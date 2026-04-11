@@ -1,0 +1,186 @@
+# =============================================================================
+# Claude Meta Orchestrator
+# =============================================================================
+#
+# PURPOSE
+# -------
+# Orchestrates a multi-issue implementation plan. Reads a "meta issue" (labeled
+# `meta`) that contains a dependency graph and wave-based execution order, then
+# drives the loop: mark completed tasks → assign next ready tasks → repeat.
+#
+# HOW IT WORKS
+# ------------
+# 1. Triggered by one of three paths:
+#    a. A PR is merged into a `meta/*` branch (human merges only — GITHUB_TOKEN
+#       merges don't emit this event)
+#    b. Someone comments `@claude` on a meta-labeled issue (kickstart / retry)
+#    c. A task worker's post-step calls `gh workflow run` with the meta issue
+#       number (this is the PRIMARY loop mechanism — see LOOP CLOSURE below)
+# 2. Determines which meta issue to operate on based on the trigger type.
+# 3. Reads the meta issue body (dependency graph + wave checkboxes).
+# 4. Checks which tasks have merged PRs → marks them as done.
+# 5. Identifies the next wave of ready tasks → comments `@claude` on each,
+#    which triggers the Task Worker workflow.
+# 6. Posts a summary comment on the meta issue.
+# 7. When ALL tasks are done, opens a final PR: `meta/<N>` → `main`.
+#
+# BRANCH MODEL
+# ------------
+# Each meta issue gets its own integration branch: `meta/<issue_number>`.
+# All task PRs target this branch. When all tasks are done, the meta branch
+# is merged into `main` via a final PR.
+#
+# LOOP CLOSURE (GITHUB_TOKEN LIMITATION)
+# ----------------------------------------
+# GitHub Actions events triggered by GITHUB_TOKEN do NOT fire other workflows
+# (to prevent infinite loops). This affects BOTH:
+#   - pull_request events (PR merges by GITHUB_TOKEN are silent)
+#   - issue_comment events (comments by github-actions[bot] are silent)
+#
+# EXCEPTION: workflow_dispatch and repository_dispatch ARE allowed.
+#
+# Solution: this orchestrator accepts a third trigger — workflow_dispatch with
+# a `meta_issue` input. The task worker (and fix agent) post-steps call
+# `gh workflow run claude-meta.yml -f meta_issue=<N>` after a successful merge.
+#
+# WHY `prompt` (NOT `system_prompt`)
+# -----------------------------------
+# The `prompt` input puts the action in "automation mode" — the agent executes
+# immediately without needing `@claude` in a trigger comment. Using
+# `--system-prompt` in `claude_args` would REPLACE the action's built-in
+# system prompt (which provides GitHub context), so we avoid it.
+#
+# TIMEOUT
+# -------
+# 60-minute hard limit. Orchestrator runs typically finish in 1–3 minutes.
+#
+# FAILURE HANDLING
+# ----------------
+# On failure, a notification comment is posted on the meta issue with a link
+# to the failed run and retry instructions.
+# =============================================================================
+
+name: Claude Meta Orchestrator
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+on:
+  pull_request:
+    types: [closed]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      meta_issue:
+        description: 'Meta issue number to orchestrate'
+        required: true
+        type: string
+
+jobs:
+  orchestrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    # Three trigger paths:
+    # 1. PR merged into a meta/* branch (human merges only)
+    # 2. @claude comment on a meta-labeled issue (kickstart or manual retry)
+    # 3. workflow_dispatch from task worker post-step (loop closure)
+    if: >
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'pull_request'
+        && github.event.pull_request.merged == true
+        && startsWith(github.event.pull_request.base.ref, 'meta/'))
+      || (github.event_name == 'issue_comment'
+          && contains(github.event.comment.body, '@claude')
+          && contains(toJSON(github.event.issue.labels.*.name), 'meta'))
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Claude Meta Orchestrator
+        env:
+          META_ISSUE_INPUT: ${{ github.event.inputs.meta_issue }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: "--model claude-sonnet-4-6 --allowedTools Bash,Read,Glob,Grep,Write,Edit"
+          # Allow both bots: claude[bot] for kickstart/retry comments,
+          # github-actions[bot] for workflow_dispatch from post-steps
+          allowed_bots: "claude[bot],github-actions[bot]"
+          prompt: |
+            You are an orchestrator agent for a multi-issue implementation plan.
+
+            ## Determine which meta issue to work on
+
+            - If triggered by a PR merge: the PR's base branch is `meta/<N>`. The meta issue is #N.
+            - If triggered by a comment: the comment is on the meta issue itself. Use that issue number.
+            - If triggered by workflow_dispatch: the meta issue number is in `github.event.inputs.meta_issue` (also available as env var META_ISSUE_INPUT). Use that number.
+
+            ## Your job
+
+            1. Read the meta issue body. It contains:
+               - A dependency graph
+               - A wave-based execution order with checkboxes (`- [ ] #N ...` or `- [x] #N ...`)
+
+            2. Ensure the meta branch exists:
+               - Check if branch `meta/<N>` exists: `git ls-remote --heads origin meta/<N>`
+               - If not, create it from main: `git checkout main && git pull && git checkout -b meta/<N> && git push -u origin meta/<N>`
+
+            3. For each unchecked issue in the list, check if it has a merged PR targeting `meta/<N>`:
+               - `gh pr list --state merged --base meta/<N> --search "fixes #<issue>"`
+               - Also check: `gh pr list --state merged --search "fixes #<issue>"` (in case the search syntax differs)
+               - If found, update the meta issue body to check that box (`- [x]`)
+
+            4. Identify the next unchecked issues whose ALL dependencies are checked (done).
+               - IMPORTANT: If this run was triggered by a PR merge but NOT all issues in the current wave are done yet, do NOT assign new wave issues. Just update checkboxes and comment the status. The next trigger will advance the loop.
+
+            5. For each ready issue, comment on it with EXACTLY this format (fill in the values):
+               ```
+               @claude Implement this issue.
+               - Base branch: `meta/<N>`
+               - Target your PR to `meta/<N>`
+               - Include `fixes #<issue_number>` in the PR body
+               ```
+               If the issue has label `priority:P0`, add: "This is P0 — auto-merge is enabled."
+
+            6. Comment on the meta issue summarizing: which issues were marked done, which were assigned, what's next.
+
+            7. If ALL issues are checked, open a final PR: `meta/<N>` → `main` with a summary of everything implemented.
+
+            8. If no issues are ready (all done or all blocked), say so on the meta issue.
+
+      # --- Failure notification ---
+      # Posts on the meta issue so the human knows the orchestrator broke
+      # without having to check GitHub Actions manually.
+      - name: Notify failure on meta issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
+          EVENT_NAME: ${{ github.event_name }}
+          META_INPUT: ${{ github.event.inputs.meta_issue }}
+        run: |
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            META_ISSUE="${{ github.event.issue.number }}"
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            META_ISSUE="$META_INPUT"
+          else
+            BASE_REF="${{ github.event.pull_request.base.ref }}"
+            META_ISSUE=$(echo "$BASE_REF" | grep -oP '\d+' || echo "")
+          fi
+
+          if [ -n "$META_ISSUE" ]; then
+            gh issue comment "$META_ISSUE" --body "$(cat <<EOF
+          ⚠️ **Meta Orchestrator Failed**
+
+          - **Run:** https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}
+          - **Trigger:** ${EVENT_NAME}
+          - **Action needed:** Comment \`@claude\` on this issue to retry.
+          EOF
+          )"
+          fi

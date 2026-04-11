@@ -1,0 +1,174 @@
+# =============================================================================
+# Claude Fix Agent
+# =============================================================================
+#
+# PURPOSE
+# -------
+# Semi-automated recovery for failed task workers. When a task agent fails
+# (timeout, code errors, conflict resolution failure), this workflow can be
+# triggered to pick up where it left off — using the existing branch and
+# error context to attempt a fix.
+#
+# HOW IT WORKS
+# ------------
+# 1. Triggered by an `@claude fix` comment on a non-meta issue.
+# 2. Extracts context by reading all comments on the issue:
+#    - Base branch (from the orchestrator's original comment)
+#    - Existing branch (from the failed task worker's push)
+#    - Last failed run ID (for log reference)
+# 3. Checks out the existing branch if one was pushed, otherwise the base
+#    branch. The fix agent starts from whatever progress the task worker made.
+# 4. Runs the Claude agent in interactive mode. The agent sees:
+#    - The original issue body (spec)
+#    - All comments including the failure notification and `@claude fix`
+#    - The existing code on the branch (partial implementation)
+# 5. After the agent finishes, creates a PR and merges — same logic as task worker.
+# 6. Triggers the meta workflow via workflow_dispatch to advance the loop.
+# 7. Posts a success/failure notification on both the task issue and the
+#    meta issue so the orchestrator can continue.
+#
+# WHEN TO USE
+# -----------
+# - Task worker timed out
+# - Task worker hit permission denials or tool errors
+# - Post-step conflict resolution failed
+# - Agent produced broken code that needs a targeted fix
+#
+# TIMEOUT: 60 minutes
+# =============================================================================
+
+name: Claude Fix Agent
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: write  # required to call `gh workflow run` on the meta workflow
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    if: >
+      contains(github.event.comment.body, '@claude fix')
+      && !contains(toJSON(github.event.issue.labels.*.name), 'meta')
+
+    steps:
+      # --- Gather context from issue history ---
+      - name: Extract meta context
+        id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+        run: |
+          COMMENTS=$(gh api "repos/${{ github.repository }}/issues/${ISSUE_NUM}/comments" --jq '.[].body')
+          BASE_BRANCH=$(echo "$COMMENTS" | grep -oP 'Base branch: `\K[^`]+' | tail -1 || echo "main")
+          META_NUM=$(echo "$BASE_BRANCH" | grep -oP '\d+' || echo "0")
+
+          BRANCH=$(gh api "repos/${{ github.repository }}/git/matching-refs/heads/claude/" \
+            --jq "[.[].ref | select(contains(\"issue-${ISSUE_NUM}-\"))] | sort | last // empty" \
+            | sed 's|refs/heads/||' 2>/dev/null || echo "")
+
+          FAILED_RUN=$(gh run list --workflow=claude-task.yml --status=failure --limit=5 --json databaseId,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[0].databaseId' 2>/dev/null || echo "")
+
+          echo "base_branch=$BASE_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "meta_number=$META_NUM" >> "$GITHUB_OUTPUT"
+          echo "existing_branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "failed_run=$FAILED_RUN" >> "$GITHUB_OUTPUT"
+
+      # --- Checkout existing branch or base branch ---
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.existing_branch || steps.meta.outputs.base_branch }}
+          fetch-depth: 0
+
+      # --- Run the Claude fix agent ---
+      - name: Run Claude Fix Agent
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: "--model claude-sonnet-4-6"
+          allowed_bots: "claude[bot],github-actions[bot]"
+          base_branch: ${{ steps.meta.outputs.base_branch }}
+          branch_prefix: "claude/${{ steps.meta.outputs.meta_number }}-"
+
+      # --- Auto-create PR and merge ---
+      - name: Auto-create PR and merge
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          BASE_BRANCH: ${{ steps.meta.outputs.base_branch }}
+        run: |
+          BRANCH=$(gh api "repos/${{ github.repository }}/git/matching-refs/heads/claude/" \
+            --jq "[.[].ref | select(contains(\"issue-${ISSUE_NUM}-\"))] | sort | last // empty" \
+            | sed 's|refs/heads/||' 2>/dev/null || echo "")
+
+          if [ -z "$BRANCH" ]; then
+            echo "No branch found for issue #${ISSUE_NUM}"
+            exit 0
+          fi
+
+          EXISTING=$(gh pr list --head "$BRANCH" --base "$BASE_BRANCH" --json number --jq 'length' 2>/dev/null || echo "0")
+          if [ "$EXISTING" -gt 0 ]; then
+            PR_NUM=$(gh pr list --head "$BRANCH" --base "$BASE_BRANCH" --json number --jq '.[0].number')
+            echo "PR #$PR_NUM already exists, trying to merge..."
+          else
+            TITLE=$(gh issue view "$ISSUE_NUM" --json title --jq '.title')
+            PR_URL=$(gh pr create --base "$BASE_BRANCH" --head "$BRANCH" --title "$TITLE" --body "fixes #${ISSUE_NUM}")
+            PR_NUM=$(echo "$PR_URL" | grep -oP '\d+$')
+            echo "Created PR #$PR_NUM"
+          fi
+
+          if gh pr merge "$PR_NUM" --merge 2>/dev/null; then
+            echo "PR #$PR_NUM merged successfully"
+            exit 0
+          fi
+
+          gh api "repos/${{ github.repository }}/pulls/${PR_NUM}/merge" \
+            -X PUT -f merge_method=merge 2>/dev/null && {
+            echo "PR #$PR_NUM merged via API"
+            exit 0
+          }
+
+          echo "Merge failed — PR may need manual conflict resolution"
+          exit 1
+
+      # --- Trigger meta orchestrator to continue the loop ---
+      - name: Trigger meta to continue loop
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          META_NUM: ${{ steps.meta.outputs.meta_number }}
+        run: |
+          if [ "$META_NUM" != "0" ] && [ -n "$META_NUM" ]; then
+            gh workflow run claude-meta.yml -f meta_issue="$META_NUM"
+            echo "Triggered meta workflow for issue #$META_NUM"
+          fi
+
+      # --- Always notify the result ---
+      - name: Notify fix result
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          META_NUM: ${{ steps.meta.outputs.meta_number }}
+          RUN_ID: ${{ github.run_id }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ "$JOB_STATUS" = "success" ]; then
+            gh issue comment "$ISSUE_NUM" --body "✅ **Fix agent succeeded.** [View run](https://github.com/${{ github.repository }}/actions/runs/${RUN_ID})"
+          else
+            gh issue comment "$ISSUE_NUM" --body "❌ **Fix agent also failed.** [View run](https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}) — Manual intervention may be needed."
+            if [ "$META_NUM" != "0" ]; then
+              gh issue comment "$META_NUM" --body "❌ **Fix agent failed** on issue #${ISSUE_NUM}. Manual intervention needed."
+            fi
+          fi

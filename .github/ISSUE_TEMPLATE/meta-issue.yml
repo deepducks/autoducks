@@ -1,0 +1,82 @@
+name: "Meta Issue (Implementation Plan)"
+description: "Create a multi-wave implementation plan that will be executed autonomously by Claude agents."
+title: "Meta: <short plan name>"
+labels: ["meta"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## How this works
+
+        A meta issue represents an **implementation plan** — a set of task issues organized in dependency waves. When you kickstart this issue with `@claude`, the orchestrator will:
+
+        1. Create a `meta/<this-issue-number>` branch from `main`
+        2. Assign the first wave of tasks (by commenting `@claude` on them)
+        3. Track progress as tasks are merged
+        4. Advance through waves until everything is done
+        5. Open a final PR: `meta/<N>` → `main`
+
+        **Before creating this issue, create the individual task issues first** so you can reference them by number below.
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: Purpose
+      description: What does this implementation plan accomplish? Why does it exist?
+      placeholder: |
+        Example: Implement the core authentication system with JWT tokens, refresh flow, and OAuth providers.
+    validations:
+      required: true
+
+  - type: textarea
+    id: graph
+    attributes:
+      label: Dependency Graph
+      description: ASCII graph showing how issues depend on each other. Keep it in a code block.
+      value: |
+        ```
+        #N1 → #N2 → #N3
+                 ↘ #N4
+        ```
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: execution_order
+    attributes:
+      label: Execution Order (Waves)
+      description: |
+        Group task issues into waves. Issues within the same wave can run in parallel. A wave is ready when ALL issues from previous waves are checked. **Use the exact checkbox format shown** — the orchestrator parses these.
+      value: |
+        ### Wave 1 — Foundation
+        - [ ] #N1 Short description `P0`
+
+        ### Wave 2 — Depends on Wave 1
+        - [ ] #N2 Short description `P0`
+        - [ ] #N3 Short description `P1`
+
+        ### Wave 3 — Depends on Wave 2
+        - [ ] #N4 Short description `P2`
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: instructions
+    attributes:
+      label: Orchestrator Instructions
+      description: Additional guidance for the orchestrator (optional).
+      value: |
+        1. Issues within the same wave can be assigned in parallel
+        2. A wave is ready when ALL issues from previous waves are checked
+        3. An individual issue is ready when ALL its explicit dependencies (listed in its body) are checked
+        4. Issues labeled `priority:P0` will be auto-merged
+      render: markdown
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+
+        **After creating this issue:** comment `@claude` on it to kickstart the orchestration loop.

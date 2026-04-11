@@ -1,0 +1,82 @@
+name: "Task Issue (Single Unit of Work)"
+description: "Create a task that a Claude agent will implement autonomously. Task issues are referenced from a meta issue."
+title: "<area>: <short task description>"
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## How this works
+
+        A task issue is a single unit of work that a Claude agent will implement. When the meta orchestrator assigns this issue, the agent will:
+
+        1. Read the issue body (what you write below) as its complete specification
+        2. Check out the meta branch, create a working branch
+        3. Implement the tasks and commit
+        4. Create a PR targeting the meta branch
+        5. Merge it (auto-merge if labeled `priority:P0`)
+
+        **Write the body as if you were briefing a developer.** Be specific about what success looks like.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One or two sentences describing what this task accomplishes.
+      placeholder: |
+        Example: Implement the JWT token generation and validation utilities in `packages/auth/src/jwt.ts`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Tasks
+      description: Concrete, actionable items. Break down the work into a checklist.
+      value: |
+        - [ ] First concrete thing to do
+        - [ ] Second concrete thing to do
+        - [ ] Third concrete thing to do
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: How the agent (and you) will know the task is complete. Testable conditions.
+      value: |
+        - [ ] The code compiles / type-checks
+        - [ ] Unit tests pass
+        - [ ] Specific behavior X works as expected
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Which other issues must be done first? Leave blank if none.
+      placeholder: |
+        - Depends on #42 (data model must exist)
+        - Depends on #43 (storage interface)
+      render: markdown
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Links to design docs, API specs, existing code, or examples (optional).
+      placeholder: |
+        - See [VISION.md](./VISION.md) section 3 for context
+        - Related code: `src/existing/module.ts`
+      render: markdown
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+
+        **Labels:** Add `priority:P0` for critical-path tasks (they will be auto-merged). Use `priority:P1`, `P2`, `P3` for lower priorities.
