@@ -22,24 +22,31 @@
 #
 # META ISSUE BODY FORMAT
 # ----------------------
-# The meta issue body must contain a YAML code block with this structure:
+# The meta issue body uses natural markdown. The parser is lenient:
 #
-#   ```yaml
-#   waves:
-#     - name: Foundation
-#       tasks: [1]
-#     - name: Contracts
-#       tasks: [2]
-#     - name: Core
-#       tasks: [3, 5, 6, 7]
-#   ```
+#   ## Wave 1 — Foundation
+#   - [ ] #1 Project Bootstrap `P0`
+#   - [ ] #2 Data Model `P0`
 #
-# Below it, a flat checkbox list tracks progress (updated by this script):
+#   ## Wave 2: Core
+#   - [ ] #3 Router `P0`
+#   - [ ] #5 Token Management `P0`
 #
-#   - [ ] #1 Title `P0`
-#   - [ ] #2 Title `P0`
+#   ### Wave 3 (Parallel Adapters)
+#   - [ ] #6 Slack `P1`
+#   - [ ] #7 Discord `P2`
 #
-# Any other markdown is preserved.
+# Rules:
+#   - Any non-checkbox line containing "Wave <number>" (case-insensitive)
+#     opens a new wave. Heading style doesn't matter (##, ###, **bold**,
+#     plain text — all work). Separators after "Wave N" are stripped
+#     (":", "—", "-", "(", etc.) to extract the wave name.
+#   - Any line matching `- [ ] #N` or `- [x] #N` (or `* [ ] #N`) is a task
+#     assigned to the most recent wave.
+#   - Task state (checked/unchecked) is NOT used — the orchestrator derives
+#     state from merged PRs, not from the checkbox marks in the body.
+#     The body's checkboxes are updated by the orchestrator based on merges.
+#   - Any other markdown (intros, notes, headings) is preserved and ignored.
 # =============================================================================
 
 set -euo pipefail
@@ -87,7 +94,7 @@ META=$(determine_meta)
 log "Meta issue: #$META"
 
 # -----------------------------------------------------------------------------
-# 2. Load meta issue and extract YAML plan block
+# 2. Load meta issue and parse markdown wave structure
 # -----------------------------------------------------------------------------
 ISSUE_JSON=$(gh issue view "$META" --json body,title,labels)
 ISSUE_BODY=$(echo "$ISSUE_JSON" | jq -r '.body')
@@ -96,13 +103,120 @@ HAS_META_LABEL=$(echo "$ISSUE_JSON" | jq -r '.labels[].name' | grep -qx "meta" &
 
 [[ "$HAS_META_LABEL" == "yes" ]] || die "Issue #$META does not have 'meta' label"
 
-# Extract YAML block (first ```yaml ... ``` block)
-PLAN_YAML=$(echo "$ISSUE_BODY" | awk '/^```yaml$/{flag=1;next}/^```$/{flag=0}flag')
-[[ -n "$PLAN_YAML" ]] || die "Meta issue has no YAML plan block. Expected a \`\`\`yaml ... \`\`\` block with 'waves' definition."
+# Parse wave structure. Two formats supported:
+# 1. YAML code block (preferred — explicit and unambiguous):
+#    ```yaml
+#    waves:
+#      - name: Foundation
+#        tasks: [1]
+#      - name: Core
+#        tasks: [2, 3]
+#    ```
+# 2. Markdown headings (fallback — natural for humans):
+#    ## Wave 1 — Foundation
+#    - [ ] #1 Bootstrap
+# The script tries YAML first. If no valid YAML plan is found, it falls
+# back to markdown parsing. Output: "WAVE|<idx>|<name>" and "TASK|<idx>|<num>".
 
-NUM_WAVES=$(echo "$PLAN_YAML" | yq '.waves | length')
-[[ "$NUM_WAVES" != "0" && "$NUM_WAVES" != "null" ]] || die "Plan has no waves defined"
+parse_yaml_plan() {
+  local body="$1"
+  # Extract first ```yaml ... ``` block
+  local yaml_block
+  yaml_block=$(echo "$body" | awk '/^```yaml[[:space:]]*$/{flag=1;next}/^```[[:space:]]*$/{flag=0}flag')
+  [[ -n "$yaml_block" ]] || return 1
+
+  # Check it has a `waves:` key
+  echo "$yaml_block" | grep -q '^waves:' || return 1
+
+  # Verify yq can parse it and it has at least one wave
+  local num_waves
+  num_waves=$(echo "$yaml_block" | yq '.waves | length' 2>/dev/null || echo "")
+  [[ -n "$num_waves" && "$num_waves" != "null" && "$num_waves" -gt 0 ]] || return 1
+
+  # Emit in the same format as the markdown parser
+  local i
+  for ((i=0; i<num_waves; i++)); do
+    local name tasks
+    name=$(echo "$yaml_block" | yq -r ".waves[$i].name // \"Wave $((i+1))\"")
+    printf "WAVE|%d|%s\n" "$((i+1))" "$name"
+    while IFS= read -r t; do
+      [[ -n "$t" && "$t" != "null" ]] && printf "TASK|%d|%s\n" "$((i+1))" "$t"
+    done < <(echo "$yaml_block" | yq -r ".waves[$i].tasks[]" 2>/dev/null)
+  done
+  return 0
+}
+
+parse_markdown_plan() {
+  local body="$1"
+  # A wave heading is a line that:
+  # - Starts with a heading marker (#, *, or the word "Wave" itself)
+  # - Contains "Wave <N>"
+  # - Is NOT a checkbox line
+  # This prevents inline mentions like "Wave 2 depends on Wave 1" from
+  # being mistakenly parsed as wave headings.
+  echo "$body" | awk '
+    /^(#|\*|[Ww]ave)/ && /[Ww]ave[[:space:]]+[0-9]+/ && !/^[[:space:]]*[-*][[:space:]]+\[/ {
+      wave++
+      name = ""
+      if (match($0, /[Ww]ave[[:space:]]+[0-9]+/)) {
+        rest = substr($0, RSTART + RLENGTH)
+        gsub(/^[[:space:]]*[:——\-\*\(]+[[:space:]]*/, "", rest)
+        gsub(/[\)\*]+[[:space:]]*$/, "", rest)
+        gsub(/[[:space:]]+$/, "", rest)
+        name = rest
+      }
+      if (name == "") name = "Wave " wave
+      printf "WAVE|%d|%s\n", wave, name
+      next
+    }
+    wave >= 1 && /^[[:space:]]*[-*][[:space:]]+\[[xX[:space:]]\][[:space:]]+#[0-9]+/ {
+      if (match($0, /#[0-9]+/)) {
+        num = substr($0, RSTART+1, RLENGTH-1)
+        printf "TASK|%d|%s\n", wave, num
+      }
+    }
+  '
+}
+
+# Try YAML first, fall back to markdown
+PARSED=""
+if PARSED=$(parse_yaml_plan "$ISSUE_BODY") && [[ -n "$PARSED" ]]; then
+  log "Parsed plan from YAML block"
+else
+  PARSED=$(parse_markdown_plan "$ISSUE_BODY")
+  [[ -n "$PARSED" ]] && log "Parsed plan from markdown headings"
+fi
+
+[[ -n "$PARSED" ]] || die "Meta issue body has no wave structure. Accepted formats: (1) \`\`\`yaml\`\`\` block with 'waves:' key, or (2) markdown headings like '## Wave 1 — Name' followed by '- [ ] #N' checkbox lines."
+
+# Build WAVE_NAMES and WAVE_TASKS arrays from parsed output
+declare -a WAVE_NAMES_BY_IDX=()     # index 0-based → name
+declare -a WAVE_TASKS_BY_IDX=()     # index 0-based → space-separated task numbers
+
+while IFS='|' read -r kind idx rest; do
+  case "$kind" in
+    WAVE)
+      i=$((idx - 1))
+      WAVE_NAMES_BY_IDX[$i]="$rest"
+      WAVE_TASKS_BY_IDX[$i]=""
+      ;;
+    TASK)
+      i=$((idx - 1))
+      if [[ -z "${WAVE_TASKS_BY_IDX[$i]}" ]]; then
+        WAVE_TASKS_BY_IDX[$i]="$rest"
+      else
+        WAVE_TASKS_BY_IDX[$i]="${WAVE_TASKS_BY_IDX[$i]} $rest"
+      fi
+      ;;
+  esac
+done <<< "$PARSED"
+
+NUM_WAVES=${#WAVE_NAMES_BY_IDX[@]}
+[[ $NUM_WAVES -gt 0 ]] || die "No waves parsed from meta issue body"
 log "Plan has $NUM_WAVES waves"
+for ((i=0; i<NUM_WAVES; i++)); do
+  log "  Wave $((i+1)) [${WAVE_NAMES_BY_IDX[$i]}]: ${WAVE_TASKS_BY_IDX[$i]:-<empty>}"
+done
 
 # -----------------------------------------------------------------------------
 # 3. Ensure meta branch exists
@@ -182,8 +296,8 @@ declare -a WAVE_STATE=()  # "done" | "pending"
 declare -a WAVE_NAMES=()
 
 for ((i=0; i<NUM_WAVES; i++)); do
-  NAME=$(echo "$PLAN_YAML" | yq ".waves[$i].name // \"Wave $((i+1))\"")
-  TASKS=$(echo "$PLAN_YAML" | yq -r ".waves[$i].tasks[]")
+  NAME="${WAVE_NAMES_BY_IDX[$i]}"
+  TASKS="${WAVE_TASKS_BY_IDX[$i]}"
 
   ALL_DONE=true
   for t in $TASKS; do
@@ -280,7 +394,7 @@ fi
 
 # Case C: assign next wave
 log "Assigning wave $((NEXT_WAVE+1)): ${WAVE_NAMES[$NEXT_WAVE]}"
-NEXT_TASKS=$(echo "$PLAN_YAML" | yq -r ".waves[$NEXT_WAVE].tasks[]")
+NEXT_TASKS="${WAVE_TASKS_BY_IDX[$NEXT_WAVE]}"
 
 declare -a ASSIGNED=()
 declare -a SKIPPED=()
