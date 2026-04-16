@@ -12,8 +12,10 @@
 #      it `meta`, and replies to the commenter
 #
 # The resulting issue is a fully-formed meta issue matching the meta-issue
-# template (Purpose / YAML Plan / Progress). It is NOT kickstarted here —
-# the human reviews, then comments `@claude` to hand off to the orchestrator.
+# template (Purpose / YAML Plan / Progress). It is labeled `meta` + `draft`
+# and assigned to the commenter. It is NOT kickstarted here — the human
+# reviews, removes the `draft` label (optional), and comments `@claude` to
+# hand off to the orchestrator.
 #
 # TRIGGER
 # -------
@@ -188,6 +190,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
+          COMMENTER: ${{ steps.meta.outputs.commenter }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -270,9 +273,16 @@ jobs:
           cat /tmp/meta-body.md
           echo "--- End ---"
 
-          # Update the issue body and add the meta label
+          # Ensure the 'draft' label exists (idempotent)
+          gh label create draft --color "CCCCCC" \
+            --description "Plan drafted but not yet kickstarted" 2>/dev/null || true
+
+          # Update the issue body, add labels, assign the commenter
           gh issue edit "$ISSUE_NUM" --body-file /tmp/meta-body.md
-          gh issue edit "$ISSUE_NUM" --add-label meta
+          gh issue edit "$ISSUE_NUM" --add-label meta --add-label draft
+          # Assignment can fail if the commenter isn't a collaborator — don't block on it
+          gh issue edit "$ISSUE_NUM" --add-assignee "$COMMENTER" \
+            || echo "::warning::Could not assign @$COMMENTER (missing repo access?)"
 
           echo "task_count=$TASK_COUNT" >> "$GITHUB_OUTPUT"
 
@@ -287,11 +297,11 @@ jobs:
           MODEL: ${{ steps.meta.outputs.model }}
           REASONING: ${{ steps.meta.outputs.reasoning }}
         run: |
-          gh issue comment "$ISSUE_NUM" --body "@$COMMENTER — Plan ready. Created **${TASK_COUNT}** task issues and labeled this one as \`meta\`.
+          gh issue comment "$ISSUE_NUM" --body "@$COMMENTER — Plan ready. Created **${TASK_COUNT}** task issues; this issue is labeled \`meta\`/\`draft\` and assigned to you.
 
           _Planned with \`${MODEL}\` at reasoning \`${REASONING}\`._
 
-          **Next step:** review the plan in the issue body above. When you're ready, comment \`@claude\` on this issue to kickstart the orchestration loop."
+          **Next step:** review the plan in the issue body above. When you're ready, comment \`@claude\` on this issue to kickstart the orchestration loop. (You may also want to remove the \`draft\` label once reviewed.)"
 
       # --- Failure notification ---
       - name: Notify failure
