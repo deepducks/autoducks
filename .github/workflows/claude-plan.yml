@@ -374,6 +374,13 @@ jobs:
             echo "$line" | jq -e . >/dev/null || { echo "::error::Invalid JSONL line: $line"; exit 1; }
           done < /tmp/tasks.jsonl
 
+          # Ensure priority labels exist (idempotent — covers repos where
+          # setup.sh wasn't fully run or a label was manually deleted).
+          gh label create "priority:P0" --repo "$REPO" --color "B60205" --description "Critical path" 2>/dev/null || true
+          gh label create "priority:P1" --repo "$REPO" --color "D93F0B" --description "High priority" 2>/dev/null || true
+          gh label create "priority:P2" --repo "$REPO" --color "FBCA04" --description "Medium priority" 2>/dev/null || true
+          gh label create "priority:P3" --repo "$REPO" --color "0E8A16" --description "Low priority" 2>/dev/null || true
+
           # Collect NEW_NUMBERS = integers that appear in the new plan YAML.
           YAML_BLOCK=$(awk '/^```yaml[[:space:]]*$/{flag=1;next}/^```[[:space:]]*$/{flag=0}flag' /tmp/plan-body.md)
           NEW_NUMBERS=()
