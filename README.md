@@ -175,7 +175,7 @@ State (which tasks are done) is always derived from merged PRs — the checkboxe
 **Option B — Existing repo:** run the install script in your repo root:
 
 ```bash
-curl -s https://raw.githubusercontent.com/ggondim/claude-in-github/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ggondim/claude-in-github/main/scripts/install.sh | bash
 ```
 
 Only `.github/` is modified — nothing else is added to your repo. On a fresh install, setup runs automatically (you can skip to step 3). Run again at any time to update to the latest version.

@@ -4,9 +4,9 @@
 # =============================================================================
 #
 # USAGE
-#   curl -s https://raw.githubusercontent.com/ggondim/claude-in-github/main/scripts/install.sh | bash
-#   curl -s .../install.sh | bash -s -- --repo OWNER/REPO
-#   curl -s .../install.sh | bash -s -- --no-setup
+#   curl -fsSL https://raw.githubusercontent.com/ggondim/claude-in-github/main/scripts/install.sh | bash
+#   curl -fsSL .../install.sh | bash -s -- --repo OWNER/REPO
+#   curl -fsSL .../install.sh | bash -s -- --no-setup
 #
 # WHAT IT DOES
 #   Downloads all workflow files, prompts, and scripts into .github/ only.
