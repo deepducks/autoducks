@@ -20,8 +20,8 @@ Four composable GitHub Actions workflows plus tooling:
 | `.github/scripts/meta-orchestrate.sh` | Bash script that powers the meta orchestrator (zero LLM) |
 | `.github/ISSUE_TEMPLATE/meta-issue.yml` | Structured form for creating meta issues |
 | `.github/ISSUE_TEMPLATE/task-issue.yml` | Structured form for creating task issues |
-| `scripts/setup.sh` | Validates prerequisites and creates labels |
-| `scripts/smoke-test.sh` | End-to-end validator — creates 3 trivial tasks and runs the loop |
+| `.github/scripts/setup.sh` | Validates prerequisites and creates labels |
+| `scripts/smoke-test.sh` | End-to-end validator — creates 3 trivial tasks and runs the loop (source repo only) |
 
 ## Architectural highlights
 
@@ -168,15 +168,22 @@ State (which tasks are done) is always derived from merged PRs — the checkboxe
 
 ## Quick start
 
-### 1. Create your repo from this template
+### 1. Get the files
 
-Click **Use this template** at the top of this page → create a new repo.
+**Option A — New repo (easiest):** Click **Use this template** at the top of this page → create a new repo, then skip to step 2.
+
+**Option B — Existing repo:** run the install script in your repo root:
+
+```bash
+curl -s https://raw.githubusercontent.com/ggondim/claude-in-github/main/scripts/install.sh | bash
+```
+
+Only `.github/` is modified — nothing else is added to your repo. On a fresh install, setup runs automatically (you can skip to step 3). Run again at any time to update to the latest version.
 
 ### 2. Run the setup script
 
 ```bash
-cd your-new-repo
-./scripts/setup.sh
+.github/scripts/setup.sh
 ```
 
 The script will:
@@ -215,6 +222,7 @@ If your org blocks this, enable it at `https://github.com/organizations/<ORG>/se
 ### 4. Validate with a smoke test
 
 ```bash
+# from the claude-in-github source repo
 ./scripts/smoke-test.sh --cleanup
 ```
 
