@@ -1,0 +1,55 @@
+name: Test Claude .claude folder generation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Claude agent
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: "--model claude-sonnet-4-6 --allowedTools Read"
+          prompt: "Read the file README.md and report its first line."
+
+      - name: Inspect .claude folder
+        run: |
+          echo "=== HOME .claude ==="
+          if [ -d "$HOME/.claude" ]; then
+            find "$HOME/.claude" -type f | sort
+            echo "--- sizes ---"
+            du -sh "$HOME/.claude"/*  2>/dev/null || true
+          else
+            echo ".claude not found in HOME ($HOME)"
+          fi
+
+          echo ""
+          echo "=== WORKSPACE .claude ==="
+          if [ -d "$GITHUB_WORKSPACE/.claude" ]; then
+            find "$GITHUB_WORKSPACE/.claude" -type f | sort
+            echo "--- sizes ---"
+            du -sh "$GITHUB_WORKSPACE/.claude"/* 2>/dev/null || true
+          else
+            echo ".claude not found in WORKSPACE ($GITHUB_WORKSPACE)"
+          fi
+
+          echo ""
+          echo "=== /tmp .claude ==="
+          if [ -d "/tmp/.claude" ]; then
+            find "/tmp/.claude" -type f | sort
+          else
+            echo ".claude not found in /tmp"
+          fi
+
+          echo ""
+          echo "=== Global search for .claude dirs ==="
+          find / -maxdepth 6 -name ".claude" -type d 2>/dev/null | grep -v proc || echo "none found"
