@@ -1,125 +1,310 @@
 # claude-in-github
 
-> A template repo for autonomous agentic development workflows powered by [Claude Code](https://github.com/anthropics/claude-code-action).
+> An opinionated, drop-in GitHub Actions package that turns issues and comments into an autonomous implementation loop powered by [Claude Code](https://github.com/anthropics/claude-code-action).
 
-Drop this template into any GitHub repository and let Claude agents implement a multi-issue plan from start to finish — no human intervention required after the kickstart.
+Plan a feature in conversation with a Claude agent, split it into tasks, ship them in parallel waves, open the final PR — all without leaving GitHub. Or use any single piece in isolation.
 
 ---
 
-## What you get
+## TL;DR
 
-Four composable GitHub Actions workflows plus tooling:
+- **6 slash commands** on issue comments: `/agents plan`, `/agents start`, `/agents work`, `/agents fix`, `/agents revert`, `/agents close`.
+- **Every command is usable in isolation.** You don't have to run a full plan → start → ship pipeline — each verb does one thing well.
+- **Only 3 of the 6 workflows actually call Claude** (plan, task, fix). The other three are pure shell. Cheaper + faster + no LLM drift.
+- **Feature issues are first-class GitHub objects**: they get the native `Feature` issue type, task issues get `Task`, and task-feature relationships use the sub-issues API.
+- **Reactions on the trigger comment** tell you at a glance whether the workflow succeeded: 👀 while running, 👍 on success, 😕 on failure.
 
-| File | Purpose |
+```mermaid
+flowchart LR
+    C(["/agents &lt;verb&gt;"])
+    C -->|plan| P["claude-plan.yml<br/>(LLM — plans & decomposes)"]
+    C -->|start| F["claude-feature.yml<br/>(bash — orchestrates)"]
+    C -->|work| T["claude-task.yml<br/>(LLM — implements)"]
+    C -->|fix| FX["claude-fix.yml<br/>(LLM — recovers)"]
+    C -->|revert| R["claude-agents-revert.yml<br/>(bash — undoes plan)"]
+    C -->|close| CL["claude-agents-close.yml<br/>(bash — tears down)"]
+    P -.->|parser| PP[parse-plan.py]
+    F -.->|dispatches| T
+    T -.->|loop| F
+```
+
+---
+
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ggondim/claude-in-github/main/scripts/install.sh | bash
+```
+
+Only `.github/` is modified. On a fresh install, setup runs automatically. Run again at any time to update to the latest version.
+
+Then one-time prereqs per repo/org (the setup script checks all of these):
+
+| Prereq | How |
 |---|---|
-| `.github/workflows/claude-plan.yml` | **Planner** — `/agents plan` runs an iterative planning conversation (questions → plan → revisions) and produces a ready-to-kickstart feature issue |
-| `.github/workflows/claude-feature.yml` | **Orchestrator** — deterministic bash script that tracks progress and dispatches tasks |
-| `.github/workflows/claude-task.yml` | **Worker** — implements a single task, creates and auto-merges its PR |
-| `.github/workflows/claude-fix.yml` | **Recovery** — `/agents fix` picks up failed tasks, resolves conflicts |
-| `.github/prompts/` | Agent system prompts as editable `.md` files — loaded into workflows at runtime |
-| `.github/scripts/feature-orchestrate.sh` | Bash script that powers the feature orchestrator (zero LLM) |
-| `.github/ISSUE_TEMPLATE/feature-issue.yml` | Structured form for creating feature issues |
-| `.github/ISSUE_TEMPLATE/task-issue.yml` | Structured form for creating task issues |
-| `.github/scripts/setup.sh` | Validates prerequisites and creates labels |
-| `scripts/smoke-test.sh` | End-to-end validator — creates 3 trivial tasks and runs the loop (source repo only) |
+| `CLAUDE_CODE_OAUTH_TOKEN` secret | `gh secret set CLAUDE_CODE_OAUTH_TOKEN` — get it from [claude.com/oauth/code](https://claude.com/oauth/code). Org-level is fine (`--org <name> --visibility all`). |
+| Claude Code GitHub App | Install at [github.com/apps/claude](https://github.com/apps/claude) and grant it the target repos. |
+| Actions write + PR creation | `gh api repos/OWNER/REPO/actions/permissions/workflow -X PUT -f default_workflow_permissions=write -F can_approve_pull_request_reviews=true` |
+| Issue types `Feature` and `Task` (optional) | Create at `github.com/organizations/<ORG>/settings/issue-types`. Without them, workflows still run — the native type is just silently skipped; the `feature` label still distinguishes feature issues from task issues. |
 
-## Architectural highlights
+Validate with the end-to-end smoke test (creates a throwaway plan, ships it, tears it down):
 
-- **Feature orchestrator is 100% deterministic** — it's a bash script, not an LLM. Parses a YAML plan block from the feature issue, checks merged PRs, updates checkboxes, dispatches the next wave. Runs in seconds, costs $0.
-- **LLMs are only used where they must be** — planning (plan-agent), implementing (task worker), and fixing failures (fix agent). Everything else is bash.
-- **Plan agent is optional but end-to-end** — mention `/agents plan` on a feature request and you get back a full feature issue with task issues created and linked. Model and reasoning level are configurable via directive.
-- **Loop closure via `workflow_dispatch`** — the only way to cascade workflow runs from `GITHUB_TOKEN`-authenticated steps, since PR merges and bot comments by `GITHUB_TOKEN` don't trigger workflows.
-- **Branch per feature issue** — `feature/<N>` acts as an integration branch for the plan. Task PRs target it. When all tasks are done, a final PR merges `feature/<N>` → `main`.
-- **Prompts live in `.github/prompts/`** — edit the `.md` files to tune agent behavior without touching workflow YAML.
+```bash
+./scripts/smoke-test.sh --cleanup              # orchestrator → workers → final PR → /agents close
+./scripts/smoke-test-plan.sh                   # /agents plan → types + sub-issues → /agents revert
+```
 
 ---
 
-## How it works
+## Commands cheatsheet
 
-```
-   (optional — skip if you write the plan manually)
+Every trigger is an issue comment that starts with `/agents <verb>`. Verbs that call Claude accept optional `[model] [reasoning]` args. Workflows are gated by labels — the right issue context determines which verb is valid.
 
- Human files a feature request and
- comments /agents plan [model] [reasoning]
-        │
-        ▼                                         ┌──── human answers questions in new comments ───┐
-   ┌──────────────────────────────────────────┐   │                                                │
-   │         claude-plan.yml                   │◄──┤           human comments revision requests ◄──┤
-   │  1. Parse directive (model, reasoning)    │   │                                                │
-   │  2. On revision: gather conversation      │   │                                                │
-   │     context (current plan + existing      │   │                                                │
-   │     tasks + recent comments)              │   │                                                │
-   │  3. Plan agent: Questions Mode OR         │   │                                                │
-   │     Plan Mode (new or revised)            │   │                                                │
-   │     ├── Questions → post comment, stop ───┼───┘                                                │
-   │     └── Plan ─── 4. Splitter: extract    │                                                     │
-   │                    tasks (ref = Tn or #)  │                                                     │
-   │                  5. Bash reconciliation:  │                                                     │
-   │                    integer ref → edit     │                                                     │
-   │                    Tn ref       → create  │                                                     │
-   │                    dropped      → close   │                                                     │
-   │                    + label feature+draft     │                                                     │
-   │                    (first pass only)      │                                                     │
-   └──────────────┬───────────────────────────┘                                                      │
-                  │                                                                                  │
-                  │  (issue now `feature`+`draft`; further /agents plan → revision) ──────────────────── ┘
-                  ▼
- Human reviews the plan, comments /agents start to approve + kickstart
-        │           (feature orchestrator removes the `draft` label,
-        │            blocking further /agents plan revisions)
-        ▼
-   ┌──────────────────────────────────────────┐
-   │         claude-feature.yml (bash)            │
-   │  1. Parse YAML plan from issue body       │
-   │  2. Ensure feature/<N> branch exists         │
-   │  3. Scan merged PRs → update checkboxes   │
-   │  4. Find next ready wave                  │
-   │  5. gh workflow run claude-task.yml ───── │──┐
-   └──────────────┬───────────────────────────┘  │
-                  │                              │
-                  ▼                              │
-   ┌──────────────────────────────────────────┐  │
-   │         claude-task.yml (Claude)          │◄─┘
-   │  1. Read issue body (gh issue view)       │
-   │  2. Implement tasks                       │
-   │  3. Commit + push branch                  │
-   │  4. Post-step: auto-create + merge PR     │
-   │  5. gh workflow run claude-feature.yml ───── │──┐
-   └──────────────────────────────────────────┘  │
-                                                 │
-                  ┌──────────────────────────────┘
-                  ▼
-              loops back to claude-feature.yml
-                  │
-          (when all waves done)
-                  ▼
-   feature script opens final PR: feature/<N> → main
+| Verb | Trigger context | Does | Accepts args |
+|---|---|---|---|
+| `/agents plan [model] [reasoning]` | Any issue that isn't a task (no `priority:P*`) | Converses, asks clarifying questions or drafts a plan. Revises on re-invocation. | ✅ |
+| `/agents start [model] [reasoning]` | Issue with `feature` label | Kickstarts the orchestrator loop. Removes `draft` label; args propagate to downstream task workers. | ✅ |
+| `/agents work [model] [reasoning]` | Any issue WITHOUT `feature` label | Runs a task worker on that specific issue. Useful standalone (no plan, no orchestrator). | ✅ |
+| `/agents fix [model] [reasoning]` | Any issue WITHOUT `feature` label, typically after a failed task worker | Picks up the existing partial branch, reads failure context, retries. | ✅ |
+| `/agents revert` | Issue with `feature` label | Closes tasks, strips labels, deletes comments, reverts body to pre-plan state. | ❌ |
+| `/agents close` | Issue with `feature` label | Closes tasks, deletes task branches, closes PRs, deletes the feature branch, closes the feature issue. | ❌ |
+
+Directive args (for the 4 LLM verbs):
+- **model:** `opus` | `sonnet` | `haiku` (default: `opus` for plan, `sonnet` for work/fix)
+- **reasoning:** `off` | `low` | `medium` | `high` | `max` (default: `high`)
+
+Examples: `/agents plan sonnet low`, `/agents fix opus max`, `/agents work haiku off`.
+
+---
+
+## Use cases
+
+### 1. Full autonomy: plan → start → ship
+
+You write a feature request and let Claude plan, decompose, and ship it — no human intervention after the kickstart.
+
+```mermaid
+sequenceDiagram
+    actor H as Human
+    participant FI as Feature Issue
+    participant Plan as claude-plan.yml
+    participant Feat as claude-feature.yml
+    participant Task as claude-task.yml
+
+    H->>FI: creates (feature request)
+    H->>FI: /agents plan
+    FI-->>Plan: triggers
+    Plan->>FI: 👀
+    Plan->>Plan: explore + decompose
+    Plan->>FI: updates body, creates task issues<br/>links as sub-issues, applies Feature/Task types
+    Plan->>FI: 👍 "Plan ready"
+    H->>FI: reviews, /agents start
+    FI-->>Feat: triggers
+    Feat->>FI: 👀
+    loop per wave
+        Feat->>Task: workflow_dispatch
+        Task->>Task: implement + PR + merge
+        Task-->>Feat: workflow_dispatch (loop)
+    end
+    Feat->>FI: opens final PR feature/N → main
+    Feat->>FI: 👍
+    H->>FI: merges final PR (auto-closes every task)
 ```
+
+### 2. Architect locally with Claude Code, execute remotely
+
+Use `claude` in plan mode on your laptop to discuss architecture in depth, have Claude draft and file the GitHub issue, then kick off the autonomous flow with `/agents plan` to get task decomposition and tracking.
+
+```mermaid
+sequenceDiagram
+    actor H as Human
+    participant CL as Claude Code (local)
+    participant FI as Feature Issue
+    participant Plan as claude-plan.yml
+
+    H->>CL: /plan — architect the feature
+    CL->>H: proposes design, you iterate
+    H->>CL: ExitPlanMode — approve
+    CL->>FI: gh issue create (rich draft)
+    H->>FI: /agents plan
+    FI-->>Plan: triggers
+    Plan->>FI: draft plan body + task issues
+    Note over H,FI: …continue with Use case 1 from here
+```
+
+Why this split works well: Claude Code local has your full context (open files, running dev server, git state, conversation memory). The GitHub plan-agent doesn't — it can only explore the checked-out repo. So you use local Claude to decide **what** to build and **why**, then hand a well-scoped draft to the GitHub agent to decide **how to decompose** and who-does-what.
+
+### 3. Manual plan + autonomous execution
+
+You already know exactly what needs to happen — write the feature issue and task issues yourself, skip `/agents plan`, jump straight to `/agents start`.
+
+```mermaid
+sequenceDiagram
+    actor H as Human
+    participant FI as Feature Issue
+    participant Feat as claude-feature.yml
+
+    H->>FI: creates feature issue (YAML plan)<br/>+ task issues manually
+    H->>FI: /agents start
+    FI-->>Feat: triggers
+    Note over Feat: …continues exactly like Use case 1 from /agents start
+```
+
+The feature issue's body just needs a YAML `waves:` block with task numbers — no plan-agent needed. See [Feature issue format](#feature-issue-format).
+
+### 4. One-off task (no plan, no orchestrator)
+
+You have a single task issue and want Claude to implement it — no waves, no feature branch, no plan.
+
+```mermaid
+sequenceDiagram
+    actor H as Human
+    participant TI as Task Issue
+    participant Task as claude-task.yml
+
+    H->>TI: creates task issue with spec
+    H->>TI: /agents work
+    TI-->>Task: triggers
+    Task->>TI: 👀
+    Task->>Task: checkout main, create branch,<br/>implement, PR, merge
+    Task->>TI: 👍 (auto-closes on merge)
+```
+
+The task worker is happy to run on any non-feature issue. No label gating beyond "isn't a feature issue."
+
+### 5. Recover a failed task
+
+A task worker crashed, merge-conflicted, or ran out of time. Retry with extra context:
+
+```mermaid
+sequenceDiagram
+    actor H as Human
+    participant TI as Task Issue
+    participant Fix as claude-fix.yml
+
+    TI->>TI: prior task worker failed<br/>(notification comment posted)
+    H->>TI: /agents fix opus max
+    TI-->>Fix: triggers
+    Fix->>TI: 👀
+    Fix->>Fix: find partial branch,<br/>read failure-context.md (last 10 comments),<br/>continue the work
+    Fix->>TI: 👍 or 😕
+```
+
+You can escalate reasoning (`opus max`) specifically on fix to throw more compute at a tricky failure without affecting the default for fresh task workers.
+
+### 6. Revert a bad plan
+
+The plan turned out wrong (bad scope, wrong decomposition) but no implementation has started yet. Put the feature issue back to its pre-plan state:
+
+```mermaid
+sequenceDiagram
+    actor H as Human
+    participant FI as Feature Issue
+    participant Rev as claude-agents-revert.yml
+
+    H->>FI: /agents revert
+    FI-->>Rev: triggers
+    Rev->>FI: 👀
+    Rev->>Rev: close all task issues,<br/>strip feature+draft labels,<br/>delete all comments,<br/>revert body via userContentEdits
+    Rev->>FI: 👍 (body now matches the original draft)
+```
+
+`/agents revert` intentionally does NOT touch branches or PRs — if any implementation has started, use `/agents close` instead.
+
+### 7. Close a shipped (or abandoned) epic
+
+Tear down every artifact of a feature: task issues, task branches, open PRs, the feature branch, and the feature issue itself.
+
+```mermaid
+sequenceDiagram
+    actor H as Human
+    participant FI as Feature Issue
+    participant Close as claude-agents-close.yml
+
+    H->>FI: /agents close
+    FI-->>Close: triggers
+    Close->>FI: 👀
+    Close->>Close: for each task: close PRs, delete branches, close issue<br/>delete feature/N branch + close its PR<br/>close feature issue (reason=completed)
+    Close->>FI: 👍 "Cleanup summary: N tasks closed, M PRs closed, …"
+```
+
+Use this after a successful ship (main has the merged work — close cleans up orchestration scaffolding without undoing code), or as a "abandon this epic" command.
+
+---
+
+## Architecture
+
+### Feature issue lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unplanned: human creates issue
+    Unplanned --> Draft: /agents plan
+    Draft --> Draft: /agents plan (revise)
+    Draft --> Unplanned: /agents revert
+    Draft --> Active: /agents start
+    Active --> Active: task worker / fix loop
+    Active --> Shipped: final PR merged
+    Shipped --> [*]: /agents close (optional cleanup)
+    Active --> [*]: /agents close (abandon)
+    Unplanned --> Active: manual plan + /agents start
+```
+
+**Labels drive the state**: `feature` + `draft` = Draft, `feature` without `draft` = Active, no labels = Unplanned. Trigger guards in the workflows are label-based.
 
 ### Branch model
 
-```
-main
- ├── feature/17                          ← feature issue #17's integration branch
- │    ├── claude/17-issue-1-xxxxx     ← task #1 branch
- │    ├── claude/17-issue-3-xxxxx     ← task #3 branch
- │    └── claude/17-issue-7-xxxxx     ← task #7 branch
- │
- └── feature/42                          ← another feature issue's branch
-      └── claude/42-issue-1-xxxxx
+```mermaid
+graph TD
+    main[main]
+    main --> f17["feature/17<br/>integration branch for issue #17"]
+    f17 --> t17a["claude/17-issue-1-yyyymmdd-hhmmss"]
+    f17 --> t17b["claude/17-issue-3-yyyymmdd-hhmmss"]
+    f17 --> t17c["claude/17-issue-7-yyyymmdd-hhmmss"]
+    main --> f42["feature/42<br/>(parallel epic)"]
+    f42 --> t42["claude/42-issue-1-yyyymmdd-hhmmss"]
 ```
 
-- Each **feature issue** gets its own integration branch: `feature/<issue_number>`
-- Each **task** branches from the feature branch: `claude/<feature>-issue-<task>-<timestamp>`
-- Task PRs target the feature branch (not `main`)
-- When all tasks are done, a final PR merges `feature/<N>` → `main`
-- Multiple feature issues (multiple implementation plans) can run in parallel
+- Each feature issue gets its own integration branch: `feature/<issue_number>`.
+- Each task branches from the feature branch: `claude/<feature>-issue-<task>-<timestamp>`.
+- Task PRs target the feature branch (not `main`).
+- When all tasks merge, the orchestrator opens a final PR `feature/<N>` → `main` with `Closes #N` for every task plus the feature issue (GitHub auto-closes them when this PR merges into `main`).
+- Multiple feature issues run in parallel with zero collision.
+
+### Plan agent, step-by-step
+
+```mermaid
+sequenceDiagram
+    participant P as Plan Agent (LLM)
+    participant PP as parse-plan.py
+    participant R as Reconcile step (bash)
+    participant GH as GitHub API
+
+    P->>P: read draft + CLAUDE.md + explore repo
+    alt Questions Mode
+        P-->>GH: /tmp/questions.md → posted as comment, workflow stops
+    else Plan Mode
+        P->>PP: /tmp/plan-body.md
+        alt parse succeeds
+            PP->>R: /tmp/tasks.jsonl
+        else parse fails
+            PP-->>P: re-invoke with error context
+            P->>PP: retry once
+            alt retry succeeds
+                PP->>R: /tmp/tasks.jsonl
+            else retry fails
+                PP->>GH: ⚠️ "plan output malformed twice" + 😕 + exit 1
+            end
+        end
+        R->>GH: gh api POST /issues (with type=Task)<br/>POST /issues/N/sub_issues<br/>gh issue edit (preserved tasks)<br/>gh issue close (dropped)<br/>PATCH /issues/META (type=Feature)
+    end
+```
+
+The plan agent NEVER calls `gh` — it just writes `/tmp/plan-body.md`. The parse + reconcile are 100% deterministic bash/Python. If the agent produces malformed output, you get a visible error comment and a failure reaction, not a silent miss.
 
 ### Feature issue format
 
-The feature issue body can use **one of two formats**:
-
-**1. YAML (preferred — explicit):**
+The orchestrator reads a YAML block from the feature issue body. Preferred format:
 
 ````markdown
 ## Plan
@@ -138,11 +323,10 @@ waves:
 
 - [ ] #1 Project Bootstrap `P0`
 - [ ] #2 Data Model `P0`
-- [ ] #3 Router `P0`
 ...
 ````
 
-**2. Markdown (fallback — natural headings):**
+Markdown fallback (if no YAML block is found):
 
 ```markdown
 ## Wave 1 — Foundation
@@ -150,353 +334,114 @@ waves:
 
 ## Wave 2: Contracts
 - [ ] #2 Data Model `P0`
-
-### Wave 3 (Core)
-- [ ] #3 Router `P0`
-- [ ] #5 Token Management `P0`
 ```
 
-The orchestrator tries YAML first (parsed with `yq`, pre-installed on runners). If no valid YAML plan block is found, it falls back to markdown parsing (awk-based, lenient). Markdown parsing rules:
-
-- **Wave header:** line starts with `#`, `*`, or the word "Wave"; contains "Wave <N>"; is not a checkbox
-- **Task:** checkbox line `- [ ] #N` or `* [ ] #N` (or `[x]` for done), assigned to the most recent wave
-- **Wave name:** whatever text follows "Wave <N>", after stripping separators (`:`, `—`, `-`, `(`, etc.)
-
-State (which tasks are done) is always derived from merged PRs — the checkboxes are updated by the orchestrator.
+Rules:
+- **Wave header:** any non-checkbox line containing "Wave <N>" (case-insensitive), any heading level or even plain text.
+- **Task:** `- [ ] #N` or `* [ ] #N`, assigned to the most recent wave.
+- **State:** derived from merged PRs, not from the checkbox marks — the orchestrator updates checkboxes after scanning merges.
 
 ---
 
-## Quick start
+## Reference
 
-### 1. Get the files
+### Workflow matrix
 
-**Option A — New repo (easiest):** Click **Use this template** at the top of this page → create a new repo, then skip to step 2.
+| Workflow | Trigger | LLM? | Timeout | Key permissions |
+|---|---|---|---|---|
+| [claude-plan.yml](.github/workflows/claude-plan.yml) | `/agents plan` on non-task issue | ✅ plan-agent (directive-configurable) | 30min | `contents: read`, `issues: write` |
+| [claude-feature.yml](.github/workflows/claude-feature.yml) | `/agents start` + PR merge into `feature/*` + `workflow_dispatch` + issue assigned | ❌ pure bash | 10min | `contents: write`, `pull-requests: write`, `issues: write`, `actions: write` |
+| [claude-task.yml](.github/workflows/claude-task.yml) | `/agents work` on non-feature issue + `workflow_dispatch` (from orchestrator) | ✅ task worker | 60min | same as feature |
+| [claude-fix.yml](.github/workflows/claude-fix.yml) | `/agents fix` on non-feature issue | ✅ fix agent | 60min | same as feature |
+| [claude-agents-revert.yml](.github/workflows/claude-agents-revert.yml) | `/agents revert` on feature issue | ❌ pure bash | 10min | `contents: read`, `issues: write` |
+| [claude-agents-close.yml](.github/workflows/claude-agents-close.yml) | `/agents close` on feature issue | ❌ pure bash | 10min | `contents: write`, `issues: write`, `pull-requests: write` |
 
-**Option B — Existing repo:** run the install script in your repo root:
+### Agent prompts
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/ggondim/claude-in-github/main/scripts/install.sh | bash
-```
+All prompts live in [.github/prompts/](.github/prompts/) as editable Markdown. Edit the file, and the next workflow run picks it up — no YAML changes needed.
 
-Only `.github/` is modified — nothing else is added to your repo. On a fresh install, setup runs automatically (you can skip to step 3). Run again at any time to update to the latest version.
+| File | Used by | Placeholders |
+|---|---|---|
+| [plan-agent.md](.github/prompts/plan-agent.md) | `claude-plan.yml` | `{{THINK_PHRASE}}` (substituted from directive) |
+| [task-worker.md](.github/prompts/task-worker.md) | `claude-task.yml` | none |
+| [fix-agent.md](.github/prompts/fix-agent.md) | `claude-fix.yml` | none |
 
-### 2. Run the setup script
+### Scripts
 
-```bash
-.github/scripts/setup.sh
-```
-
-The script will:
-- Create required labels (`feature`, `smoke-test`, `priority:P0` … `P3`)
-- Check that the `CLAUDE_CODE_OAUTH_TOKEN` secret is set
-- Check that Actions have the right workflow permissions
-- Report anything that needs manual setup
-
-### 3. Manual prerequisites (one-time per repo)
-
-#### a) Install the Claude Code GitHub App
-
-Visit https://github.com/apps/claude and install it on your repo.
-
-#### b) Add the OAuth token secret
-
-Get a token from https://claude.com/oauth/code and add it:
-
-```bash
-gh secret set CLAUDE_CODE_OAUTH_TOKEN
-```
-
-#### c) Enable write permissions + PR creation for Actions
-
-```bash
-gh api repos/OWNER/REPO/actions/permissions/workflow \
-  -X PUT \
-  -f default_workflow_permissions=write \
-  -F can_approve_pull_request_reviews=true
-```
-
-If your org blocks this, enable it at `https://github.com/organizations/<ORG>/settings/actions`:
-- **Workflow permissions:** Read and write permissions
-- ☑️ Allow GitHub Actions to create and approve pull requests
-
-### 4. Validate with a smoke test
-
-```bash
-# from the claude-in-github source repo
-./scripts/smoke-test.sh --cleanup
-```
-
-This creates 3 trivial tasks in 2 waves, kickstarts the loop, waits for the final PR, then cleans up all artifacts.
-
-If the smoke test passes, your setup is ready for real work.
-
----
-
-## Usage
-
-### Option A — Generate the plan with `/agents plan` (easiest)
-
-Planning is a short conversation on the issue. The plan-agent can ask clarifying questions, propose a plan, accept revision requests, and iterate until you approve by commenting `/agents start`.
-
-#### 1. File a feature/problem issue
-
-Just describe what you want — no template required. The trigger filter requires the issue to NOT be a task (`priority:P*` label) and to be either unplanned (no `feature` label) or still a draft (`feature`+`draft`).
-
-#### 2. Trigger with `/agents plan`
-
-Comment on the issue. The comment can be just `/agents plan`, or include a directive to pin model and reasoning budget:
-
-```
-/agents plan                       # defaults: opus + high thinking
-/agents plan sonnet                # sonnet + high thinking
-/agents plan opus max              # opus + ultrathink
-/agents plan haiku off             # haiku, no extended thinking
-```
-
-Directive tokens — **model:** `opus` | `sonnet` | `haiku`; **reasoning:** `off` | `low` | `medium` | `high` | `max`. Unknown tokens are ignored. Punctuation and case are forgiven (`/agents plan sonnet, please` → sonnet + default reasoning).
-
-#### 3. The agent responds in one of three ways
-
-**(a) Questions** — if the agent is missing critical info, it posts a numbered list of clarifying questions and stops. No task issues are created; no labels are applied. Reply to the questions in new comments, then mention `/agents plan` again (with or without a directive) to continue. The agent sees the full thread on the next run.
-
-**(b) First plan** — if enough context is present, the plan-agent drafts a full feature-issue plan (Purpose / YAML Plan / Progress / Notes) into the issue body, the splitter extracts task specs, and a deterministic bash step creates the task issues, labels the issue `feature`+`draft`, and assigns you as the planning author. The issue now looks like a manually-authored feature (Option B below).
-
-**(c) Revision** — if the issue is already `feature`+`draft` and you comment change requests ("split task 3 into frontend and backend", "drop task 5", "task 2 needs more detail on X"), then re-mention `/agents plan`, the agent revises. Reconciliation is **deterministic**:
-
-- Existing task issue numbers that appear in the new plan YAML → `gh issue edit` (only if title or body actually changed)
-- Existing numbers dropped from the new plan → `gh issue close` with a "Superseded by revised plan" comment
-- Fresh `Tn` placeholders in the new plan → `gh issue create`
-
-The identity signal is the `ref` the plan-agent writes in each `### …` heading: a bare integer means "preserve issue #N", a `Tn` placeholder means "create new". You can see every identity choice in the plan body before approving.
-
-#### 4. Approve and kickstart
-
-When you're happy with the plan, comment `/agents start` on the feature issue. The orchestrator starts, removes the `draft` label (which also blocks further `/agents plan` revisions), and runs the implementation loop to completion.
-
-When the final `feature/<N> → main` PR merges, GitHub auto-closes every task issue and the feature issue via `Closes #N` lines in the PR body.
-
-<details>
-<summary>Example transcript</summary>
-
-```
-[human]   Opens issue: "Add rate limiting to the public API"
-[human]   Comments: /agents plan sonnet medium
-
-[bot]     🤔 Plan agent has questions before writing the plan.
-          1. Which endpoints are "public" — anything under /v1/ or only unauthenticated ones?
-          2. Sliding window or fixed window?
-          3. Per-IP or per-API-key?
-          Reply and re-mention /agents plan.
-
-[human]   Comments: 1. all of /v1/public/*  2. sliding window  3. per-IP for now
-[human]   Comments: /agents plan
-
-[bot]     Updates issue body with Purpose / YAML Plan / Progress / Notes.
-          Creates task issues #42, #43, #44. Labels issue feature + draft.
-          Posts: "Plan ready. Created 3 task issues; assigned to you."
-
-[human]   Comments: "Task #43 and #44 are really the same work — merge them"
-[human]   Comments: /agents plan
-
-[bot]     Revised plan now has `tasks: [42, T_NEW]` in YAML.
-          Closes #44 with "Superseded by revised plan on #N".
-          Edits #43's title/body to reflect the merged scope.
-          Creates new task for T_NEW.
-          Posts: "Plan revised. 1 created, 1 updated, 0 unchanged, 1 closed."
-
-[human]   Comments: /agents start
-
-[feature]    Removes `draft` label. Dispatches wave 1. Loop runs to completion.
-[feature]    Opens final PR feature/N → main with body "Closes #42, Closes #43, Closes #T_NEW_RESOLVED, Closes #N"
-[human]   Merges final PR. All issues auto-close.
-```
-
-</details>
-
-### Option B — Write the plan manually
-
-1. **Create task issues** using the "Task Issue" template. One issue per unit of work. Include acceptance criteria and explicit dependencies.
-
-2. **Create a feature issue** using the "Feature Issue" template. Reference the task issues by number in the YAML plan block.
-
-3. **Kickstart** by commenting on the feature issue:
-   ```
-   /agents start
-   ```
-   Or assign the feature issue to someone (triggers the same workflow).
-
-4. The orchestrator takes over — creates the branch, dispatches the first wave, tracks progress, advances waves, and opens the final PR automatically.
-
-### Handling failures
-
-When a task worker fails:
-
-1. A notification is posted on both the **feature issue** and the **task issue**.
-2. Retry by commenting on the failed task issue:
-   ```
-   /agents fix
-   ```
-3. The fix agent picks up the existing partial branch, reads the error context from previous comments, and attempts to complete the task.
-
-### Retrying the orchestrator
-
-If the feature orchestrator itself fails (rare), just comment `/agents start` on the feature issue. The script is idempotent — it reads current state from GitHub and picks up where it left off.
-
-### Manually dispatching the orchestrator
-
-You can also trigger the feature workflow directly (no comment needed):
-
-```bash
-gh workflow run claude-feature.yml -f feature_issue=17
-```
-
----
-
-## Workflow details
-
-### `claude-plan.yml` — Planner (two-agent, iterative)
-
-| | |
+| File | Purpose |
 |---|---|
-| **Triggers** | `/agents plan` comment on an issue that is NOT a task (no `priority:P*`) AND is either unplanned (no `feature`) OR still draft (`feature`+`draft`). PR comments ignored. |
-| **Modes** | **Questions Mode** — agent writes only `/tmp/questions.md` → workflow posts a comment and stops (no labels, no tasks). **Plan Mode** — agent writes `/tmp/plan-body.md` → splitter + reconciliation run. **Revision Mode** — subcase of Plan Mode triggered when the issue is `feature`+`draft`; the workflow builds `/tmp/conversation.md` (current plan + existing task bodies + recent comments) as extra context. |
-| **Agent 1 (Plan)** | Model configurable via directive (default `claude-opus-4-7`). Tools: `Read, Glob, Grep, Write`. Explores the repo; decides Questions vs Plan Mode; on Plan Mode writes the feature-issue body to `/tmp/plan-body.md` with `Tn` placeholders for new tasks and real integers for preserved tasks. |
-| **Agent 2 (Splitter)** | `claude-sonnet-4-6`. Tools: `Read, Write`. Mechanically extracts task specs into `/tmp/tasks.jsonl`. On revisions, reads `/tmp/existing-tasks.json` to accurately refresh preserved-task bodies. |
-| **Reconciliation (deterministic)** | Each splitter entry's `ref` drives a single `gh` call: integer → `gh issue edit` (only on content change); `Tn` → `gh issue create`; numbers in old plan but absent from new plan → `gh issue close` with a "Superseded" comment. |
-| **Extended thinking** | Controlled by directive (`off`/`low`/`medium`/`high`/`max`) → injects magic phrase (`think hard` / `think very hard` / `ultrathink`) into the prompt. |
-| **Timeout** | 30 minutes |
-| **Key permissions** | `contents: read`, `issues: write`, `id-token: write` |
+| [.github/scripts/feature-orchestrate.sh](.github/scripts/feature-orchestrate.sh) | The feature orchestrator — 100% deterministic bash. Parses YAML plan, checks merged PRs, updates checkboxes, dispatches the next wave. |
+| [.github/scripts/parse-plan.py](.github/scripts/parse-plan.py) | Deterministic Python parser that replaces the former LLM splitter. Reads `/tmp/plan-body.md`, writes `/tmp/tasks.jsonl` for the reconcile step. Writes a structured error report when the plan-agent output is malformed, used by the retry step. |
+| [.github/scripts/parse-directive.sh](.github/scripts/parse-directive.sh) | Shared `/agents <verb> [model] [reasoning]` parser. Emits `$GITHUB_OUTPUT`-style `key=value` lines for downstream steps. Used by every LLM-triggering workflow. |
+| [.github/scripts/react.sh](.github/scripts/react.sh) | 1-line reaction helper. Posts 👀/👍/😕 to a comment. Fault-tolerant (silent on 4xx). |
+| [scripts/setup.sh](scripts/setup.sh) | One-shot prereq validator: labels, secret, permissions, issue types, GitHub App hint. |
+| [scripts/install.sh](scripts/install.sh) | Downloads every workflow/script/prompt/template file into `.github/`. Idempotent — re-run to upgrade. |
+| [scripts/smoke-test.sh](scripts/smoke-test.sh) | E2E orchestrator test: 3 tasks, 2 waves, polls for final PR, tests reactions + `/agents close`. |
+| [scripts/smoke-test-plan.sh](scripts/smoke-test-plan.sh) | E2E plan-pipeline test: creates draft, runs `/agents plan`, asserts types/sub-issues/reactions, tests `/agents revert`. |
 
-### `claude-feature.yml` — Orchestrator (deterministic)
+### Directive parsing
 
-| | |
+The `/agents <verb>` grammar is anchored at comment start (`startsWith` filter — no accidental matches from prose). Directive parsing is handled by `.github/scripts/parse-directive.sh`, which normalizes tokens (lowercase, strips punctuation) and ignores unknown words.
+
+| Token class | Values | Default |
+|---|---|---|
+| command | `plan` / `start` / `work` / `fix` / `revert` / `close` | — |
+| model | `opus` / `sonnet` / `haiku` | per verb (plan = opus, work/fix = sonnet) |
+| reasoning | `off`, `low`, `medium` (`med`), `high`, `max` (`ultra`, `ultrathink`) | `high` |
+
+Examples: `/agents plan sonnet low`, `/agents fix opus, ultrathink please` (punctuation tolerated).
+
+### Guardrails & known limitations
+
+| Guardrail | How it works |
 |---|---|
-| **Triggers** | `/agents start` comment on feature issue, assign on feature issue, PR merge into `feature/*` (human merges), `workflow_dispatch` (from task worker post-step) |
-| **Implementation** | Pure bash script in `.github/scripts/feature-orchestrate.sh` |
-| **LLM** | None |
-| **Timeout** | 10 minutes |
-| **Key permissions** | `contents: write`, `pull-requests: write`, `issues: write`, `actions: write` |
-
-### `claude-task.yml` — Worker
-
-| | |
-|---|---|
-| **Triggers** | `workflow_dispatch` (from feature script), `/agents start` comment on non-feature issue (manual retry) |
-| **Implementation** | Claude Code agent with explicit prompt |
-| **Model** | `claude-sonnet-4-6` |
-| **Timeout** | 60 minutes |
-| **Key permissions** | `contents: write`, `pull-requests: write`, `issues: write`, `actions: write` |
-
-### `claude-fix.yml` — Fix agent
-
-| | |
-|---|---|
-| **Triggers** | `/agents fix` comment on non-feature issue |
-| **Implementation** | Claude Code agent, picks up existing partial branch |
-| **Model** | `claude-sonnet-4-6` |
-| **Timeout** | 60 minutes |
-| **Key permissions** | Same as task worker |
-
----
-
-## Guardrails
-
-| Guardrail | Description |
-|---|---|
-| **Deterministic feature** | The orchestrator is a bash script — no LLM drift, no probabilistic failures |
-| **60-minute timeout** | Task/fix agents have a hard time limit to prevent runaway costs |
-| **Failure notifications** | Failures are reported on both the feature and task issues |
-| **Fix agent** | `/agents fix` provides semi-automated recovery |
-| **Idempotent orchestrator** | Re-running the feature script is always safe — it reads current state from GitHub |
-| **Conflict resolution** | Task worker auto-resolves merge conflicts via API merge |
-| **Bot allowlist** | Only `claude[bot]` and `github-actions[bot]` can trigger workflows |
-| **Loop closure via `workflow_dispatch`** | Reliable cross-workflow triggering from `GITHUB_TOKEN` |
-
-### Known limitations
+| Deterministic orchestrator | Pure bash — no LLM probabilistic behaviour in the loop. |
+| 60-minute worker timeout | Prevents runaway costs on a single task. |
+| Fail-loud on malformed plan | Parser writes a structured error; plan-agent gets one retry with the error context; if both attempts fail, the user sees a comment + 😕 reaction. |
+| Failure notifications | Every LLM workflow posts a comment and a 😕 reaction on failure. |
+| Fix agent | `/agents fix` for semi-automated recovery with partial-branch resume. |
+| Idempotent orchestrator | Re-running `/agents start` is always safe — state is derived from GitHub. |
+| Reactions as quick status | 👀 while running, 👍 on success, 😕 on failure — tells you at a glance without reading comments. |
 
 | Limitation | Workaround |
 |---|---|
-| `GITHUB_TOKEN`-generated events don't trigger other workflows (neither PR merges nor bot comments) | Use `gh workflow run` (workflow_dispatch IS allowed for `GITHUB_TOKEN`) |
-| Workflow validation fails when workflow files change between trigger and execution | Re-trigger via `/agents start` comment (uses the latest workflow from `main`) |
-| `git` auth not available in post-steps | Post-steps use `gh api` and `gh` CLI instead of `git` commands |
-| Git ref replication lag after branch creation | Feature script waits up to 5s; task worker pre-step polls up to 20s |
-| Parallel tasks in the same wave may touch shared files | Post-step tries direct merge, falls back to API merge; unresolvable conflicts trigger failure notification |
-| P1+ tasks need human review before merging (with branch protection) | The orchestrator comments on P0 tasks mentioning auto-merge; others wait for review |
-
----
-
-## Configuration
-
-The defaults should work out of the box, but you can customize:
-
-### Edit agent prompts
-
-All agent system prompts live in `.github/prompts/` as `.md` files:
-
-| File | Used by |
-|---|---|
-| `plan-agent.md` | `claude-plan.yml` — Plan agent (supports `{{THINK_PHRASE}}` placeholder) |
-| `splitter-agent.md` | `claude-plan.yml` — Splitter agent |
-| `task-worker.md` | `claude-task.yml` — Task worker |
-| `fix-agent.md` | `claude-fix.yml` — Fix agent |
-
-Each workflow has a "Load prompt" step that reads the relevant file into `$GITHUB_ENV` at runtime and feeds it into the Claude Code action. Edit the `.md` file and the next workflow run picks it up — no YAML changes needed.
-
-### Change the model
-
-For the **task/fix agents**, edit the `claude_args` line in `claude-task.yml` or `claude-fix.yml`:
-
-```yaml
-claude_args: "--model claude-opus-4-5 --allowedTools Bash,Read,Glob,Grep,Write,Edit"
-```
-
-**Important:** the model ID must be the full version, not a short alias. `claude-sonnet` does not work — use `claude-sonnet-4-6`.
-
-For the **plan agent**, no YAML edit is needed — pass the directive in the comment:
-
-```
-/agents plan sonnet medium
-/agents plan opus max
-/agents plan haiku off
-```
-
-### Change the timeout
-
-Edit `timeout-minutes` at the job level. Max is 360 minutes on GitHub-hosted runners.
-
-### Restrict who can trigger
-
-By default, any `/agents start` / `/agents plan` comment from a repo collaborator triggers workflows. To restrict further, add `allowed_non_write_users` or modify the `if` conditions.
+| `GITHUB_TOKEN`-generated events don't trigger other workflows (neither PR merges nor bot comments). | Loop closure uses `workflow_dispatch` (the one exception), called from post-steps. |
+| Git refs have replication lag after branch creation. | Task worker polls up to 20s before `actions/checkout`. |
+| Parallel tasks in a wave may touch shared files → merge conflicts. | Post-step tries direct merge, falls back to API merge; unresolvable conflicts emit a failure notification that `/agents fix` can pick up. |
+| P1+ tasks need human review before merging (with branch protection). | The orchestrator auto-merges P0 only; others wait for review. |
+| Issue types aren't configured at the org. | Workflows still run; the `type` PATCH/POST silently no-ops. Only the native type badge is missing; the `feature` label still distinguishes. |
 
 ---
 
 ## Design decisions
 
-Non-obvious choices documented for future maintainers:
+Non-obvious choices, documented for future maintainers:
 
-- **Why is the feature orchestrator pure bash instead of an LLM?** The feature does state tracking and dispatching — not creative work. LLMs were probabilistic about parsing wave structure and updating checkboxes. A deterministic script is faster (seconds vs minutes), cheaper ($0 vs ~$0.10 per run), and never drifts.
+- **Why is the feature orchestrator pure bash?** It's dispatching and state-tracking, not creative work. Earlier LLM versions were probabilistic about parsing wave structure and updating checkboxes. The bash script is faster (seconds vs minutes), cheaper ($0), and never drifts.
 
-- **Why YAML for the plan structure?** It's trivially parseable with `yq` (pre-installed on GitHub runners), human-editable, and naturally expresses waves. ASCII dependency graphs were visual but required LLM interpretation.
+- **Why was the plan-splitter LLM replaced with a Python parser?** Splitting a structured plan body into JSONL is pure parsing — zero creative inference. The old splitter burned ~8 minutes per run at Sonnet pricing; `parse-plan.py` does it in <1s. The retry-on-failure path keeps the "no silent miss" guarantee by re-invoking the plan-agent with specific error context if the parser rejects the output.
 
-- **Why `workflow_dispatch` for loop closure?** GitHub Actions deliberately blocks `GITHUB_TOKEN`-generated events from triggering other workflows (to prevent infinite loops). The exception is `workflow_dispatch` and `repository_dispatch`. Bot comments by `GITHUB_TOKEN` are also silent, so we can't use comments for cross-workflow communication.
+- **Why YAML for the plan structure?** Trivially parseable with `yq` (pre-installed on runners), human-editable, and naturally expresses waves.
 
-- **Why a separate feature branch per plan?** Isolation. Multiple plans can run in parallel without stepping on each other. It also makes it trivial to abandon a plan — just delete the branch.
+- **Why `workflow_dispatch` for loop closure?** GitHub deliberately blocks `GITHUB_TOKEN`-generated events from triggering other workflows. `workflow_dispatch` and `repository_dispatch` are the only exceptions. Bot comments by `GITHUB_TOKEN` are silent too, so we can't use comments for cross-workflow communication — but `gh workflow run` works.
 
-- **Why explicit git commands in the task worker prompt?** Earlier versions said "the workflow handles the PR" and the agent interpreted this as "I don't need to commit/push either." Being explicit eliminates the ambiguity.
+- **Why a separate feature branch per plan?** Isolation. Multiple plans can run in parallel without stepping on each other. It's also trivial to abandon a plan — `/agents close` deletes the branch.
 
-- **Why does the task worker poll for branch visibility?** GitHub has eventual consistency on git refs. When the feature script creates `feature/<N>` and immediately dispatches a task worker, the ref may not be visible to `actions/checkout`. Polling handles this.
+- **Why does plan-agent revision use bimodal refs (integer or `Tn`)?** Deterministic reconciliation. The plan-agent decides identity at authoring time by writing a real issue number (preserve) or a fresh placeholder (create) into each `### <ref> — …` heading. Bash reconciles with pure set operations — no LLM-based semantic matching. You can audit every identity choice in the plan body before approving with `/agents start`.
 
-- **Why does plan-agent revision use bimodal refs (integer or `Tn`) instead of LLM-based task diffing?** Deterministic reconciliation. The plan-agent decides identity at authoring time by writing a real issue number (preserve) or a fresh placeholder (create) into each `### … —` heading. Bash then reconciles with pure set operations — no semantic matching, no "is this task the same as before" inference. The identity choice is visible in the plan body, so humans can audit it before approving with `/agents start`.
+- **Why does the final PR body use `Closes #N` for every task?** GitHub auto-closes referenced issues only when a PR merges into the **default branch**. Task PRs target `feature/*`, not `main`, so `fixes #N` on them doesn't auto-close. The final feature PR carries closure directives for every task plus the feature issue itself.
 
-- **Why does the final PR body use `Closes #N` for every task?** GitHub auto-closes referenced issues only when a PR merges into the **default branch**. Task PRs target `feature/*`, not `main`, so `fixes #N` on them doesn't auto-close anything. The only merge-into-main event is the final feature PR, so it must carry closure directives for every task plus the feature issue itself.
+- **Why `eyes`/`+1`/`confused` instead of hourglass + checkmark?** The GitHub reactions API accepts only a fixed set (`+1, -1, laugh, confused, heart, hooray, rocket, eyes`). `eyes` is the idiomatic "seen / working on it" across GitHub bots; `+1` is the closest "done" signal. There's no hourglass.
 
-- **Why `gh api` instead of `git ls-remote` in post-steps?** Git credentials are revoked after the `claude-code-action` step completes, but `GITHUB_TOKEN` still works with the `gh` CLI.
+- **Why is the directive parser a separate script instead of inlined in each workflow?** Four workflows needed the same model+reasoning parsing. One shared script means one place to add a new model or reasoning level, not four.
+
+- **Why do `/agents revert` and `/agents close` delete comments / branches in bulk instead of interactively?** Determinism. The trigger comment is the consent — if you didn't want destruction, you wouldn't type `/agents close`. Best-effort per-item failures (already-closed issue, missing branch) log warnings but don't abort the rest of the cleanup.
 
 ---
 
 ## Contributing
 
-Issues and PRs welcome. If you find a new failure mode, please document the root cause in the "Known limitations" table.
+Issues and PRs welcome. If you find a new failure mode, please document the root cause in "Known limitations". If you're adding a new `/agents <verb>`, update the commands cheatsheet, the workflow matrix, and at least one Use case diagram.
 
 ## License
 
