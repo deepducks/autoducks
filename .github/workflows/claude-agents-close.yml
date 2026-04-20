@@ -1,0 +1,195 @@
+# =============================================================================
+# Claude Agents — Close
+# =============================================================================
+#
+# PURPOSE
+# -------
+# Fully tears down a feature epic. Use when you want to abandon or wrap up
+# an implementation loop: every task issue is closed, every task branch is
+# deleted (and any open PRs on them are closed), the feature's integration
+# branch `feature/<N>` is deleted (and its final PR, if any, is closed),
+# and the feature issue itself is closed as completed.
+#
+# WHAT IT DOES (scope: ONE feature issue)
+# 1. Closes every task issue referenced in the feature's YAML plan block.
+# 2. Finds every branch matching `claude/<FEATURE>-issue-<TASK>-*`:
+#    - Closes any open PR from that branch.
+#    - Deletes the branch.
+# 3. Finds the feature branch `feature/<FEATURE>`:
+#    - Closes any PR from it.
+#    - Deletes the branch.
+# 4. Closes the feature issue with reason=completed.
+#
+# WHAT IT DOES NOT DO
+# - Does not touch merged PRs' commits on main — implementation work that
+#   already landed stays landed. This workflow is about tearing down the
+#   orchestration scaffolding, not undoing code.
+# - Does not delete comments. History is preserved.
+#
+# TRIGGER
+# -------
+# `/agents close` comment on an issue that has the `feature` label.
+#
+# FAILURE MODE
+# ------------
+# Per-branch / per-task failures log warnings but do not abort the rest of
+# the cleanup. Overall workflow failure posts a comment + 😕 reaction.
+# =============================================================================
+
+name: Claude Agents — Close
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    if: >
+      github.event.issue.pull_request == null
+      && startsWith(github.event.comment.body, '/agents close')
+      && contains(toJSON(github.event.issue.labels.*.name), 'feature')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: React — started
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/react.sh "${{ github.event.comment.id }}" eyes
+
+      - name: Close feature epic
+        id: close
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          FEATURE: ${{ github.event.issue.number }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+        run: |
+          set -euo pipefail
+
+          echo "=== Close feature epic #$FEATURE ==="
+
+          # --- 1. Parse YAML block for task numbers ---
+          CURRENT_BODY=$(gh issue view "$FEATURE" --repo "$REPO" --json body --jq '.body')
+          YAML_BLOCK=$(echo "$CURRENT_BODY" | awk '/^```yaml[[:space:]]*$/{flag=1;next}/^```[[:space:]]*$/{flag=0}flag')
+
+          TASK_NUMBERS=()
+          if [[ -n "$YAML_BLOCK" ]]; then
+            while IFS= read -r n; do
+              [[ "$n" =~ ^[0-9]+$ ]] && TASK_NUMBERS+=("$n")
+            done < <(echo "$YAML_BLOCK" | yq '.waves[].tasks[]' 2>/dev/null | grep -E '^[0-9]+$' || true)
+          fi
+          echo "Task numbers in plan: ${TASK_NUMBERS[*]:-<none>}"
+
+          TASKS_CLOSED=0
+          PRS_CLOSED=0
+          BRANCHES_DELETED=0
+
+          # --- 2. For each task: close PRs, delete branches, close issue ---
+          for t in "${TASK_NUMBERS[@]}"; do
+            # Find branches with the naming convention
+            BRANCH_REFS=$(gh api "repos/$REPO/git/matching-refs/heads/claude/$FEATURE-issue-$t-" \
+              --jq '.[].ref | sub("^refs/heads/"; "")' 2>/dev/null || echo "")
+
+            if [[ -n "$BRANCH_REFS" ]]; then
+              while IFS= read -r branch; do
+                [[ -z "$branch" ]] && continue
+
+                # Close any open PR on this branch
+                PR_NUM=$(gh pr list --repo "$REPO" --head "$branch" --state open \
+                  --json number --jq '.[0].number // empty' 2>/dev/null || echo "")
+                if [[ -n "$PR_NUM" ]]; then
+                  if gh pr close "$PR_NUM" --repo "$REPO" \
+                      --comment "Closed by \`/agents close\` on feature #$FEATURE" 2>/dev/null; then
+                    PRS_CLOSED=$((PRS_CLOSED + 1))
+                    echo "Closed PR #$PR_NUM (branch $branch)"
+                  else
+                    echo "::warning::Could not close PR #$PR_NUM"
+                  fi
+                fi
+
+                # Delete the branch
+                if gh api "repos/$REPO/git/refs/heads/$branch" --method DELETE --silent 2>/dev/null; then
+                  BRANCHES_DELETED=$((BRANCHES_DELETED + 1))
+                  echo "Deleted branch $branch"
+                else
+                  echo "::warning::Could not delete branch $branch (already gone?)"
+                fi
+              done <<< "$BRANCH_REFS"
+            fi
+
+            # Close the task issue
+            if gh issue close "$t" --repo "$REPO" --reason completed \
+                --comment "Epic closed via \`/agents close\` on feature #$FEATURE" 2>/dev/null; then
+              TASKS_CLOSED=$((TASKS_CLOSED + 1))
+              echo "Closed task #$t"
+            else
+              echo "::warning::Could not close task #$t (already closed?)"
+            fi
+          done
+
+          # --- 3. Close the feature's integration branch + any final PR ---
+          FEATURE_BRANCH="feature/$FEATURE"
+          if gh api "repos/$REPO/git/refs/heads/$FEATURE_BRANCH" --silent 2>/dev/null; then
+            # Any PR from this branch?
+            FEATURE_PR=$(gh pr list --repo "$REPO" --head "$FEATURE_BRANCH" --state open \
+              --json number --jq '.[0].number // empty' 2>/dev/null || echo "")
+            if [[ -n "$FEATURE_PR" ]]; then
+              if gh pr close "$FEATURE_PR" --repo "$REPO" \
+                  --comment "Closed by \`/agents close\` on feature #$FEATURE" 2>/dev/null; then
+                PRS_CLOSED=$((PRS_CLOSED + 1))
+                echo "Closed feature PR #$FEATURE_PR"
+              fi
+            fi
+            # Delete the feature branch
+            if gh api "repos/$REPO/git/refs/heads/$FEATURE_BRANCH" --method DELETE --silent 2>/dev/null; then
+              BRANCHES_DELETED=$((BRANCHES_DELETED + 1))
+              echo "Deleted feature branch $FEATURE_BRANCH"
+            fi
+          else
+            echo "No feature branch $FEATURE_BRANCH (never created, or already gone)"
+          fi
+
+          # --- 4. Close the feature issue itself ---
+          gh issue close "$FEATURE" --repo "$REPO" --reason completed \
+            --comment "Feature epic closed by @$COMMENTER via \`/agents close\`.
+
+          **Cleanup summary:**
+          - Task issues closed: $TASKS_CLOSED
+          - PRs closed: $PRS_CLOSED
+          - Branches deleted: $BRANCHES_DELETED"
+
+          echo "tasks_closed=$TASKS_CLOSED"       >> "$GITHUB_OUTPUT"
+          echo "prs_closed=$PRS_CLOSED"           >> "$GITHUB_OUTPUT"
+          echo "branches_deleted=$BRANCHES_DELETED" >> "$GITHUB_OUTPUT"
+
+      - name: React — outcome
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ "$JOB_STATUS" = "success" ]; then
+            .github/scripts/react.sh "${{ github.event.comment.id }}" +1
+          else
+            .github/scripts/react.sh "${{ github.event.comment.id }}" confused
+          fi
+
+      - name: Notify failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FEATURE: ${{ github.event.issue.number }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          gh issue comment "$FEATURE" --body "@$COMMENTER — ⚠️ **Close failed.** [View logs](https://github.com/${{ github.repository }}/actions/runs/${RUN_ID})"

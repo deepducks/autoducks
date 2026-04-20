@@ -54,6 +54,8 @@ FILE_PAIRS=(
   ".github/workflows/claude-task.yml:.github/workflows/claude-task.yml"
   ".github/workflows/claude-fix.yml:.github/workflows/claude-fix.yml"
   ".github/workflows/claude-plan.yml:.github/workflows/claude-plan.yml"
+  ".github/workflows/claude-agents-revert.yml:.github/workflows/claude-agents-revert.yml"
+  ".github/workflows/claude-agents-close.yml:.github/workflows/claude-agents-close.yml"
   ".github/scripts/feature-orchestrate.sh:.github/scripts/feature-orchestrate.sh"
   ".github/scripts/parse-plan.py:.github/scripts/parse-plan.py"
   ".github/scripts/parse-directive.sh:.github/scripts/parse-directive.sh"

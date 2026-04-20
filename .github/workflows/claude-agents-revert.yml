@@ -1,0 +1,176 @@
+# =============================================================================
+# Claude Agents — Revert
+# =============================================================================
+#
+# PURPOSE
+# -------
+# Undoes a plan-agent run without cleaning up any actual implementation work.
+# Use when the plan turned out wrong (bad tasks, wrong scope, wrong
+# decomposition) AND no task branches/PRs exist yet, so you want the issue
+# back to its pre-`/agents plan` state to re-run planning with different
+# input.
+#
+# WHAT IT DOES (scope: ONE feature issue)
+# 1. Closes every task issue referenced in the feature's YAML plan block.
+# 2. Removes `feature` and `draft` labels from the feature issue.
+# 3. Deletes ALL comments on the feature issue (including user comments —
+#    confirmed user preference).
+# 4. Reverts the body to the most recent human-authored edit (per GraphQL
+#    `userContentEdits` history), so the original draft is restored.
+#
+# WHAT IT DOES NOT DO
+# - Task branches, PRs, merges, and `feature/<N>` integration branch are
+#   untouched. If implementation work exists, use `/agents close` instead.
+#
+# TRIGGER
+# -------
+# `/agents revert` comment on an issue that has the `feature` label.
+#
+# FAILURE MODE
+# ------------
+# Any step failing posts a comment on the issue with the run URL and adds
+# a 😕 reaction. The comment-deletion step is best-effort per comment —
+# a single failed delete logs a warning but doesn't abort the rest.
+# =============================================================================
+
+name: Claude Agents — Revert
+
+permissions:
+  contents: read
+  issues: write
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  revert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    if: >
+      github.event.issue.pull_request == null
+      && startsWith(github.event.comment.body, '/agents revert')
+      && contains(toJSON(github.event.issue.labels.*.name), 'feature')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: React — started
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/react.sh "${{ github.event.comment.id }}" eyes
+
+      - name: Revert feature issue
+        id: revert
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          FEATURE: ${{ github.event.issue.number }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+        run: |
+          set -euo pipefail
+
+          echo "=== Revert feature issue #$FEATURE ==="
+
+          # --- 1. Parse YAML block to find task numbers ---
+          CURRENT_BODY=$(gh issue view "$FEATURE" --repo "$REPO" --json body --jq '.body')
+          YAML_BLOCK=$(echo "$CURRENT_BODY" | awk '/^```yaml[[:space:]]*$/{flag=1;next}/^```[[:space:]]*$/{flag=0}flag')
+
+          TASK_NUMBERS=()
+          if [[ -n "$YAML_BLOCK" ]]; then
+            while IFS= read -r n; do
+              [[ "$n" =~ ^[0-9]+$ ]] && TASK_NUMBERS+=("$n")
+            done < <(echo "$YAML_BLOCK" | yq '.waves[].tasks[]' 2>/dev/null | grep -E '^[0-9]+$' || true)
+          fi
+          echo "Task numbers in plan: ${TASK_NUMBERS[*]:-<none>}"
+
+          # --- 2. Close each task issue ---
+          CLOSED=0
+          for t in "${TASK_NUMBERS[@]}"; do
+            if gh issue close "$t" --repo "$REPO" \
+                --comment "Reverted by \`/agents revert\` on #$FEATURE" 2>/dev/null; then
+              CLOSED=$((CLOSED + 1))
+              echo "Closed #$t"
+            else
+              echo "::warning::Could not close #$t (already closed?)"
+            fi
+          done
+
+          # --- 3. Remove feature + draft labels ---
+          gh issue edit "$FEATURE" --repo "$REPO" \
+            --remove-label feature --remove-label draft 2>/dev/null \
+            || echo "::warning::Could not remove labels (already removed?)"
+
+          # --- 4. Fetch the original body via GraphQL userContentEdits ---
+          # Pick the most recent edit authored by a non-bot user whose
+          # timestamp is EARLIER than any github-actions edit. If no such
+          # user edit exists, the creation body is the "original" — in
+          # that case we leave the body alone and log a notice.
+          EDITS_JSON=$(gh api graphql -f query='
+            query($owner: String!, $name: String!, $num: Int!) {
+              repository(owner: $owner, name: $name) {
+                issue(number: $num) {
+                  userContentEdits(first: 50) {
+                    nodes { editor { login } editedAt diff }
+                  }
+                }
+              }
+            }' \
+            -F "owner=${REPO%/*}" -F "name=${REPO#*/}" -F "num=$FEATURE" 2>/dev/null || echo '{}')
+
+          ORIGINAL_BODY=$(echo "$EDITS_JSON" | jq -r '
+            .data.repository.issue.userContentEdits.nodes
+            | map(select(.editor.login != "github-actions"))
+            | sort_by(.editedAt) | reverse | .[0].diff // empty' 2>/dev/null || echo "")
+
+          if [[ -n "$ORIGINAL_BODY" && "$ORIGINAL_BODY" != "null" ]]; then
+            printf '%s' "$ORIGINAL_BODY" > /tmp/original-body.md
+            gh issue edit "$FEATURE" --repo "$REPO" --body-file /tmp/original-body.md
+            echo "Body reverted to most recent human-authored edit"
+          else
+            echo "::notice::No pre-agent user edit found — body left unchanged. The creation body is the original."
+          fi
+
+          # --- 5. Delete ALL comments (user preference; preserves audit via run logs) ---
+          # We delete AFTER restoring the body so the trigger comment itself
+          # goes away too — no self-reference left behind.
+          COMMENT_IDS=$(gh api "repos/$REPO/issues/$FEATURE/comments" --jq '.[].id' 2>/dev/null || echo "")
+          DELETED=0
+          if [[ -n "$COMMENT_IDS" ]]; then
+            while IFS= read -r cid; do
+              [[ -z "$cid" ]] && continue
+              if gh api "repos/$REPO/issues/comments/$cid" --method DELETE --silent 2>/dev/null; then
+                DELETED=$((DELETED + 1))
+              else
+                echo "::warning::Could not delete comment $cid"
+              fi
+            done <<< "$COMMENT_IDS"
+          fi
+          echo "Deleted $DELETED comments"
+
+          echo "tasks_closed=$CLOSED"  >> "$GITHUB_OUTPUT"
+          echo "comments_deleted=$DELETED" >> "$GITHUB_OUTPUT"
+
+      - name: React — outcome
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ "$JOB_STATUS" = "success" ]; then
+            .github/scripts/react.sh "${{ github.event.comment.id }}" +1
+          else
+            .github/scripts/react.sh "${{ github.event.comment.id }}" confused
+          fi
+
+      - name: Notify failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FEATURE: ${{ github.event.issue.number }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          gh issue comment "$FEATURE" --body "@$COMMENTER — ⚠️ **Revert failed.** [View logs](https://github.com/${{ github.repository }}/actions/runs/${RUN_ID})"
