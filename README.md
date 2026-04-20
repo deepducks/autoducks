@@ -1,8 +1,10 @@
 # claude-in-github
 
-> An opinionated, drop-in GitHub Actions package that turns issues and comments into an autonomous implementation loop powered by [Claude Code](https://github.com/anthropics/claude-code-action).
+> An opinionated GitHub Actions package built on top of [Anthropic's official Claude Code + GitHub Actions integration](https://code.claude.com/docs/en/github-actions).
 
-Plan a feature in conversation with a Claude agent, split it into tasks, ship them in parallel waves, open the final PR — all without leaving GitHub. Or use any single piece in isolation.
+The official integration hands you a Claude Code run triggered by `@claude` on an issue or PR — one agent, one task, ship. This repo extends that baseline into an **SDD-style loop** (Spec-Driven Development): the feature issue body *is* the plan (YAML waves + task references), each task issue *is* its own unit spec (summary, checkboxes, acceptance criteria), and a deterministic orchestrator ships the whole graph in dependency order without leaving GitHub.
+
+Every piece works in isolation — use the full `/agents plan` → `/agents start` → ship chain, or pick a single verb for a one-off.
 
 ---
 
