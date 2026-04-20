@@ -13,10 +13,13 @@
 #     sees the full conversation and can now produce a plan.
 #
 #   First pass (Plan Mode)
-#     The plan agent designs the plan; the splitter extracts task specs; a
-#     deterministic bash step creates task issues, substitutes placeholders
-#     with real numbers, updates the issue body, labels `meta`+`draft`, and
-#     assigns the commenter.
+#     The plan agent designs the plan; a deterministic Python parser
+#     extracts task specs into JSONL (no second LLM call); a bash step
+#     creates task issues, substitutes placeholders with real numbers,
+#     updates the issue body, labels `meta`+`draft`, and assigns the
+#     commenter. If the parser rejects the plan body, the plan agent is
+#     re-invoked once with the specific format error; a second failure
+#     posts a visible error comment and fails the job.
 #
 #   Revision
 #     The human comments change requests on a `meta+draft` issue and mentions
@@ -258,7 +261,7 @@ jobs:
           # Carry OLD_NUMBERS to the reconciliation step as a space-separated string
           echo "old_numbers=${OLD_NUMBERS[*]}" >> "$GITHUB_OUTPUT"
 
-      # --- Load prompts from .github/prompts/ into env vars ---
+      # --- Load the plan-agent prompt into an env var ---
       - name: Load prompts
         env:
           THINK_PHRASE: ${{ steps.meta.outputs.think_phrase }}
@@ -271,13 +274,6 @@ jobs:
           {
             echo "PLAN_PROMPT<<$DELIM"
             printf '%s\n' "$PLAN"
-            echo "$DELIM"
-          } >> "$GITHUB_ENV"
-
-          # Splitter agent — no placeholders
-          {
-            echo "SPLITTER_PROMPT<<$DELIM"
-            cat .github/prompts/splitter-agent.md
             echo "$DELIM"
           } >> "$GITHUB_ENV"
 
@@ -326,19 +322,84 @@ jobs:
           @$COMMENTER — please reply to these in new comments, then re-mention \`@plan-agent\` (with or without a directive) and I'll pick up the thread."
             echo "mode=questions" >> "$GITHUB_OUTPUT"
           else
-            echo "Plan Mode: continuing to splitter."
+            echo "Plan Mode: continuing to parser."
             echo "mode=plan" >> "$GITHUB_OUTPUT"
           fi
 
-      # --- Agent 2: Splitter (Sonnet) ---
-      - name: Run Splitter Agent
+      # --- Deterministic parse: plan-body.md → tasks.jsonl ---
+      # Replaces the former LLM splitter (sub-second vs ~8min). On failure,
+      # writes /tmp/parse-error.md with structured feedback for the retry.
+      - name: Parse plan
+        id: parse
         if: steps.mode.outputs.mode == 'plan'
+        continue-on-error: true
+        run: |
+          python3 .github/scripts/parse-plan.py /tmp/plan-body.md /tmp/tasks.jsonl
+
+      # --- Retry path: build a prompt that tells the agent exactly what failed ---
+      - name: Rebuild prompt with parse error
+        if: steps.mode.outputs.mode == 'plan' && steps.parse.outcome == 'failure'
+        env:
+          THINK_PHRASE: ${{ steps.meta.outputs.think_phrase }}
+        run: |
+          DELIM="___CLAUDE_PROMPT_EOF___"
+          PLAN=$(cat .github/prompts/plan-agent.md)
+          PLAN="${PLAN//\{\{THINK_PHRASE\}\}/$THINK_PHRASE}"
+          ERROR_BODY=$(cat /tmp/parse-error.md)
+          {
+            echo "PLAN_RETRY_PROMPT<<$DELIM"
+            printf '%s\n' "$PLAN"
+            printf '\n\n## Retry context — your previous plan body failed to parse\n\n'
+            printf 'The deterministic parser rejected your previous `/tmp/plan-body.md` output.\n'
+            printf 'Parser feedback:\n\n---\n\n'
+            printf '%s\n' "$ERROR_BODY"
+            printf '\n---\n\n'
+            printf 'Your previous `/tmp/plan-body.md` is still on disk; you can `Read` it to see what you wrote.\n'
+            printf 'Re-emit `/tmp/plan-body.md` correcting the formatting error above. Preserve your plan content — only fix the format.\n'
+            echo "$DELIM"
+          } >> "$GITHUB_ENV"
+
+      - name: Run Plan Agent (retry after parse failure)
+        if: steps.mode.outputs.mode == 'plan' && steps.parse.outcome == 'failure'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--model claude-sonnet-4-6 --allowedTools Read,Write"
+          claude_args: "--model ${{ steps.meta.outputs.model }} --allowedTools Read,Glob,Grep,Write"
           allowed_bots: "claude[bot],github-actions[bot]"
-          prompt: ${{ env.SPLITTER_PROMPT }}
+          prompt: ${{ env.PLAN_RETRY_PROMPT }}
+
+      - name: Parse plan (retry)
+        id: parse_retry
+        if: steps.mode.outputs.mode == 'plan' && steps.parse.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          python3 .github/scripts/parse-plan.py /tmp/plan-body.md /tmp/tasks.jsonl
+
+      # --- Fail loud on giving up: post the parser error as a comment and exit 1 ---
+      - name: Fail visibly on parse giving up
+        id: fail_parse
+        if: >
+          steps.mode.outputs.mode == 'plan'
+          && steps.parse.outcome == 'failure'
+          && steps.parse_retry.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
+          COMMENTER: ${{ steps.meta.outputs.commenter }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          ERROR_BODY=$(cat /tmp/parse-error.md 2>/dev/null || echo "(parser error file missing)")
+          gh issue comment "$ISSUE_NUM" --body "@$COMMENTER — ⚠️ **Plan agent produced unparseable output twice.** No tasks were created.
+
+          The agent was re-invoked once with the parser's error message; both attempts failed to match the required plan template.
+
+          **Latest parser error:**
+
+          $ERROR_BODY
+
+          [View full workflow logs](https://github.com/$REPO/actions/runs/$RUN_ID) for the raw plan body. Re-mention \`@plan-agent\` to try again."
+          exit 1
 
       # --- Deterministic reconciliation: create / update / close tasks ---
       # Reconciliation is driven entirely by each task's `ref` field:
@@ -347,7 +408,9 @@ jobs:
       # Any integer present in OLD_NUMBERS but absent from the new YAML
       # (tracked in NEW_NUMBERS) gets closed with a "superseded" comment.
       - name: Reconcile task issues and finalize meta
-        if: steps.mode.outputs.mode == 'plan'
+        if: >
+          steps.mode.outputs.mode == 'plan'
+          && (steps.parse.outcome == 'success' || steps.parse_retry.outcome == 'success')
         id: finalize
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -360,7 +423,7 @@ jobs:
           set -euo pipefail
 
           [[ -s /tmp/plan-body.md ]]  || { echo "::error::Plan agent produced no plan"; exit 1; }
-          [[ -s /tmp/tasks.jsonl ]]   || { echo "::error::Splitter produced no tasks"; exit 1; }
+          [[ -s /tmp/tasks.jsonl ]]   || { echo "::error::Parser produced no tasks"; exit 1; }
 
           echo "--- Plan body ---"
           cat /tmp/plan-body.md
@@ -547,9 +610,9 @@ jobs:
           **Next step:** review the plan in the issue body above. When you're ready, comment \`@claude\` on this issue to kickstart the orchestration loop. (Or mention \`@plan-agent\` again with change requests to revise.)"
           fi
 
-      # --- Failure notification ---
+      # --- Failure notification (generic fallback — the fail_parse step posts its own detailed comment) ---
       - name: Notify failure
-        if: failure()
+        if: failure() && steps.fail_parse.outcome != 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
