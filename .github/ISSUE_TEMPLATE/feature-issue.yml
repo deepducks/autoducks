@@ -8,7 +8,7 @@ body:
       value: |
         ## How this works
 
-        A feature issue represents an **implementation plan** — a set of task issues organized into dependency waves. When you kickstart this issue with `@claude` (or assign it to someone), the orchestrator will:
+        A feature issue represents an **implementation plan** — a set of task issues organized into dependency waves. When you kickstart this issue with `/agents start` (or assign it to someone), the orchestrator will:
 
         1. Create a `feature/<this-issue-number>` branch from `main`
         2. Dispatch the first wave of tasks (one task worker per issue)
@@ -92,6 +92,6 @@ body:
       value: |
         ---
 
-        **After creating this issue:** comment `@claude` on it (or assign it) to kickstart the orchestration loop.
+        **After creating this issue:** comment `/agents start` on it (or assign it) to kickstart the orchestration loop.
 
         **Priorities:** tasks labeled `priority:P0` are auto-merged. Others may require human review depending on your branch protection rules.

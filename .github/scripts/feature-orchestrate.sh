@@ -63,7 +63,7 @@ report_failure() {
 
 - **Run:** https://github.com/$REPO/actions/runs/${GITHUB_RUN_ID:-unknown}
 - **Event:** $GITHUB_EVENT_NAME
-- **Action needed:** Comment \`@claude\` on this issue to retry." 2>/dev/null || true
+- **Action needed:** Comment \`/agents start\` on this issue to retry." 2>/dev/null || true
   fi
   exit $exit_code
 }
@@ -247,7 +247,7 @@ fi
 
 # Kickstart-time side effect: drop the `draft` label if the plan-agent left
 # it on the feature issue. Once the orchestrator has committed to running,
-# `@plan-agent` revisions should be blocked — removing `draft` does that
+# `/agents plan` revisions should be blocked — removing `draft` does that
 # via the claude-plan.yml trigger filter. Silent no-op for manually-
 # authored feature issues that never had `draft`.
 gh issue edit "$FEATURE" --remove-label draft 2>/dev/null || true
@@ -442,8 +442,8 @@ for t in $NEXT_TASKS; do
 
   # Post informational comment on task issue (visible trail for humans).
   # NOTE: this comment does NOT trigger the task worker — GITHUB_TOKEN comments
-  # are silent to workflow events. The @claude mention is only for human readers.
-  COMMENT="@claude Implement this issue.
+  # are silent to workflow events. The assignment comment is informational.
+  COMMENT="Task dispatched. Implementing this issue.
 - Base branch: \`$BRANCH\`
 - Target your PR to \`$BRANCH\`
 - Include \`fixes #$t\` in the PR body"
@@ -455,9 +455,13 @@ for t in $NEXT_TASKS; do
 
   # Actually trigger the task worker via workflow_dispatch.
   # This is reliable because workflow_dispatch IS allowed from GITHUB_TOKEN.
-  gh workflow run claude-task.yml --repo "$REPO" \
-    -f issue_number="$t" \
-    -f base_branch="$BRANCH" >/dev/null
+  # $WORKER_MODEL and $WORKER_REASONING are optional — inherited from the
+  # `/agents start` directive if present, otherwise the task worker applies
+  # its own defaults.
+  DISPATCH_ARGS=(-f "issue_number=$t" -f "base_branch=$BRANCH")
+  [[ -n "${WORKER_MODEL:-}" ]]     && DISPATCH_ARGS+=(-f "model=$WORKER_MODEL")
+  [[ -n "${WORKER_REASONING:-}" ]] && DISPATCH_ARGS+=(-f "reasoning=$WORKER_REASONING")
+  gh workflow run claude-task.yml --repo "$REPO" "${DISPATCH_ARGS[@]}" >/dev/null
 
   ASSIGNED+=("#$t")
   log "Assigned and dispatched task #$t"

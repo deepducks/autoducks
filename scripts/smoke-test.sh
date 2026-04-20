@@ -38,7 +38,7 @@
 #   Task 3: Create a second new file
 #
 # This validates:
-# - Feature orchestrator kickstart via @claude comment
+# - Feature orchestrator kickstart via /agents start comment
 # - Task worker triggered by feature's assignment comment
 # - Branch creation under feature/<N>
 # - Auto PR creation and merge
@@ -223,7 +223,7 @@ echo "  Feature: #$FEATURE"
 
 # --- Kickstart ---
 echo "[4/5] Kickstarting the loop..."
-gh issue comment $FEATURE $REPO_ARG --body "@claude Start the smoke test orchestration loop."
+gh issue comment $FEATURE $REPO_ARG --body "/agents start Start the smoke test orchestration loop."
 echo "  Kickstart comment posted."
 
 if [[ "$WAIT" == false ]]; then

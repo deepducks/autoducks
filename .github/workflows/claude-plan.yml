@@ -9,7 +9,7 @@
 #
 #   First pass (Questions Mode)
 #     If the agent is unsure, it posts a numbered questions comment and stops.
-#     The human answers in new comments, re-mentions @plan-agent, the agent
+#     The human answers in new comments, runs `/agents plan` again, the agent
 #     sees the full conversation and can now produce a plan.
 #
 #   First pass (Plan Mode)
@@ -22,8 +22,8 @@
 #     posts a visible error comment and fails the job.
 #
 #   Revision
-#     The human comments change requests on a `feature+draft` issue and mentions
-#     @plan-agent again. The agent sees conversation.md (current plan +
+#     The human comments change requests on a `feature+draft` issue and runs
+#     `/agents plan` again. The agent sees conversation.md (current plan +
 #     existing task bodies + recent comments). To preserve a task, it uses
 #     its real issue number in the YAML; to introduce one, it uses a fresh
 #     Tn placeholder; to drop one, it omits the number. Bash reconciles
@@ -32,27 +32,28 @@
 #     close`. No LLM diffing.
 #
 #   Approval
-#     @claude on the feature issue kickstarts orchestration and removes `draft`.
+#     `/agents start` on the feature issue kickstarts orchestration and
+#     removes `draft`.
 #
 # TRIGGER
 # -------
-# `@plan-agent` on an issue that is NOT a task (`priority:P*`) AND is either:
+# `/agents plan` on an issue that is NOT a task (`priority:P*`) AND is either:
 #   - not yet planned (no `feature` label) — first pass, or
 #   - planned but still draft (`feature`+`draft`) — revision.
 # Kickstarted plans (`feature` without `draft`) are blocked.
 #
 # DIRECTIVE SYNTAX (optional, in the comment)
 # -------------------------------------------
-#   @plan-agent [model] [reasoning]
+#   /agents plan [model] [reasoning]
 #
 # - model:     opus | sonnet | haiku                (default: opus)
 # - reasoning: off | low | medium | high | max      (default: high)
 #
 # Examples:
-#   @plan-agent                     → opus + high thinking
-#   @plan-agent sonnet              → sonnet + high thinking
-#   @plan-agent opus max            → opus + ultrathink
-#   @plan-agent haiku off           → haiku, no extended thinking
+#   /agents plan                    → opus + high thinking
+#   /agents plan sonnet             → sonnet + high thinking
+#   /agents plan opus max           → opus + ultrathink
+#   /agents plan haiku off          → haiku, no extended thinking
 #
 # Reasoning is applied via Claude Code's magic phrases ("think hard",
 # "think very hard", "ultrathink") injected into the plan agent prompt.
@@ -92,7 +93,7 @@ jobs:
     # are always blocked. Kickstarted plans (feature without draft) are blocked.
     if: >
       github.event.issue.pull_request == null
-      && contains(github.event.comment.body, '@plan-agent')
+      && startsWith(github.event.comment.body, '/agents plan')
       && !contains(toJSON(github.event.issue.labels.*.name), 'priority:P')
       && (
         !contains(toJSON(github.event.issue.labels.*.name), 'feature')
@@ -100,65 +101,33 @@ jobs:
       )
 
     steps:
-      # --- Extract context + parse directive (model + reasoning) ---
-      # Also determines whether this is a first-pass or a revision invocation
-      # by checking the issue's current labels.
+      # --- Checkout so we can call the shared parse-directive.sh ---
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # --- Parse /agents directive (command, model, reasoning, think_phrase) ---
+      - name: Parse directive
+        id: directive
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: .github/scripts/parse-directive.sh >> "$GITHUB_OUTPUT"
+
+      # --- Extract context (issue number, commenter, revision detection) ---
       - name: Extract context
         id: feature
         env:
-          COMMENT_BODY: ${{ github.event.comment.body }}
-          ISSUE_NUM: ${{ github.event.issue.number }}
-          COMMENTER: ${{ github.event.comment.user.login }}
           ISSUE_LABELS: ${{ toJSON(github.event.issue.labels.*.name) }}
         run: |
-          DIRECTIVE=$(echo "$COMMENT_BODY" | grep -oE '@plan-agent.*' | head -1 || echo "@plan-agent")
-          read -ra TOKENS <<< "$DIRECTIVE"
-
-          MODEL="claude-opus-4-7"
-          REASONING="high"
-
-          for tok in "${TOKENS[@]:1}"; do
-            # Lowercase (portable — avoids bash 4 ${tok,,}) and strip punctuation
-            t=$(echo "$tok" | tr '[:upper:]' '[:lower:]' | tr -d ',.!?:;')
-            case "$t" in
-              opus)                    MODEL="claude-opus-4-7" ;;
-              sonnet)                  MODEL="claude-sonnet-4-6" ;;
-              haiku)                   MODEL="claude-haiku-4-5-20251001" ;;
-              off|none|no-think)       REASONING="off" ;;
-              low)                     REASONING="low" ;;
-              med|medium)              REASONING="medium" ;;
-              high)                    REASONING="high" ;;
-              max|ultra|ultrathink)    REASONING="max" ;;
-            esac
-          done
-
-          case "$REASONING" in
-            off)    THINK_PHRASE="" ;;
-            low)    THINK_PHRASE="Think before writing." ;;
-            medium) THINK_PHRASE="Think hard before writing." ;;
-            high)   THINK_PHRASE="Think very hard before writing." ;;
-            max)    THINK_PHRASE="Ultrathink — take extensive time to reason before writing." ;;
-          esac
-
-          # Revision detection: both `feature` AND `draft` labels present means
-          # the plan was already written and this invocation is a refinement.
           IS_REVISION="false"
           if echo "$ISSUE_LABELS" | grep -q '"feature"' && echo "$ISSUE_LABELS" | grep -q '"draft"'; then
             IS_REVISION="true"
           fi
 
-          echo "Directive: model=$MODEL reasoning=$REASONING is_revision=$IS_REVISION"
+          echo "Directive: model=${{ steps.directive.outputs.model }} reasoning=${{ steps.directive.outputs.reasoning }} is_revision=$IS_REVISION"
 
-          echo "issue_number=$ISSUE_NUM" >> "$GITHUB_OUTPUT"
-          echo "commenter=$COMMENTER" >> "$GITHUB_OUTPUT"
-          echo "model=$MODEL" >> "$GITHUB_OUTPUT"
-          echo "reasoning=$REASONING" >> "$GITHUB_OUTPUT"
-          echo "think_phrase=$THINK_PHRASE" >> "$GITHUB_OUTPUT"
+          echo "issue_number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          echo "commenter=${{ github.event.comment.user.login }}" >> "$GITHUB_OUTPUT"
           echo "is_revision=$IS_REVISION" >> "$GITHUB_OUTPUT"
-
-      # --- Checkout so the plan agent can explore the codebase ---
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
       # --- Fetch the feature request body to a local file ---
       - name: Fetch issue body
@@ -264,7 +233,7 @@ jobs:
       # --- Load the plan-agent prompt into an env var ---
       - name: Load prompts
         env:
-          THINK_PHRASE: ${{ steps.feature.outputs.think_phrase }}
+          THINK_PHRASE: ${{ steps.directive.outputs.think_phrase }}
         run: |
           DELIM="___CLAUDE_PROMPT_EOF___"
 
@@ -282,7 +251,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--model ${{ steps.feature.outputs.model }} --allowedTools Read,Glob,Grep,Write"
+          claude_args: "--model ${{ steps.directive.outputs.model }} --allowedTools Read,Glob,Grep,Write"
           allowed_bots: "claude[bot],github-actions[bot]"
           prompt: ${{ env.PLAN_PROMPT }}
 
@@ -319,7 +288,7 @@ jobs:
 
           $QBODY
 
-          @$COMMENTER — please reply to these in new comments, then re-mention \`@plan-agent\` (with or without a directive) and I'll pick up the thread."
+          @$COMMENTER — please reply to these in new comments, then re-mention \`/agents plan\` (with or without a directive) and I'll pick up the thread."
             echo "mode=questions" >> "$GITHUB_OUTPUT"
           else
             echo "Plan Mode: continuing to parser."
@@ -340,7 +309,7 @@ jobs:
       - name: Rebuild prompt with parse error
         if: steps.mode.outputs.mode == 'plan' && steps.parse.outcome == 'failure'
         env:
-          THINK_PHRASE: ${{ steps.feature.outputs.think_phrase }}
+          THINK_PHRASE: ${{ steps.directive.outputs.think_phrase }}
         run: |
           DELIM="___CLAUDE_PROMPT_EOF___"
           PLAN=$(cat .github/prompts/plan-agent.md)
@@ -364,7 +333,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--model ${{ steps.feature.outputs.model }} --allowedTools Read,Glob,Grep,Write"
+          claude_args: "--model ${{ steps.directive.outputs.model }} --allowedTools Read,Glob,Grep,Write"
           allowed_bots: "claude[bot],github-actions[bot]"
           prompt: ${{ env.PLAN_RETRY_PROMPT }}
 
@@ -398,7 +367,7 @@ jobs:
 
           $ERROR_BODY
 
-          [View full workflow logs](https://github.com/$REPO/actions/runs/$RUN_ID) for the raw plan body. Re-mention \`@plan-agent\` to try again."
+          [View full workflow logs](https://github.com/$REPO/actions/runs/$RUN_ID) for the raw plan body. Re-mention \`/agents plan\` to try again."
           exit 1
 
       # --- Deterministic reconciliation: create / update / close tasks ---
@@ -589,8 +558,8 @@ jobs:
           ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
           COMMENTER: ${{ steps.feature.outputs.commenter }}
           IS_REVISION: ${{ steps.feature.outputs.is_revision }}
-          MODEL: ${{ steps.feature.outputs.model }}
-          REASONING: ${{ steps.feature.outputs.reasoning }}
+          MODEL: ${{ steps.directive.outputs.model }}
+          REASONING: ${{ steps.directive.outputs.reasoning }}
           CREATED: ${{ steps.finalize.outputs.created }}
           UPDATED: ${{ steps.finalize.outputs.updated }}
           UNCHANGED: ${{ steps.finalize.outputs.unchanged }}
@@ -601,13 +570,13 @@ jobs:
 
           _Revised with \`${MODEL}\` at reasoning \`${REASONING}\`._
 
-          **Next step:** re-review the plan above. Comment \`@claude\` to kickstart, or mention \`@plan-agent\` again for another revision."
+          **Next step:** re-review the plan above. Comment \`/agents start\` to kickstart, or mention \`/agents plan\` again for another revision."
           else
             gh issue comment "$ISSUE_NUM" --body "@$COMMENTER — Plan ready. Created **${CREATED}** task issues; this issue is labeled \`feature\`/\`draft\` and assigned to you.
 
           _Planned with \`${MODEL}\` at reasoning \`${REASONING}\`._
 
-          **Next step:** review the plan in the issue body above. When you're ready, comment \`@claude\` on this issue to kickstart the orchestration loop. (Or mention \`@plan-agent\` again with change requests to revise.)"
+          **Next step:** review the plan in the issue body above. When you're ready, comment \`/agents start\` on this issue to kickstart the orchestration loop. (Or mention \`/agents plan\` again with change requests to revise.)"
           fi
 
       # --- Failure notification (generic fallback — the fail_parse step posts its own detailed comment) ---

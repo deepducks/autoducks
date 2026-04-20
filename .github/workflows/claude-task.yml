@@ -31,10 +31,11 @@
 #
 # TRIGGERS
 # --------
-# 1. workflow_dispatch — called by the feature orchestrator with issue_number
-#    and base_branch inputs. Primary trigger for autonomous loop execution.
-# 2. issue_comment — @claude comment on a non-feature issue. Manual override /
-#    retry path. Excludes `@claude fix` (handled by claude-fix.yml).
+# 1. workflow_dispatch — called by the feature orchestrator with issue_number,
+#    base_branch, and optional model/reasoning inputs. Primary trigger for
+#    autonomous loop execution.
+# 2. issue_comment — `/agents work [model] [reasoning]` on a non-feature issue.
+#    Manual override / retry path.
 #
 # BRANCH NAMING
 # -------------
@@ -66,6 +67,16 @@ on:
         description: 'Base branch (e.g. feature/17)'
         required: true
         type: string
+      model:
+        description: 'Model override'
+        required: false
+        type: string
+        default: claude-sonnet-4-6
+      reasoning:
+        description: 'Reasoning level (off | low | medium | high | max)'
+        required: false
+        type: string
+        default: high
 
 jobs:
   execute:
@@ -74,12 +85,25 @@ jobs:
 
     if: >
       github.event_name == 'workflow_dispatch'
-      || (contains(github.event.comment.body, '@claude')
-          && !contains(toJSON(github.event.issue.labels.*.name), 'feature')
-          && !contains(github.event.comment.body, '@claude fix'))
+      || (startsWith(github.event.comment.body, '/agents work')
+          && !contains(toJSON(github.event.issue.labels.*.name), 'feature'))
 
     steps:
-      # --- Determine issue number and base branch (deterministic) ---
+      # --- Checkout early so parse-directive.sh is available ---
+      - name: Checkout repository (shallow, for the parser script)
+        uses: actions/checkout@v4
+
+      # --- Parse /agents directive (only relevant on issue_comment trigger) ---
+      - name: Parse directive
+        id: directive
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: .github/scripts/parse-directive.sh >> "$GITHUB_OUTPUT"
+
+      # --- Determine issue number, base branch, model (deterministic) ---
+      # On workflow_dispatch, model/reasoning come from inputs (set by the
+      # feature orchestrator). On issue_comment, they come from the parsed
+      # /agents work directive.
       - name: Extract context
         id: feature
         env:
@@ -87,19 +111,29 @@ jobs:
           COMMENT_BODY: ${{ github.event.comment.body }}
           INPUT_ISSUE: ${{ github.event.inputs.issue_number }}
           INPUT_BASE: ${{ github.event.inputs.base_branch }}
+          INPUT_MODEL: ${{ github.event.inputs.model }}
+          INPUT_REASONING: ${{ github.event.inputs.reasoning }}
           COMMENT_ISSUE: ${{ github.event.issue.number }}
+          DIRECTIVE_MODEL: ${{ steps.directive.outputs.model }}
+          DIRECTIVE_REASONING: ${{ steps.directive.outputs.reasoning }}
         run: |
           if [[ "$EVENT" == "workflow_dispatch" ]]; then
             ISSUE_NUM="$INPUT_ISSUE"
             BASE_BRANCH="$INPUT_BASE"
+            MODEL="${INPUT_MODEL:-claude-sonnet-4-6}"
+            REASONING="${INPUT_REASONING:-high}"
           else
             ISSUE_NUM="$COMMENT_ISSUE"
             BASE_BRANCH=$(echo "$COMMENT_BODY" | grep -oP 'Base branch: `\K[^`]+' || echo "main")
+            MODEL="$DIRECTIVE_MODEL"
+            REASONING="$DIRECTIVE_REASONING"
           fi
           FEATURE_NUM=$(echo "$BASE_BRANCH" | grep -oP '\d+' || echo "0")
           echo "issue_number=$ISSUE_NUM" >> "$GITHUB_OUTPUT"
           echo "base_branch=$BASE_BRANCH" >> "$GITHUB_OUTPUT"
           echo "feature_number=$FEATURE_NUM" >> "$GITHUB_OUTPUT"
+          echo "model=$MODEL" >> "$GITHUB_OUTPUT"
+          echo "reasoning=$REASONING" >> "$GITHUB_OUTPUT"
 
       # --- Wait for base branch visibility (replication lag) ---
       - name: Wait for base branch visibility
@@ -169,7 +203,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--model claude-sonnet-4-6 --allowedTools Read,Glob,Grep,Write,Edit,Bash"
+          claude_args: "--model ${{ steps.feature.outputs.model }} --allowedTools Read,Glob,Grep,Write,Edit,Bash"
           allowed_bots: "claude[bot],github-actions[bot]"
           prompt: ${{ env.TASK_PROMPT }}
 
@@ -260,9 +294,9 @@ jobs:
             gh issue comment "$FEATURE_NUM" --body "⚠️ **Task Worker Failed** — Issue #${ISSUE_NUM}
 
           - **Run:** https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}
-          - **Action needed:** Comment \`@claude fix\` on issue #${ISSUE_NUM} to retry."
+          - **Action needed:** Comment \`/agents fix\` on issue #${ISSUE_NUM} to retry."
           fi
 
           gh issue comment "$ISSUE_NUM" --body "⚠️ **Task worker failed.** [View logs](https://github.com/${{ github.repository }}/actions/runs/${RUN_ID})
 
-          To retry with fix context, comment \`@claude fix\` on this issue."
+          To retry with fix context, comment \`/agents fix\` on this issue."

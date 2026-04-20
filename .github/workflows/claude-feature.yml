@@ -16,10 +16,14 @@
 #
 # TRIGGERS
 # --------
-# 1. issue_comment — @claude comment on a feature-labeled issue (kickstart / retry)
-# 2. issues assigned — someone assigns a feature-labeled issue (UX alternative to commenting)
-# 3. pull_request closed — human merges a PR into feature/* (fallback; GITHUB_TOKEN merges are silent)
-# 4. workflow_dispatch — called by task worker post-step after a successful merge (primary loop mechanism)
+# 1. issue_comment — `/agents start [model] [reasoning]` on a feature-labeled
+#    issue (kickstart / retry). Accepts optional model + reasoning args that
+#    are propagated to downstream task workers via workflow_dispatch inputs.
+# 2. issues assigned — someone assigns a feature-labeled issue (UX alternative)
+# 3. pull_request closed — human merges a PR into feature/* (fallback;
+#    GITHUB_TOKEN merges are silent)
+# 4. workflow_dispatch — called by task worker post-step after a successful
+#    merge (primary loop mechanism)
 #
 # BENEFITS vs the LLM version
 # ---------------------------
@@ -65,7 +69,7 @@ jobs:
         && github.event.pull_request.merged == true
         && startsWith(github.event.pull_request.base.ref, 'feature/'))
       || (github.event_name == 'issue_comment'
-          && contains(github.event.comment.body, '@claude')
+          && startsWith(github.event.comment.body, '/agents start')
           && contains(toJSON(github.event.issue.labels.*.name), 'feature'))
       || (github.event_name == 'issues'
           && github.event.action == 'assigned'
@@ -74,6 +78,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # --- Parse /agents start directive so task workers can inherit model/reasoning ---
+      - name: Parse directive
+        id: directive
+        if: github.event_name == 'issue_comment'
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: .github/scripts/parse-directive.sh >> "$GITHUB_OUTPUT"
 
       - name: Run feature orchestrator script
         env:
@@ -84,4 +96,6 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           GITHUB_RUN_ID: ${{ github.run_id }}
+          WORKER_MODEL: ${{ steps.directive.outputs.model }}
+          WORKER_REASONING: ${{ steps.directive.outputs.reasoning }}
         run: ./.github/scripts/feature-orchestrate.sh

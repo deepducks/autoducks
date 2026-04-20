@@ -6,8 +6,9 @@
 # -------
 # Semi-automated recovery for failed task workers. When a task worker fails
 # (timeout, code errors, conflict resolution failure), a human or automation
-# can comment `@claude fix` on the failed task issue to retry — this time
-# with visibility into the prior partial branch and failure context.
+# can comment `/agents fix [model] [reasoning]` on the failed task issue to
+# retry — this time with visibility into the prior partial branch and failure
+# context.
 #
 # SEPARATION OF CONCERNS
 # ----------------------
@@ -32,9 +33,8 @@
 #
 # TRIGGERS
 # --------
-# - issue_comment with `@claude fix` on a non-feature issue
-# - (The task worker explicitly excludes `@claude fix` from its own triggers
-#   to avoid double execution.)
+# - issue_comment with `/agents fix [model] [reasoning]` on a non-feature
+#   issue. Accepts optional model + reasoning args just like `/agents plan`.
 #
 # TIMEOUT: 60 minutes
 # =============================================================================
@@ -58,10 +58,21 @@ jobs:
     timeout-minutes: 60
 
     if: >
-      contains(github.event.comment.body, '@claude fix')
+      startsWith(github.event.comment.body, '/agents fix')
       && !contains(toJSON(github.event.issue.labels.*.name), 'feature')
 
     steps:
+      # --- Checkout early so parse-directive.sh is available ---
+      - name: Checkout repository (shallow, for the parser script)
+        uses: actions/checkout@v4
+
+      # --- Parse /agents fix directive (model + reasoning) ---
+      - name: Parse directive
+        id: directive
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: .github/scripts/parse-directive.sh >> "$GITHUB_OUTPUT"
+
       # --- Gather context from issue history (deterministic) ---
       - name: Extract context
         id: feature
@@ -157,7 +168,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--model claude-sonnet-4-6 --allowedTools Read,Glob,Grep,Write,Edit,Bash"
+          claude_args: "--model ${{ steps.directive.outputs.model }} --allowedTools Read,Glob,Grep,Write,Edit,Bash"
           allowed_bots: "claude[bot],github-actions[bot]"
           prompt: ${{ env.FIX_PROMPT }}
 

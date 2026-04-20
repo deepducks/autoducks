@@ -56,6 +56,7 @@ FILE_PAIRS=(
   ".github/workflows/claude-plan.yml:.github/workflows/claude-plan.yml"
   ".github/scripts/feature-orchestrate.sh:.github/scripts/feature-orchestrate.sh"
   ".github/scripts/parse-plan.py:.github/scripts/parse-plan.py"
+  ".github/scripts/parse-directive.sh:.github/scripts/parse-directive.sh"
   ".github/prompts/plan-agent.md:.github/prompts/plan-agent.md"
   ".github/prompts/task-worker.md:.github/prompts/task-worker.md"
   ".github/prompts/fix-agent.md:.github/prompts/fix-agent.md"
