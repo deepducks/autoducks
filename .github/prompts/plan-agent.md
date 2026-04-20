@@ -41,7 +41,7 @@ waves:
 
 ## Tasks
 
-### T1 - <short title> `priority:P0`  <!-- SABOTAGE: hyphen instead of em-dash -->
+### T1 — <short title> `priority:P0`
 
 **Summary:** <one sentence. If the draft specifies the exact shape of artifacts this task produces (types, classes, signatures, constants, error messages), inline them verbatim as a code block right after the summary sentence — do not translate spec into prose bullets.>
 
@@ -55,7 +55,7 @@ waves:
 
 **References:** <optional — file paths, docs — or omit this line>
 
-### T2 - <short title> `priority:P0`  <!-- SABOTAGE: hyphen instead of em-dash -->
+### T2 — <short title> `priority:P0`
 ... same structure ...
 
 ## Progress
