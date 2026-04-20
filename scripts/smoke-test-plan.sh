@@ -184,9 +184,14 @@ echo "[4/7] Waiting for plan-agent run..."
 # uniquely identify it.
 PLAN_WAITED=0
 PLAN_RUN_ID=""
+# Every /agents comment fires ALL 6 workflows on this repo; most skip
+# because their if: guard doesn't match. Filter out conclusion=skipped
+# so we grab the one that's actually running /agents plan.
+CUTOFF=$(date -u -v-2M '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -d '-2 min' '+%Y-%m-%dT%H:%M:%SZ')
 while [[ $PLAN_WAITED -lt 60 ]]; do
-  PLAN_RUN_ID=$(gh run list --workflow="Claude Plan Agent" --limit 3 \
-    --json databaseId,createdAt --jq "[.[] | select(.createdAt > \"$(date -u -v-2M '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -d '-2 min' '+%Y-%m-%dT%H:%M:%SZ')\")] | .[0].databaseId // empty" 2>/dev/null || echo "")
+  PLAN_RUN_ID=$(gh run list --workflow="Claude Plan Agent" --limit 5 \
+    --json databaseId,createdAt,conclusion \
+    --jq "[.[] | select(.createdAt > \"$CUTOFF\" and .conclusion != \"skipped\")] | .[0].databaseId // empty" 2>/dev/null || echo "")
   [[ -n "$PLAN_RUN_ID" ]] && break
   sleep 5
   PLAN_WAITED=$((PLAN_WAITED + 5))
@@ -335,8 +340,10 @@ echo "  Revert comment posted (id: ${REVERT_COMMENT_ID:-unknown})"
 
 # Wait for revert run
 sleep 5
-REVERT_RUN_ID=$(gh run list --workflow="Claude Agents — Revert" --limit 3 \
-  --json databaseId,createdAt --jq "[.[] | select(.createdAt > \"$(date -u -v-1M '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -d '-1 min' '+%Y-%m-%dT%H:%M:%SZ')\")] | .[0].databaseId // empty" 2>/dev/null || echo "")
+REVERT_CUTOFF=$(date -u -v-1M '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -d '-1 min' '+%Y-%m-%dT%H:%M:%SZ')
+REVERT_RUN_ID=$(gh run list --workflow="Claude Agents — Revert" --limit 5 \
+  --json databaseId,createdAt,conclusion \
+  --jq "[.[] | select(.createdAt > \"$REVERT_CUTOFF\" and .conclusion != \"skipped\")] | .[0].databaseId // empty" 2>/dev/null || echo "")
 
 if [[ -z "$REVERT_RUN_ID" ]]; then
   fail "revert run did not appear"
