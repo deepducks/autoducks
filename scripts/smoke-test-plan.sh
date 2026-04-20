@@ -246,23 +246,32 @@ else
   fail "Feature body unchanged — plan-agent did not write the plan"
 fi
 
-# Extract task numbers from YAML block
+# Extract task numbers from YAML block. Use a grep-only approach so we
+# don't require yq on the runner (the workflow itself does use yq, but
+# this smoke-test might run anywhere).
 YAML_BLOCK=$(echo "$CURRENT_BODY" | awk '/^```yaml[[:space:]]*$/{flag=1;next}/^```[[:space:]]*$/{flag=0}flag')
 TASK_NUMBERS=()
 if [[ -n "$YAML_BLOCK" ]]; then
+  # Match `tasks: [N, M, ...]` lines and extract every integer token.
   while IFS= read -r n; do
-    [[ "$n" =~ ^[0-9]+$ ]] && TASK_NUMBERS+=("$n")
-  done < <(echo "$YAML_BLOCK" | yq '.waves[].tasks[]' 2>/dev/null | grep -E '^[0-9]+$' || true)
+    [[ -n "$n" ]] && TASK_NUMBERS+=("$n")
+  done < <(echo "$YAML_BLOCK" | grep -oE 'tasks:[[:space:]]*\[[^]]*\]' | grep -oE '[0-9]+' || true)
 fi
 
-if [[ ${#TASK_NUMBERS[@]} -ge 1 ]]; then
+if [[ ${#TASK_NUMBERS[@]:-0} -ge 1 ]]; then
   pass "Plan YAML contains ${#TASK_NUMBERS[@]} task number(s): ${TASK_NUMBERS[*]}"
 else
   fail "Plan YAML has no task numbers — splitter output empty?"
 fi
 
+if [[ ${#TASK_NUMBERS[@]:-0} -eq 0 ]]; then
+  echo "[!] No tasks to assert on — skipping per-task checks"
+  TASK_NUMBERS=()
+fi
+
 # Each task has priority:P* label
-for t in "${TASK_NUMBERS[@]}"; do
+for t in "${TASK_NUMBERS[@]:-}"; do
+  [[ -z "$t" ]] && continue
   TLABELS=$(gh issue view $t $REPO_ARG --json labels --jq '[.labels[].name] | join(",")')
   if echo "$TLABELS" | grep -qE "priority:P"; then
     pass "Task #$t has priority label ($TLABELS)"
@@ -279,7 +288,8 @@ else
   warn "Issue type on #$FEATURE = '${FEATURE_TYPE:-none}' (Feature type may not be configured at the org)"
 fi
 
-for t in "${TASK_NUMBERS[@]}"; do
+for t in "${TASK_NUMBERS[@]:-}"; do
+  [[ -z "$t" ]] && continue
   T_TYPE=$(gh issue view $t $REPO_ARG --json issueType --jq '.issueType.name // empty' 2>/dev/null || echo "")
   if [[ "$T_TYPE" == "Task" ]]; then
     pass "Issue type on #$t = Task"
@@ -292,12 +302,13 @@ done
 SUB_ISSUES=$(gh api "repos/$REPO/issues/$FEATURE/sub_issues" --jq '[.[].number]' 2>/dev/null || echo "[]")
 if [[ "$SUB_ISSUES" != "[]" ]]; then
   MATCHED=0
-  for t in "${TASK_NUMBERS[@]}"; do
+  for t in "${TASK_NUMBERS[@]:-}"; do
+    [[ -z "$t" ]] && continue
     if echo "$SUB_ISSUES" | jq -e "index($t)" >/dev/null 2>&1; then
       MATCHED=$((MATCHED + 1))
     fi
   done
-  if [[ $MATCHED -eq ${#TASK_NUMBERS[@]} ]]; then
+  if [[ $MATCHED -eq ${#TASK_NUMBERS[@]:-0} ]]; then
     pass "All ${#TASK_NUMBERS[@]} tasks linked as sub-issues of #$FEATURE"
   else
     warn "Only $MATCHED/${#TASK_NUMBERS[@]} tasks linked as sub-issues (API partial)"
@@ -354,7 +365,8 @@ echo ""
 echo "[7/7] Asserting revert state..."
 
 # Tasks should be closed
-for t in "${TASK_NUMBERS[@]}"; do
+for t in "${TASK_NUMBERS[@]:-}"; do
+  [[ -z "$t" ]] && continue
   T_STATE=$(gh issue view $t $REPO_ARG --json state --jq '.state')
   if [[ "$T_STATE" == "CLOSED" ]]; then
     pass "Task #$t closed"
