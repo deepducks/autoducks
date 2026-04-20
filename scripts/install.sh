@@ -67,6 +67,8 @@ FILE_PAIRS=(
   ".github/ISSUE_TEMPLATE/task-issue.yml:.github/ISSUE_TEMPLATE/task-issue.yml"
   "scripts/setup.sh:.github/scripts/setup.sh"
   "scripts/install.sh:.github/scripts/install.sh"
+  "scripts/smoke-test.sh:scripts/smoke-test.sh"
+  "scripts/smoke-test-plan.sh:scripts/smoke-test-plan.sh"
 )
 
 for pair in "${FILE_PAIRS[@]}"; do
