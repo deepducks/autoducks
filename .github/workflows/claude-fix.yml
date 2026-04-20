@@ -21,7 +21,7 @@
 #   - Commit and push whatever the agent wrote
 #   - Create or reuse PR
 #   - Merge PR
-#   - Trigger meta orchestrator
+#   - Trigger feature orchestrator
 #   - Notify result
 #
 # LLM (Claude agent):
@@ -32,7 +32,7 @@
 #
 # TRIGGERS
 # --------
-# - issue_comment with `@claude fix` on a non-meta issue
+# - issue_comment with `@claude fix` on a non-feature issue
 # - (The task worker explicitly excludes `@claude fix` from its own triggers
 #   to avoid double execution.)
 #
@@ -46,7 +46,7 @@ permissions:
   pull-requests: write
   issues: write
   id-token: write
-  actions: write  # required to call `gh workflow run` on the meta workflow
+  actions: write  # required to call `gh workflow run` on the feature workflow
 
 on:
   issue_comment:
@@ -59,12 +59,12 @@ jobs:
 
     if: >
       contains(github.event.comment.body, '@claude fix')
-      && !contains(toJSON(github.event.issue.labels.*.name), 'meta')
+      && !contains(toJSON(github.event.issue.labels.*.name), 'feature')
 
     steps:
       # --- Gather context from issue history (deterministic) ---
       - name: Extract context
-        id: meta
+        id: feature
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUM: ${{ github.event.issue.number }}
@@ -72,7 +72,7 @@ jobs:
           # Find base branch from orchestrator's original assignment comment
           COMMENTS=$(gh api "repos/${{ github.repository }}/issues/${ISSUE_NUM}/comments" --jq '.[].body')
           BASE_BRANCH=$(echo "$COMMENTS" | grep -oP 'Base branch: `\K[^`]+' | tail -1 || echo "main")
-          META_NUM=$(echo "$BASE_BRANCH" | grep -oP '\d+' || echo "0")
+          FEATURE_NUM=$(echo "$BASE_BRANCH" | grep -oP '\d+' || echo "0")
 
           # Find existing partial branch pushed by the failed task worker
           EXISTING_BRANCH=$(gh api "repos/${{ github.repository }}/git/matching-refs/heads/claude/" \
@@ -85,7 +85,7 @@ jobs:
 
           echo "issue_number=$ISSUE_NUM" >> "$GITHUB_OUTPUT"
           echo "base_branch=$BASE_BRANCH" >> "$GITHUB_OUTPUT"
-          echo "meta_number=$META_NUM" >> "$GITHUB_OUTPUT"
+          echo "feature_number=$FEATURE_NUM" >> "$GITHUB_OUTPUT"
           echo "existing_branch=$EXISTING_BRANCH" >> "$GITHUB_OUTPUT"
           echo "failed_run=$FAILED_RUN" >> "$GITHUB_OUTPUT"
 
@@ -97,7 +97,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.meta.outputs.existing_branch || steps.meta.outputs.base_branch }}
+          ref: ${{ steps.feature.outputs.existing_branch || steps.feature.outputs.base_branch }}
           fetch-depth: 0
 
       # --- Prepare task branch and context files (deterministic) ---
@@ -105,10 +105,10 @@ jobs:
         id: prep
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          META_NUM: ${{ steps.meta.outputs.meta_number }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
-          EXISTING_BRANCH: ${{ steps.meta.outputs.existing_branch }}
-          BASE_BRANCH: ${{ steps.meta.outputs.base_branch }}
+          FEATURE_NUM: ${{ steps.feature.outputs.feature_number }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
+          EXISTING_BRANCH: ${{ steps.feature.outputs.existing_branch }}
+          BASE_BRANCH: ${{ steps.feature.outputs.base_branch }}
         run: |
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
@@ -120,7 +120,7 @@ jobs:
           else
             # No prior attempt — create a fresh branch from the base
             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-            TASK_BRANCH="claude/${META_NUM}-issue-${ISSUE_NUM}-fix-${TIMESTAMP}"
+            TASK_BRANCH="claude/${FEATURE_NUM}-issue-${ISSUE_NUM}-fix-${TIMESTAMP}"
             git checkout -b "$TASK_BRANCH"
             echo "Created new branch: $TASK_BRANCH"
           fi
@@ -166,7 +166,7 @@ jobs:
         if: success()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
           TASK_BRANCH: ${{ steps.prep.outputs.task_branch }}
           REPO: ${{ github.repository }}
         run: |
@@ -197,8 +197,8 @@ jobs:
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
-          BASE_BRANCH: ${{ steps.meta.outputs.base_branch }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
+          BASE_BRANCH: ${{ steps.feature.outputs.base_branch }}
           TASK_BRANCH: ${{ steps.prep.outputs.task_branch }}
         run: |
           # Check if a PR already exists for this branch
@@ -234,16 +234,16 @@ jobs:
           echo "::error::Merge failed — PR may need manual conflict resolution"
           exit 1
 
-      # --- Trigger meta to continue the loop ---
-      - name: Trigger meta to continue loop
+      # --- Trigger feature to continue the loop ---
+      - name: Trigger feature to continue loop
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          META_NUM: ${{ steps.meta.outputs.meta_number }}
+          FEATURE_NUM: ${{ steps.feature.outputs.feature_number }}
         run: |
-          if [ "$META_NUM" != "0" ] && [ -n "$META_NUM" ]; then
-            gh workflow run claude-meta.yml -f meta_issue="$META_NUM"
-            echo "Triggered meta workflow for issue #$META_NUM"
+          if [ "$FEATURE_NUM" != "0" ] && [ -n "$FEATURE_NUM" ]; then
+            gh workflow run claude-feature.yml -f feature_issue="$FEATURE_NUM"
+            echo "Triggered feature workflow for issue #$FEATURE_NUM"
           fi
 
       # --- Always notify the result ---
@@ -251,8 +251,8 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
-          META_NUM: ${{ steps.meta.outputs.meta_number }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
+          FEATURE_NUM: ${{ steps.feature.outputs.feature_number }}
           RUN_ID: ${{ github.run_id }}
           JOB_STATUS: ${{ job.status }}
         run: |
@@ -260,7 +260,7 @@ jobs:
             gh issue comment "$ISSUE_NUM" --body "✅ **Fix agent succeeded.** [View run](https://github.com/${{ github.repository }}/actions/runs/${RUN_ID})"
           else
             gh issue comment "$ISSUE_NUM" --body "❌ **Fix agent also failed.** [View run](https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}) — Manual intervention may be needed."
-            if [ "$META_NUM" != "0" ]; then
-              gh issue comment "$META_NUM" --body "❌ **Fix agent failed** on issue #${ISSUE_NUM}. [View run](https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}) — Manual intervention needed."
+            if [ "$FEATURE_NUM" != "0" ]; then
+              gh issue comment "$FEATURE_NUM" --body "❌ **Fix agent failed** on issue #${ISSUE_NUM}. [View run](https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}) — Manual intervention needed."
             fi
           fi

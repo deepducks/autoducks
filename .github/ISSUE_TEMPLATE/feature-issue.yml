@@ -1,20 +1,20 @@
-name: "Meta Issue (Implementation Plan)"
+name: "Feature Issue (Implementation Plan)"
 description: "Create a multi-wave implementation plan that will be executed autonomously by Claude agents."
-title: "Meta: <short plan name>"
-labels: ["meta"]
+title: "Feature: <short plan name>"
+labels: ["feature"]
 body:
   - type: markdown
     attributes:
       value: |
         ## How this works
 
-        A meta issue represents an **implementation plan** — a set of task issues organized into dependency waves. When you kickstart this issue with `@claude` (or assign it to someone), the orchestrator will:
+        A feature issue represents an **implementation plan** — a set of task issues organized into dependency waves. When you kickstart this issue with `@claude` (or assign it to someone), the orchestrator will:
 
-        1. Create a `meta/<this-issue-number>` branch from `main`
+        1. Create a `feature/<this-issue-number>` branch from `main`
         2. Dispatch the first wave of tasks (one task worker per issue)
-        3. Track progress as tasks are merged into the meta branch
+        3. Track progress as tasks are merged into the feature branch
         4. Advance through waves until everything is done
-        5. Open a final PR: `meta/<N>` → `main`
+        5. Open a final PR: `feature/<N>` → `main`
 
         **Before creating this issue, create the individual task issues first** so you can reference them by number in the YAML plan below.
 

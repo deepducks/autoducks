@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Meta Orchestrator — Deterministic Shell Implementation
+# Feature Orchestrator — Deterministic Shell Implementation
 # =============================================================================
 #
 # PURPOSE
 # -------
-# Advances a meta issue implementation plan. Reads the plan from a YAML block
-# in the meta issue body, checks merged PRs, updates checkboxes, assigns the
+# Advances a feature issue implementation plan. Reads the plan from a YAML block
+# in the feature issue body, checks merged PRs, updates checkboxes, assigns the
 # next ready wave of tasks, and opens the final PR when everything is done.
 #
 # No LLM involved — entirely deterministic.
@@ -16,13 +16,13 @@
 # GH_TOKEN            GitHub token with repo + actions write access
 # GITHUB_EVENT_NAME   workflow_dispatch | issue_comment | issues | pull_request
 # REPO                owner/name
-# META_INPUT          meta issue number (for workflow_dispatch)
+# FEATURE_INPUT          feature issue number (for workflow_dispatch)
 # ISSUE_NUMBER        issue number (for issue_comment / issues events)
 # PR_BASE_REF         base ref (for pull_request events)
 #
-# META ISSUE BODY FORMAT
+# FEATURE ISSUE BODY FORMAT
 # ----------------------
-# The meta issue body uses natural markdown. The parser is lenient:
+# The feature issue body uses natural markdown. The parser is lenient:
 #
 #   ## Wave 1 — Foundation
 #   - [ ] #1 Project Bootstrap `P0`
@@ -51,15 +51,15 @@
 
 set -euo pipefail
 
-log() { echo "[meta] $*" >&2; }
+log() { echo "[feature] $*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
-# Trap failures and notify the meta issue if we know which one
-META=""
+# Trap failures and notify the feature issue if we know which one
+FEATURE=""
 report_failure() {
   local exit_code=$?
-  if [[ -n "$META" ]]; then
-    gh issue comment "$META" --body "⚠️ **Meta orchestrator failed** (exit $exit_code)
+  if [[ -n "$FEATURE" ]]; then
+    gh issue comment "$FEATURE" --body "⚠️ **Feature orchestrator failed** (exit $exit_code)
 
 - **Run:** https://github.com/$REPO/actions/runs/${GITHUB_RUN_ID:-unknown}
 - **Event:** $GITHUB_EVENT_NAME
@@ -70,18 +70,18 @@ report_failure() {
 trap report_failure ERR
 
 # -----------------------------------------------------------------------------
-# 1. Determine meta issue number from event context
+# 1. Determine feature issue number from event context
 # -----------------------------------------------------------------------------
-determine_meta() {
+determine_feature() {
   case "$GITHUB_EVENT_NAME" in
     workflow_dispatch)
-      echo "${META_INPUT:-}"
+      echo "${FEATURE_INPUT:-}"
       ;;
     issue_comment|issues)
       echo "${ISSUE_NUMBER:-}"
       ;;
     pull_request)
-      echo "${PR_BASE_REF:-}" | grep -oP 'meta/\K\d+' || echo ""
+      echo "${PR_BASE_REF:-}" | grep -oP 'feature/\K\d+' || echo ""
       ;;
     *)
       die "Unknown event: $GITHUB_EVENT_NAME"
@@ -89,19 +89,19 @@ determine_meta() {
   esac
 }
 
-META=$(determine_meta)
-[[ -n "$META" ]] || die "Could not determine meta issue number from event"
-log "Meta issue: #$META"
+FEATURE=$(determine_feature)
+[[ -n "$FEATURE" ]] || die "Could not determine feature issue number from event"
+log "Feature issue: #$FEATURE"
 
 # -----------------------------------------------------------------------------
-# 2. Load meta issue and parse markdown wave structure
+# 2. Load feature issue and parse markdown wave structure
 # -----------------------------------------------------------------------------
-ISSUE_JSON=$(gh issue view "$META" --json body,title,labels)
+ISSUE_JSON=$(gh issue view "$FEATURE" --json body,title,labels)
 ISSUE_BODY=$(echo "$ISSUE_JSON" | jq -r '.body')
 ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.title')
-HAS_META_LABEL=$(echo "$ISSUE_JSON" | jq -r '.labels[].name' | grep -qx "meta" && echo "yes" || echo "no")
+HAS_META_LABEL=$(echo "$ISSUE_JSON" | jq -r '.labels[].name' | grep -qx "feature" && echo "yes" || echo "no")
 
-[[ "$HAS_META_LABEL" == "yes" ]] || die "Issue #$META does not have 'meta' label"
+[[ "$HAS_META_LABEL" == "yes" ]] || die "Issue #$FEATURE does not have 'feature' label"
 
 # Parse wave structure. Two formats supported:
 # 1. YAML code block (preferred — explicit and unambiguous):
@@ -187,7 +187,7 @@ else
   [[ -n "$PARSED" ]] && log "Parsed plan from markdown headings"
 fi
 
-[[ -n "$PARSED" ]] || die "Meta issue body has no wave structure. Accepted formats: (1) \`\`\`yaml\`\`\` block with 'waves:' key, or (2) markdown headings like '## Wave 1 — Name' followed by '- [ ] #N' checkbox lines."
+[[ -n "$PARSED" ]] || die "Feature issue body has no wave structure. Accepted formats: (1) \`\`\`yaml\`\`\` block with 'waves:' key, or (2) markdown headings like '## Wave 1 — Name' followed by '- [ ] #N' checkbox lines."
 
 # Build WAVE_NAMES and WAVE_TASKS arrays from parsed output
 declare -a WAVE_NAMES_BY_IDX=()     # index 0-based → name
@@ -212,16 +212,16 @@ while IFS='|' read -r kind idx rest; do
 done <<< "$PARSED"
 
 NUM_WAVES=${#WAVE_NAMES_BY_IDX[@]}
-[[ $NUM_WAVES -gt 0 ]] || die "No waves parsed from meta issue body"
+[[ $NUM_WAVES -gt 0 ]] || die "No waves parsed from feature issue body"
 log "Plan has $NUM_WAVES waves"
 for ((i=0; i<NUM_WAVES; i++)); do
   log "  Wave $((i+1)) [${WAVE_NAMES_BY_IDX[$i]}]: ${WAVE_TASKS_BY_IDX[$i]:-<empty>}"
 done
 
 # -----------------------------------------------------------------------------
-# 3. Ensure meta branch exists
+# 3. Ensure feature branch exists
 # -----------------------------------------------------------------------------
-BRANCH="meta/$META"
+BRANCH="feature/$FEATURE"
 # Use exit code (not output) to check branch existence — more robust than
 # parsing `gh api --jq '.ref'` output, which can return "null" string on 404.
 FIRST_RUN=false
@@ -246,14 +246,14 @@ else
 fi
 
 # Kickstart-time side effect: drop the `draft` label if the plan-agent left
-# it on the meta issue. Once the orchestrator has committed to running,
+# it on the feature issue. Once the orchestrator has committed to running,
 # `@plan-agent` revisions should be blocked — removing `draft` does that
 # via the claude-plan.yml trigger filter. Silent no-op for manually-
-# authored meta issues that never had `draft`.
-gh issue edit "$META" --remove-label draft 2>/dev/null || true
+# authored feature issues that never had `draft`.
+gh issue edit "$FEATURE" --remove-label draft 2>/dev/null || true
 
 # -----------------------------------------------------------------------------
-# 4. Get merged PRs targeting the meta branch → derive done tasks
+# 4. Get merged PRs targeting the feature branch → derive done tasks
 # -----------------------------------------------------------------------------
 MERGED_PRS=$(gh pr list --repo "$REPO" --state merged --base "$BRANCH" --json number,body,title --limit 100)
 
@@ -274,7 +274,7 @@ is_done() {
 }
 
 # -----------------------------------------------------------------------------
-# 5. Update checkboxes in meta issue body
+# 5. Update checkboxes in feature issue body
 # -----------------------------------------------------------------------------
 NEW_BODY="$ISSUE_BODY"
 CHANGED=false
@@ -287,11 +287,11 @@ for t in "${DONE_TASKS[@]}"; do
 done
 
 if [[ "$CHANGED" == "true" ]]; then
-  log "Updating meta issue body with new checkboxes"
+  log "Updating feature issue body with new checkboxes"
   # Use a temp file to handle multiline body safely
   TMPFILE=$(mktemp)
   echo "$NEW_BODY" > "$TMPFILE"
-  gh issue edit "$META" --body-file "$TMPFILE" >/dev/null
+  gh issue edit "$FEATURE" --body-file "$TMPFILE" >/dev/null
   rm -f "$TMPFILE"
   ISSUE_BODY="$NEW_BODY"
 fi
@@ -361,29 +361,29 @@ if $ALL_WAVES_DONE; then
     FINAL_PR="#$EXISTING_FINAL"
   else
     log "Opening final PR $BRANCH → main"
-    # Use `Closes #N` syntax for every task issue and the meta issue itself —
+    # Use `Closes #N` syntax for every task issue and the feature issue itself —
     # GitHub auto-closes them when this PR merges into the default branch.
-    # (Task PRs target `meta/*`, not `main`, so their own `fixes #N` bodies
+    # (Task PRs target `feature/*`, not `main`, so their own `fixes #N` bodies
     # don't auto-close anything. The final PR is the only merge-into-main
     # event, so it must carry all the closure directives.)
     FINAL_BODY=$(cat <<EOF
 ## Summary
 
-All tasks in meta issue #$META are complete:
+All tasks in feature issue #$FEATURE are complete:
 
 $(for t in "${DONE_TASKS[@]}"; do echo "- Closes #$t"; done)
 
-Closes #$META
+Closes #$FEATURE
 
 🎉 Implementation roadmap complete.
 EOF
 )
     FINAL_URL=$(gh pr create --repo "$REPO" --base main --head "$BRANCH" \
-      --title "Meta #$META: $ISSUE_TITLE" --body "$FINAL_BODY")
+      --title "Feature #$FEATURE: $ISSUE_TITLE" --body "$FINAL_BODY")
     FINAL_PR="$FINAL_URL"
   fi
 
-  gh issue comment "$META" --body "## Orchestrator Update — Complete 🎉
+  gh issue comment "$FEATURE" --body "## Orchestrator Update — Complete 🎉
 
 All waves done. Final PR: $FINAL_PR" >/dev/null
   exit 0
@@ -399,7 +399,7 @@ if [[ $NEXT_WAVE -eq -1 ]]; then
     STATUS_LINES+="- $ICON **${WAVE_NAMES[$i]}**: ${WAVE_STATE[$i]}"$'\n'
   done
 
-  gh issue comment "$META" --body "## Orchestrator Update
+  gh issue comment "$FEATURE" --body "## Orchestrator Update
 
 $STATUS_LINES
 Done tasks so far: ${DONE_TASKS[*]:-none}" >/dev/null
@@ -464,7 +464,7 @@ for t in $NEXT_TASKS; do
 done
 
 # -----------------------------------------------------------------------------
-# 9. Post summary on meta issue
+# 9. Post summary on feature issue
 # -----------------------------------------------------------------------------
 SUMMARY=$(cat <<EOF
 ## Orchestrator Update
@@ -490,5 +490,5 @@ done)
 EOF
 )
 
-gh issue comment "$META" --body "$SUMMARY" >/dev/null
+gh issue comment "$FEATURE" --body "$SUMMARY" >/dev/null
 log "Done"

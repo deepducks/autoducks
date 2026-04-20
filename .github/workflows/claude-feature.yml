@@ -1,11 +1,11 @@
 # =============================================================================
-# Claude Meta Orchestrator (Deterministic)
+# Claude Feature Orchestrator (Deterministic)
 # =============================================================================
 #
 # PURPOSE
 # -------
-# Advances a meta issue implementation plan. Reads the plan from a YAML block
-# in the meta issue body, checks merged PRs, updates checkboxes, assigns the
+# Advances a feature issue implementation plan. Reads the plan from a YAML block
+# in the feature issue body, checks merged PRs, updates checkboxes, assigns the
 # next ready wave of tasks, and opens the final PR when everything is done.
 #
 # REFACTORED: previous version used an LLM for orchestration logic, which was
@@ -16,9 +16,9 @@
 #
 # TRIGGERS
 # --------
-# 1. issue_comment — @claude comment on a meta-labeled issue (kickstart / retry)
-# 2. issues assigned — someone assigns a meta-labeled issue (UX alternative to commenting)
-# 3. pull_request closed — human merges a PR into meta/* (fallback; GITHUB_TOKEN merges are silent)
+# 1. issue_comment — @claude comment on a feature-labeled issue (kickstart / retry)
+# 2. issues assigned — someone assigns a feature-labeled issue (UX alternative to commenting)
+# 3. pull_request closed — human merges a PR into feature/* (fallback; GITHUB_TOKEN merges are silent)
 # 4. workflow_dispatch — called by task worker post-step after a successful merge (primary loop mechanism)
 #
 # BENEFITS vs the LLM version
@@ -29,10 +29,10 @@
 # - Easy to debug and reproduce
 # - Idempotent by construction (state is derived from GitHub, not inferred)
 #
-# SCRIPT: .github/scripts/meta-orchestrate.sh
+# SCRIPT: .github/scripts/feature-orchestrate.sh
 # =============================================================================
 
-name: Claude Meta Orchestrator
+name: Claude Feature Orchestrator
 
 permissions:
   contents: write
@@ -49,8 +49,8 @@ on:
     types: [assigned]
   workflow_dispatch:
     inputs:
-      meta_issue:
-        description: 'Meta issue number to orchestrate'
+      feature_issue:
+        description: 'Feature issue number to orchestrate'
         required: true
         type: string
 
@@ -63,25 +63,25 @@ jobs:
       github.event_name == 'workflow_dispatch'
       || (github.event_name == 'pull_request'
         && github.event.pull_request.merged == true
-        && startsWith(github.event.pull_request.base.ref, 'meta/'))
+        && startsWith(github.event.pull_request.base.ref, 'feature/'))
       || (github.event_name == 'issue_comment'
           && contains(github.event.comment.body, '@claude')
-          && contains(toJSON(github.event.issue.labels.*.name), 'meta'))
+          && contains(toJSON(github.event.issue.labels.*.name), 'feature'))
       || (github.event_name == 'issues'
           && github.event.action == 'assigned'
-          && contains(toJSON(github.event.issue.labels.*.name), 'meta'))
+          && contains(toJSON(github.event.issue.labels.*.name), 'feature'))
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run meta orchestrator script
+      - name: Run feature orchestrator script
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           REPO: ${{ github.repository }}
-          META_INPUT: ${{ github.event.inputs.meta_issue }}
+          FEATURE_INPUT: ${{ github.event.inputs.feature_issue }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           GITHUB_RUN_ID: ${{ github.run_id }}
-        run: ./.github/scripts/meta-orchestrate.sh
+        run: ./.github/scripts/feature-orchestrate.sh

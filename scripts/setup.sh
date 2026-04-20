@@ -14,7 +14,7 @@
 #
 # CHECKS
 #   1. gh CLI authentication
-#   2. Required labels (meta, smoke-test, priority:P0-P3) — CREATES if missing
+#   2. Required labels (feature, smoke-test, priority:P0-P3) — CREATES if missing
 #   3. CLAUDE_CODE_OAUTH_TOKEN secret — reports if missing
 #   4. Repository Actions workflow permissions — reports if wrong
 #   5. Claude Code GitHub App installation — reports if missing
@@ -69,7 +69,7 @@ echo ""
 
 # --- Check 2: Labels ---
 echo "[2/5] Required labels"
-LABELS=("meta|6F42C1|Orchestration meta issue for implementation plans"
+LABELS=("feature|6F42C1|Orchestration feature issue for implementation plans"
         "smoke-test|FFA500|Smoke test marker"
         "priority:P0|B60205|Critical path"
         "priority:P1|D93F0B|High priority"

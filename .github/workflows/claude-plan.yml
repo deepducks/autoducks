@@ -4,7 +4,7 @@
 #
 # PURPOSE
 # -------
-# Turns a feature request / problem description into a ready-to-run meta issue
+# Turns a feature request / problem description into a ready-to-run feature issue
 # via a short iterative conversation on the issue:
 #
 #   First pass (Questions Mode)
@@ -16,13 +16,13 @@
 #     The plan agent designs the plan; a deterministic Python parser
 #     extracts task specs into JSONL (no second LLM call); a bash step
 #     creates task issues, substitutes placeholders with real numbers,
-#     updates the issue body, labels `meta`+`draft`, and assigns the
+#     updates the issue body, labels `feature`+`draft`, and assigns the
 #     commenter. If the parser rejects the plan body, the plan agent is
 #     re-invoked once with the specific format error; a second failure
 #     posts a visible error comment and fails the job.
 #
 #   Revision
-#     The human comments change requests on a `meta+draft` issue and mentions
+#     The human comments change requests on a `feature+draft` issue and mentions
 #     @plan-agent again. The agent sees conversation.md (current plan +
 #     existing task bodies + recent comments). To preserve a task, it uses
 #     its real issue number in the YAML; to introduce one, it uses a fresh
@@ -32,14 +32,14 @@
 #     close`. No LLM diffing.
 #
 #   Approval
-#     @claude on the meta issue kickstarts orchestration and removes `draft`.
+#     @claude on the feature issue kickstarts orchestration and removes `draft`.
 #
 # TRIGGER
 # -------
 # `@plan-agent` on an issue that is NOT a task (`priority:P*`) AND is either:
-#   - not yet planned (no `meta` label) — first pass, or
-#   - planned but still draft (`meta`+`draft`) — revision.
-# Kickstarted plans (`meta` without `draft`) are blocked.
+#   - not yet planned (no `feature` label) — first pass, or
+#   - planned but still draft (`feature`+`draft`) — revision.
+# Kickstarted plans (`feature` without `draft`) are blocked.
 #
 # DIRECTIVE SYNTAX (optional, in the comment)
 # -------------------------------------------
@@ -88,14 +88,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    # First pass (no meta) OR revision (meta+draft). Task issues (priority:P*)
-    # are always blocked. Kickstarted plans (meta without draft) are blocked.
+    # First pass (no feature) OR revision (feature+draft). Task issues (priority:P*)
+    # are always blocked. Kickstarted plans (feature without draft) are blocked.
     if: >
       github.event.issue.pull_request == null
       && contains(github.event.comment.body, '@plan-agent')
       && !contains(toJSON(github.event.issue.labels.*.name), 'priority:P')
       && (
-        !contains(toJSON(github.event.issue.labels.*.name), 'meta')
+        !contains(toJSON(github.event.issue.labels.*.name), 'feature')
         || contains(toJSON(github.event.issue.labels.*.name), 'draft')
       )
 
@@ -104,7 +104,7 @@ jobs:
       # Also determines whether this is a first-pass or a revision invocation
       # by checking the issue's current labels.
       - name: Extract context
-        id: meta
+        id: feature
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
           ISSUE_NUM: ${{ github.event.issue.number }}
@@ -140,10 +140,10 @@ jobs:
             max)    THINK_PHRASE="Ultrathink — take extensive time to reason before writing." ;;
           esac
 
-          # Revision detection: both `meta` AND `draft` labels present means
+          # Revision detection: both `feature` AND `draft` labels present means
           # the plan was already written and this invocation is a refinement.
           IS_REVISION="false"
-          if echo "$ISSUE_LABELS" | grep -q '"meta"' && echo "$ISSUE_LABELS" | grep -q '"draft"'; then
+          if echo "$ISSUE_LABELS" | grep -q '"feature"' && echo "$ISSUE_LABELS" | grep -q '"draft"'; then
             IS_REVISION="true"
           fi
 
@@ -164,7 +164,7 @@ jobs:
       - name: Fetch issue body
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
         run: |
           gh issue view "$ISSUE_NUM" --json title,body \
             --jq '"# " + .title + "\n\n" + .body' > /tmp/issue-request.md
@@ -179,16 +179,16 @@ jobs:
       # numbers into OLD_NUMBERS (carried via step output as a space-separated
       # string) so the reconciliation step can diff them.
       - name: Build revision context
-        if: steps.meta.outputs.is_revision == 'true'
+        if: steps.feature.outputs.is_revision == 'true'
         id: revctx
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
         run: |
           set -euo pipefail
 
-          # 1. Current plan body (what's in the meta issue right now)
+          # 1. Current plan body (what's in the feature issue right now)
           {
             echo "# Revision context"
             echo ""
@@ -264,7 +264,7 @@ jobs:
       # --- Load the plan-agent prompt into an env var ---
       - name: Load prompts
         env:
-          THINK_PHRASE: ${{ steps.meta.outputs.think_phrase }}
+          THINK_PHRASE: ${{ steps.feature.outputs.think_phrase }}
         run: |
           DELIM="___CLAUDE_PROMPT_EOF___"
 
@@ -282,7 +282,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--model ${{ steps.meta.outputs.model }} --allowedTools Read,Glob,Grep,Write"
+          claude_args: "--model ${{ steps.feature.outputs.model }} --allowedTools Read,Glob,Grep,Write"
           allowed_bots: "claude[bot],github-actions[bot]"
           prompt: ${{ env.PLAN_PROMPT }}
 
@@ -294,8 +294,8 @@ jobs:
         id: mode
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
-          COMMENTER: ${{ steps.meta.outputs.commenter }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
+          COMMENTER: ${{ steps.feature.outputs.commenter }}
         run: |
           set -euo pipefail
           HAS_PLAN="false"; HAS_Q="false"
@@ -340,7 +340,7 @@ jobs:
       - name: Rebuild prompt with parse error
         if: steps.mode.outputs.mode == 'plan' && steps.parse.outcome == 'failure'
         env:
-          THINK_PHRASE: ${{ steps.meta.outputs.think_phrase }}
+          THINK_PHRASE: ${{ steps.feature.outputs.think_phrase }}
         run: |
           DELIM="___CLAUDE_PROMPT_EOF___"
           PLAN=$(cat .github/prompts/plan-agent.md)
@@ -364,7 +364,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--model ${{ steps.meta.outputs.model }} --allowedTools Read,Glob,Grep,Write"
+          claude_args: "--model ${{ steps.feature.outputs.model }} --allowedTools Read,Glob,Grep,Write"
           allowed_bots: "claude[bot],github-actions[bot]"
           prompt: ${{ env.PLAN_RETRY_PROMPT }}
 
@@ -384,8 +384,8 @@ jobs:
           && steps.parse_retry.outcome == 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
-          COMMENTER: ${{ steps.meta.outputs.commenter }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
+          COMMENTER: ${{ steps.feature.outputs.commenter }}
           RUN_ID: ${{ github.run_id }}
           REPO: ${{ github.repository }}
         run: |
@@ -407,17 +407,17 @@ jobs:
       #   ref is `Tn` string → new       → `gh issue create`
       # Any integer present in OLD_NUMBERS but absent from the new YAML
       # (tracked in NEW_NUMBERS) gets closed with a "superseded" comment.
-      - name: Reconcile task issues and finalize meta
+      - name: Reconcile task issues and finalize feature
         if: >
           steps.mode.outputs.mode == 'plan'
           && (steps.parse.outcome == 'success' || steps.parse_retry.outcome == 'success')
         id: finalize
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
-          COMMENTER: ${{ steps.meta.outputs.commenter }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
+          COMMENTER: ${{ steps.feature.outputs.commenter }}
           REPO: ${{ github.repository }}
-          IS_REVISION: ${{ steps.meta.outputs.is_revision }}
+          IS_REVISION: ${{ steps.feature.outputs.is_revision }}
           OLD_NUMBERS_STR: ${{ steps.revctx.outputs.old_numbers }}
         run: |
           set -euo pipefail
@@ -474,7 +474,7 @@ jobs:
             TITLE=$(echo "$line" | jq -r '.title')
             BODY=$(echo "$line" | jq -r '.body')
             LABELS=$(echo "$line" | jq -r '.labels | join(",")')
-            FULL_BODY=$(printf '%s\n\n---\n_Part of meta issue #%s._\n' "$BODY" "$ISSUE_NUM")
+            FULL_BODY=$(printf '%s\n\n---\n_Part of feature issue #%s._\n' "$BODY" "$ISSUE_NUM")
 
             if [[ "$REF" =~ ^[0-9]+$ ]]; then
               # Preserved: edit only if title or body actually changed.
@@ -558,20 +558,20 @@ jobs:
             /^## Tasks[[:space:]]*$/ { skip=1; next }
             /^## / && skip          { skip=0 }
             !skip
-          ' /tmp/final-body.md > /tmp/meta-body.md
+          ' /tmp/final-body.md > /tmp/feature-body.md
 
-          echo "--- Final meta issue body ---"
-          cat /tmp/meta-body.md
+          echo "--- Final feature issue body ---"
+          cat /tmp/feature-body.md
           echo "--- End ---"
 
           # Update the issue body (always).
-          gh issue edit "$ISSUE_NUM" --body-file /tmp/meta-body.md
+          gh issue edit "$ISSUE_NUM" --body-file /tmp/feature-body.md
 
           # First-pass-only work: labels + assignee.
           if [[ "$IS_REVISION" != "true" ]]; then
             gh label create draft --color "CCCCCC" \
               --description "Plan drafted but not yet kickstarted" 2>/dev/null || true
-            gh issue edit "$ISSUE_NUM" --add-label meta --add-label draft
+            gh issue edit "$ISSUE_NUM" --add-label feature --add-label draft
             gh issue edit "$ISSUE_NUM" --add-assignee "$COMMENTER" \
               || echo "::warning::Could not assign @$COMMENTER (missing repo access?)"
           fi
@@ -586,11 +586,11 @@ jobs:
         if: success() && steps.mode.outputs.mode == 'plan'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
-          COMMENTER: ${{ steps.meta.outputs.commenter }}
-          IS_REVISION: ${{ steps.meta.outputs.is_revision }}
-          MODEL: ${{ steps.meta.outputs.model }}
-          REASONING: ${{ steps.meta.outputs.reasoning }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
+          COMMENTER: ${{ steps.feature.outputs.commenter }}
+          IS_REVISION: ${{ steps.feature.outputs.is_revision }}
+          MODEL: ${{ steps.feature.outputs.model }}
+          REASONING: ${{ steps.feature.outputs.reasoning }}
           CREATED: ${{ steps.finalize.outputs.created }}
           UPDATED: ${{ steps.finalize.outputs.updated }}
           UNCHANGED: ${{ steps.finalize.outputs.unchanged }}
@@ -603,7 +603,7 @@ jobs:
 
           **Next step:** re-review the plan above. Comment \`@claude\` to kickstart, or mention \`@plan-agent\` again for another revision."
           else
-            gh issue comment "$ISSUE_NUM" --body "@$COMMENTER — Plan ready. Created **${CREATED}** task issues; this issue is labeled \`meta\`/\`draft\` and assigned to you.
+            gh issue comment "$ISSUE_NUM" --body "@$COMMENTER — Plan ready. Created **${CREATED}** task issues; this issue is labeled \`feature\`/\`draft\` and assigned to you.
 
           _Planned with \`${MODEL}\` at reasoning \`${REASONING}\`._
 
@@ -615,8 +615,8 @@ jobs:
         if: failure() && steps.fail_parse.outcome != 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
-          COMMENTER: ${{ steps.meta.outputs.commenter }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
+          COMMENTER: ${{ steps.feature.outputs.commenter }}
           RUN_ID: ${{ github.run_id }}
         run: |
           gh issue comment "$ISSUE_NUM" --body "@$COMMENTER — ⚠️ **Plan agent failed.** [View logs](https://github.com/${{ github.repository }}/actions/runs/${RUN_ID})"

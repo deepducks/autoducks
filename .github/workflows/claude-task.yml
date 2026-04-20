@@ -17,9 +17,9 @@
 #   - Create task branch with predictable naming
 #   - Fetch issue spec to a local file
 #   - Commit and push whatever the agent wrote
-#   - Create PR targeting meta branch
+#   - Create PR targeting feature branch
 #   - Merge PR (direct or via API fallback)
-#   - Trigger meta orchestrator to continue the loop
+#   - Trigger feature orchestrator to continue the loop
 #   - Notify on failure
 #
 # LLM (Claude agent):
@@ -31,15 +31,15 @@
 #
 # TRIGGERS
 # --------
-# 1. workflow_dispatch — called by the meta orchestrator with issue_number
+# 1. workflow_dispatch — called by the feature orchestrator with issue_number
 #    and base_branch inputs. Primary trigger for autonomous loop execution.
-# 2. issue_comment — @claude comment on a non-meta issue. Manual override /
+# 2. issue_comment — @claude comment on a non-feature issue. Manual override /
 #    retry path. Excludes `@claude fix` (handled by claude-fix.yml).
 #
 # BRANCH NAMING
 # -------------
-# Task branches are namespaced under their meta issue, pre-created in bash:
-#   claude/<meta_number>-issue-<task_number>-<YYYYMMDD-HHMMSS>
+# Task branches are namespaced under their feature issue, pre-created in bash:
+#   claude/<feature_number>-issue-<task_number>-<YYYYMMDD-HHMMSS>
 #
 # TIMEOUT: 60 minutes
 # =============================================================================
@@ -51,7 +51,7 @@ permissions:
   pull-requests: write
   issues: write
   id-token: write
-  actions: write  # required to call `gh workflow run` on the meta workflow
+  actions: write  # required to call `gh workflow run` on the feature workflow
 
 on:
   issue_comment:
@@ -63,7 +63,7 @@ on:
         required: true
         type: string
       base_branch:
-        description: 'Base branch (e.g. meta/17)'
+        description: 'Base branch (e.g. feature/17)'
         required: true
         type: string
 
@@ -75,13 +75,13 @@ jobs:
     if: >
       github.event_name == 'workflow_dispatch'
       || (contains(github.event.comment.body, '@claude')
-          && !contains(toJSON(github.event.issue.labels.*.name), 'meta')
+          && !contains(toJSON(github.event.issue.labels.*.name), 'feature')
           && !contains(github.event.comment.body, '@claude fix'))
 
     steps:
       # --- Determine issue number and base branch (deterministic) ---
       - name: Extract context
-        id: meta
+        id: feature
         env:
           EVENT: ${{ github.event_name }}
           COMMENT_BODY: ${{ github.event.comment.body }}
@@ -96,16 +96,16 @@ jobs:
             ISSUE_NUM="$COMMENT_ISSUE"
             BASE_BRANCH=$(echo "$COMMENT_BODY" | grep -oP 'Base branch: `\K[^`]+' || echo "main")
           fi
-          META_NUM=$(echo "$BASE_BRANCH" | grep -oP '\d+' || echo "0")
+          FEATURE_NUM=$(echo "$BASE_BRANCH" | grep -oP '\d+' || echo "0")
           echo "issue_number=$ISSUE_NUM" >> "$GITHUB_OUTPUT"
           echo "base_branch=$BASE_BRANCH" >> "$GITHUB_OUTPUT"
-          echo "meta_number=$META_NUM" >> "$GITHUB_OUTPUT"
+          echo "feature_number=$FEATURE_NUM" >> "$GITHUB_OUTPUT"
 
       # --- Wait for base branch visibility (replication lag) ---
       - name: Wait for base branch visibility
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BASE_BRANCH: ${{ steps.meta.outputs.base_branch }}
+          BASE_BRANCH: ${{ steps.feature.outputs.base_branch }}
         run: |
           for i in 1 2 3 4 5 6 7 8 9 10; do
             if gh api "repos/${{ github.repository }}/git/refs/heads/$BASE_BRANCH" &>/dev/null; then
@@ -118,11 +118,11 @@ jobs:
           echo "::error::Branch $BASE_BRANCH not visible after 10 attempts"
           exit 1
 
-      # --- Checkout the base (meta) branch ---
+      # --- Checkout the base (feature) branch ---
       - name: Checkout base branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.meta.outputs.base_branch }}
+          ref: ${{ steps.feature.outputs.base_branch }}
           fetch-depth: 0
 
       # --- Prepare task branch and spec file (deterministic) ---
@@ -132,11 +132,11 @@ jobs:
         id: prep
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          META_NUM: ${{ steps.meta.outputs.meta_number }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
+          FEATURE_NUM: ${{ steps.feature.outputs.feature_number }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
         run: |
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          TASK_BRANCH="claude/${META_NUM}-issue-${ISSUE_NUM}-${TIMESTAMP}"
+          TASK_BRANCH="claude/${FEATURE_NUM}-issue-${ISSUE_NUM}-${TIMESTAMP}"
 
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
@@ -180,7 +180,7 @@ jobs:
         if: success()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
           TASK_BRANCH: ${{ steps.prep.outputs.task_branch }}
           REPO: ${{ github.repository }}
         run: |
@@ -206,8 +206,8 @@ jobs:
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
-          BASE_BRANCH: ${{ steps.meta.outputs.base_branch }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
+          BASE_BRANCH: ${{ steps.feature.outputs.base_branch }}
           TASK_BRANCH: ${{ steps.prep.outputs.task_branch }}
         run: |
           TITLE=$(gh issue view "$ISSUE_NUM" --json title --jq '.title')
@@ -235,16 +235,16 @@ jobs:
           echo "::error::Merge failed — PR may need manual conflict resolution"
           exit 1
 
-      # --- Trigger meta to continue the loop (deterministic) ---
-      - name: Trigger meta to continue loop
+      # --- Trigger feature to continue the loop (deterministic) ---
+      - name: Trigger feature to continue loop
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          META_NUM: ${{ steps.meta.outputs.meta_number }}
+          FEATURE_NUM: ${{ steps.feature.outputs.feature_number }}
         run: |
-          if [ "$META_NUM" != "0" ] && [ -n "$META_NUM" ]; then
-            gh workflow run claude-meta.yml -f meta_issue="$META_NUM"
-            echo "Triggered meta workflow for issue #$META_NUM"
+          if [ "$FEATURE_NUM" != "0" ] && [ -n "$FEATURE_NUM" ]; then
+            gh workflow run claude-feature.yml -f feature_issue="$FEATURE_NUM"
+            echo "Triggered feature workflow for issue #$FEATURE_NUM"
           fi
 
       # --- Failure notification ---
@@ -252,12 +252,12 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUM: ${{ steps.meta.outputs.issue_number }}
-          META_NUM: ${{ steps.meta.outputs.meta_number }}
+          ISSUE_NUM: ${{ steps.feature.outputs.issue_number }}
+          FEATURE_NUM: ${{ steps.feature.outputs.feature_number }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          if [ "$META_NUM" != "0" ] && [ -n "$META_NUM" ]; then
-            gh issue comment "$META_NUM" --body "⚠️ **Task Worker Failed** — Issue #${ISSUE_NUM}
+          if [ "$FEATURE_NUM" != "0" ] && [ -n "$FEATURE_NUM" ]; then
+            gh issue comment "$FEATURE_NUM" --body "⚠️ **Task Worker Failed** — Issue #${ISSUE_NUM}
 
           - **Run:** https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}
           - **Action needed:** Comment \`@claude fix\` on issue #${ISSUE_NUM} to retry."

@@ -7,7 +7,7 @@ architecture, dependencies, and correct wave ordering before writing.
 - The repository is checked out at the current working directory — use
   Read/Glob/Grep freely to understand existing code before planning
 - If the repository has any CLAUDE.md, AGENTS.md, VISION.md or CONSTITUTION.md files, read them first for important context about how this project is structured and how agents should operate within it.
-- `/tmp/conversation.md` — **present only on revisions** (when this is a re-invocation on an existing `meta+draft` issue). Contains (1) the current plan body (with real issue numbers already in its YAML), (2) the titles+bodies of existing task issues, (3) recent comments with human feedback, answers, or revision requests. Read it carefully and produce a plan that incorporates the feedback.
+- `/tmp/conversation.md` — **present only on revisions** (when this is a re-invocation on an existing `feature+draft` issue). Contains (1) the current plan body (with real issue numbers already in its YAML), (2) the titles+bodies of existing task issues, (3) recent comments with human feedback, answers, or revision requests. Read it carefully and produce a plan that incorporates the feedback.
 
 ## Questions Mode (read before writing anything)
 

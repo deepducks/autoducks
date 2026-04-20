@@ -1,5 +1,5 @@
 name: "Task Issue (Single Unit of Work)"
-description: "Create a task that a Claude agent will implement autonomously. Task issues are referenced from a meta issue."
+description: "Create a task that a Claude agent will implement autonomously. Task issues are referenced from a feature issue."
 title: "<area>: <short task description>"
 labels: []
 body:
@@ -8,12 +8,12 @@ body:
       value: |
         ## How this works
 
-        A task issue is a single unit of work that a Claude agent will implement. When the meta orchestrator assigns this issue, the agent will:
+        A task issue is a single unit of work that a Claude agent will implement. When the feature orchestrator assigns this issue, the agent will:
 
         1. Read the issue body (what you write below) as its complete specification
-        2. Check out the meta branch, create a working branch
+        2. Check out the feature branch, create a working branch
         3. Implement the tasks and commit
-        4. Create a PR targeting the meta branch
+        4. Create a PR targeting the feature branch
         5. Merge it (auto-merge if labeled `priority:P0`)
 
         **Write the body as if you were briefing a developer.** Be specific about what success looks like.

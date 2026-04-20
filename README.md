@@ -12,24 +12,24 @@ Four composable GitHub Actions workflows plus tooling:
 
 | File | Purpose |
 |---|---|
-| `.github/workflows/claude-plan.yml` | **Planner** — `@plan-agent` runs an iterative planning conversation (questions → plan → revisions) and produces a ready-to-kickstart meta issue |
-| `.github/workflows/claude-meta.yml` | **Orchestrator** — deterministic bash script that tracks progress and dispatches tasks |
+| `.github/workflows/claude-plan.yml` | **Planner** — `@plan-agent` runs an iterative planning conversation (questions → plan → revisions) and produces a ready-to-kickstart feature issue |
+| `.github/workflows/claude-feature.yml` | **Orchestrator** — deterministic bash script that tracks progress and dispatches tasks |
 | `.github/workflows/claude-task.yml` | **Worker** — implements a single task, creates and auto-merges its PR |
 | `.github/workflows/claude-fix.yml` | **Recovery** — `@claude fix` picks up failed tasks, resolves conflicts |
 | `.github/prompts/` | Agent system prompts as editable `.md` files — loaded into workflows at runtime |
-| `.github/scripts/meta-orchestrate.sh` | Bash script that powers the meta orchestrator (zero LLM) |
-| `.github/ISSUE_TEMPLATE/meta-issue.yml` | Structured form for creating meta issues |
+| `.github/scripts/feature-orchestrate.sh` | Bash script that powers the feature orchestrator (zero LLM) |
+| `.github/ISSUE_TEMPLATE/feature-issue.yml` | Structured form for creating feature issues |
 | `.github/ISSUE_TEMPLATE/task-issue.yml` | Structured form for creating task issues |
 | `.github/scripts/setup.sh` | Validates prerequisites and creates labels |
 | `scripts/smoke-test.sh` | End-to-end validator — creates 3 trivial tasks and runs the loop (source repo only) |
 
 ## Architectural highlights
 
-- **Meta orchestrator is 100% deterministic** — it's a bash script, not an LLM. Parses a YAML plan block from the meta issue, checks merged PRs, updates checkboxes, dispatches the next wave. Runs in seconds, costs $0.
+- **Feature orchestrator is 100% deterministic** — it's a bash script, not an LLM. Parses a YAML plan block from the feature issue, checks merged PRs, updates checkboxes, dispatches the next wave. Runs in seconds, costs $0.
 - **LLMs are only used where they must be** — planning (plan-agent), implementing (task worker), and fixing failures (fix agent). Everything else is bash.
-- **Plan agent is optional but end-to-end** — mention `@plan-agent` on a feature request and you get back a full meta issue with task issues created and linked. Model and reasoning level are configurable via directive.
+- **Plan agent is optional but end-to-end** — mention `@plan-agent` on a feature request and you get back a full feature issue with task issues created and linked. Model and reasoning level are configurable via directive.
 - **Loop closure via `workflow_dispatch`** — the only way to cascade workflow runs from `GITHUB_TOKEN`-authenticated steps, since PR merges and bot comments by `GITHUB_TOKEN` don't trigger workflows.
-- **Branch per meta issue** — `meta/<N>` acts as an integration branch for the plan. Task PRs target it. When all tasks are done, a final PR merges `meta/<N>` → `main`.
+- **Branch per feature issue** — `feature/<N>` acts as an integration branch for the plan. Task PRs target it. When all tasks are done, a final PR merges `feature/<N>` → `main`.
 - **Prompts live in `.github/prompts/`** — edit the `.md` files to tune agent behavior without touching workflow YAML.
 
 ---
@@ -58,20 +58,20 @@ Four composable GitHub Actions workflows plus tooling:
    │                    integer ref → edit     │                                                     │
    │                    Tn ref       → create  │                                                     │
    │                    dropped      → close   │                                                     │
-   │                    + label meta+draft     │                                                     │
+   │                    + label feature+draft     │                                                     │
    │                    (first pass only)      │                                                     │
    └──────────────┬───────────────────────────┘                                                      │
                   │                                                                                  │
-                  │  (issue now `meta`+`draft`; further @plan-agent → revision) ──────────────────── ┘
+                  │  (issue now `feature`+`draft`; further @plan-agent → revision) ──────────────────── ┘
                   ▼
  Human reviews the plan, comments @claude to approve + kickstart
-        │           (meta orchestrator removes the `draft` label,
+        │           (feature orchestrator removes the `draft` label,
         │            blocking further @plan-agent revisions)
         ▼
    ┌──────────────────────────────────────────┐
-   │         claude-meta.yml (bash)            │
+   │         claude-feature.yml (bash)            │
    │  1. Parse YAML plan from issue body       │
-   │  2. Ensure meta/<N> branch exists         │
+   │  2. Ensure feature/<N> branch exists         │
    │  3. Scan merged PRs → update checkboxes   │
    │  4. Find next ready wave                  │
    │  5. gh workflow run claude-task.yml ───── │──┐
@@ -84,40 +84,40 @@ Four composable GitHub Actions workflows plus tooling:
    │  2. Implement tasks                       │
    │  3. Commit + push branch                  │
    │  4. Post-step: auto-create + merge PR     │
-   │  5. gh workflow run claude-meta.yml ───── │──┐
+   │  5. gh workflow run claude-feature.yml ───── │──┐
    └──────────────────────────────────────────┘  │
                                                  │
                   ┌──────────────────────────────┘
                   ▼
-              loops back to claude-meta.yml
+              loops back to claude-feature.yml
                   │
           (when all waves done)
                   ▼
-   meta script opens final PR: meta/<N> → main
+   feature script opens final PR: feature/<N> → main
 ```
 
 ### Branch model
 
 ```
 main
- ├── meta/17                          ← meta issue #17's integration branch
+ ├── feature/17                          ← feature issue #17's integration branch
  │    ├── claude/17-issue-1-xxxxx     ← task #1 branch
  │    ├── claude/17-issue-3-xxxxx     ← task #3 branch
  │    └── claude/17-issue-7-xxxxx     ← task #7 branch
  │
- └── meta/42                          ← another meta issue's branch
+ └── feature/42                          ← another feature issue's branch
       └── claude/42-issue-1-xxxxx
 ```
 
-- Each **meta issue** gets its own integration branch: `meta/<issue_number>`
-- Each **task** branches from the meta branch: `claude/<meta>-issue-<task>-<timestamp>`
-- Task PRs target the meta branch (not `main`)
-- When all tasks are done, a final PR merges `meta/<N>` → `main`
-- Multiple meta issues (multiple implementation plans) can run in parallel
+- Each **feature issue** gets its own integration branch: `feature/<issue_number>`
+- Each **task** branches from the feature branch: `claude/<feature>-issue-<task>-<timestamp>`
+- Task PRs target the feature branch (not `main`)
+- When all tasks are done, a final PR merges `feature/<N>` → `main`
+- Multiple feature issues (multiple implementation plans) can run in parallel
 
-### Meta issue format
+### Feature issue format
 
-The meta issue body can use **one of two formats**:
+The feature issue body can use **one of two formats**:
 
 **1. YAML (preferred — explicit):**
 
@@ -187,7 +187,7 @@ Only `.github/` is modified — nothing else is added to your repo. On a fresh i
 ```
 
 The script will:
-- Create required labels (`meta`, `smoke-test`, `priority:P0` … `P3`)
+- Create required labels (`feature`, `smoke-test`, `priority:P0` … `P3`)
 - Check that the `CLAUDE_CODE_OAUTH_TOKEN` secret is set
 - Check that Actions have the right workflow permissions
 - Report anything that needs manual setup
@@ -240,7 +240,7 @@ Planning is a short conversation on the issue. The plan-agent can ask clarifying
 
 #### 1. File a feature/problem issue
 
-Just describe what you want — no template required. The trigger filter requires the issue to NOT be a task (`priority:P*` label) and to be either unplanned (no `meta` label) or still a draft (`meta`+`draft`).
+Just describe what you want — no template required. The trigger filter requires the issue to NOT be a task (`priority:P*` label) and to be either unplanned (no `feature` label) or still a draft (`feature`+`draft`).
 
 #### 2. Trigger with `@plan-agent`
 
@@ -259,9 +259,9 @@ Directive tokens — **model:** `opus` | `sonnet` | `haiku`; **reasoning:** `off
 
 **(a) Questions** — if the agent is missing critical info, it posts a numbered list of clarifying questions and stops. No task issues are created; no labels are applied. Reply to the questions in new comments, then mention `@plan-agent` again (with or without a directive) to continue. The agent sees the full thread on the next run.
 
-**(b) First plan** — if enough context is present, the plan-agent drafts a full meta-issue plan (Purpose / YAML Plan / Progress / Notes) into the issue body, the splitter extracts task specs, and a deterministic bash step creates the task issues, labels the issue `meta`+`draft`, and assigns you as the planning author. The issue now looks like a manually-authored meta (Option B below).
+**(b) First plan** — if enough context is present, the plan-agent drafts a full feature-issue plan (Purpose / YAML Plan / Progress / Notes) into the issue body, the splitter extracts task specs, and a deterministic bash step creates the task issues, labels the issue `feature`+`draft`, and assigns you as the planning author. The issue now looks like a manually-authored feature (Option B below).
 
-**(c) Revision** — if the issue is already `meta`+`draft` and you comment change requests ("split task 3 into frontend and backend", "drop task 5", "task 2 needs more detail on X"), then re-mention `@plan-agent`, the agent revises. Reconciliation is **deterministic**:
+**(c) Revision** — if the issue is already `feature`+`draft` and you comment change requests ("split task 3 into frontend and backend", "drop task 5", "task 2 needs more detail on X"), then re-mention `@plan-agent`, the agent revises. Reconciliation is **deterministic**:
 
 - Existing task issue numbers that appear in the new plan YAML → `gh issue edit` (only if title or body actually changed)
 - Existing numbers dropped from the new plan → `gh issue close` with a "Superseded by revised plan" comment
@@ -271,9 +271,9 @@ The identity signal is the `ref` the plan-agent writes in each `### …` heading
 
 #### 4. Approve and kickstart
 
-When you're happy with the plan, comment `@claude` on the meta issue. The orchestrator starts, removes the `draft` label (which also blocks further `@plan-agent` revisions), and runs the implementation loop to completion.
+When you're happy with the plan, comment `@claude` on the feature issue. The orchestrator starts, removes the `draft` label (which also blocks further `@plan-agent` revisions), and runs the implementation loop to completion.
 
-When the final `meta/<N> → main` PR merges, GitHub auto-closes every task issue and the meta issue via `Closes #N` lines in the PR body.
+When the final `feature/<N> → main` PR merges, GitHub auto-closes every task issue and the feature issue via `Closes #N` lines in the PR body.
 
 <details>
 <summary>Example transcript</summary>
@@ -292,7 +292,7 @@ When the final `meta/<N> → main` PR merges, GitHub auto-closes every task issu
 [human]   Comments: @plan-agent
 
 [bot]     Updates issue body with Purpose / YAML Plan / Progress / Notes.
-          Creates task issues #42, #43, #44. Labels issue meta + draft.
+          Creates task issues #42, #43, #44. Labels issue feature + draft.
           Posts: "Plan ready. Created 3 task issues; assigned to you."
 
 [human]   Comments: "Task #43 and #44 are really the same work — merge them"
@@ -306,8 +306,8 @@ When the final `meta/<N> → main` PR merges, GitHub auto-closes every task issu
 
 [human]   Comments: @claude
 
-[meta]    Removes `draft` label. Dispatches wave 1. Loop runs to completion.
-[meta]    Opens final PR meta/N → main with body "Closes #42, Closes #43, Closes #T_NEW_RESOLVED, Closes #N"
+[feature]    Removes `draft` label. Dispatches wave 1. Loop runs to completion.
+[feature]    Opens final PR feature/N → main with body "Closes #42, Closes #43, Closes #T_NEW_RESOLVED, Closes #N"
 [human]   Merges final PR. All issues auto-close.
 ```
 
@@ -317,13 +317,13 @@ When the final `meta/<N> → main` PR merges, GitHub auto-closes every task issu
 
 1. **Create task issues** using the "Task Issue" template. One issue per unit of work. Include acceptance criteria and explicit dependencies.
 
-2. **Create a meta issue** using the "Meta Issue" template. Reference the task issues by number in the YAML plan block.
+2. **Create a feature issue** using the "Feature Issue" template. Reference the task issues by number in the YAML plan block.
 
-3. **Kickstart** by commenting on the meta issue:
+3. **Kickstart** by commenting on the feature issue:
    ```
    @claude
    ```
-   Or assign the meta issue to someone (triggers the same workflow).
+   Or assign the feature issue to someone (triggers the same workflow).
 
 4. The orchestrator takes over — creates the branch, dispatches the first wave, tracks progress, advances waves, and opens the final PR automatically.
 
@@ -331,7 +331,7 @@ When the final `meta/<N> → main` PR merges, GitHub auto-closes every task issu
 
 When a task worker fails:
 
-1. A notification is posted on both the **meta issue** and the **task issue**.
+1. A notification is posted on both the **feature issue** and the **task issue**.
 2. Retry by commenting on the failed task issue:
    ```
    @claude fix
@@ -340,14 +340,14 @@ When a task worker fails:
 
 ### Retrying the orchestrator
 
-If the meta orchestrator itself fails (rare), just comment `@claude` on the meta issue. The script is idempotent — it reads current state from GitHub and picks up where it left off.
+If the feature orchestrator itself fails (rare), just comment `@claude` on the feature issue. The script is idempotent — it reads current state from GitHub and picks up where it left off.
 
 ### Manually dispatching the orchestrator
 
-You can also trigger the meta workflow directly (no comment needed):
+You can also trigger the feature workflow directly (no comment needed):
 
 ```bash
-gh workflow run claude-meta.yml -f meta_issue=17
+gh workflow run claude-feature.yml -f feature_issue=17
 ```
 
 ---
@@ -358,21 +358,21 @@ gh workflow run claude-meta.yml -f meta_issue=17
 
 | | |
 |---|---|
-| **Triggers** | `@plan-agent` comment on an issue that is NOT a task (no `priority:P*`) AND is either unplanned (no `meta`) OR still draft (`meta`+`draft`). PR comments ignored. |
-| **Modes** | **Questions Mode** — agent writes only `/tmp/questions.md` → workflow posts a comment and stops (no labels, no tasks). **Plan Mode** — agent writes `/tmp/plan-body.md` → splitter + reconciliation run. **Revision Mode** — subcase of Plan Mode triggered when the issue is `meta`+`draft`; the workflow builds `/tmp/conversation.md` (current plan + existing task bodies + recent comments) as extra context. |
-| **Agent 1 (Plan)** | Model configurable via directive (default `claude-opus-4-7`). Tools: `Read, Glob, Grep, Write`. Explores the repo; decides Questions vs Plan Mode; on Plan Mode writes the meta-issue body to `/tmp/plan-body.md` with `Tn` placeholders for new tasks and real integers for preserved tasks. |
+| **Triggers** | `@plan-agent` comment on an issue that is NOT a task (no `priority:P*`) AND is either unplanned (no `feature`) OR still draft (`feature`+`draft`). PR comments ignored. |
+| **Modes** | **Questions Mode** — agent writes only `/tmp/questions.md` → workflow posts a comment and stops (no labels, no tasks). **Plan Mode** — agent writes `/tmp/plan-body.md` → splitter + reconciliation run. **Revision Mode** — subcase of Plan Mode triggered when the issue is `feature`+`draft`; the workflow builds `/tmp/conversation.md` (current plan + existing task bodies + recent comments) as extra context. |
+| **Agent 1 (Plan)** | Model configurable via directive (default `claude-opus-4-7`). Tools: `Read, Glob, Grep, Write`. Explores the repo; decides Questions vs Plan Mode; on Plan Mode writes the feature-issue body to `/tmp/plan-body.md` with `Tn` placeholders for new tasks and real integers for preserved tasks. |
 | **Agent 2 (Splitter)** | `claude-sonnet-4-6`. Tools: `Read, Write`. Mechanically extracts task specs into `/tmp/tasks.jsonl`. On revisions, reads `/tmp/existing-tasks.json` to accurately refresh preserved-task bodies. |
 | **Reconciliation (deterministic)** | Each splitter entry's `ref` drives a single `gh` call: integer → `gh issue edit` (only on content change); `Tn` → `gh issue create`; numbers in old plan but absent from new plan → `gh issue close` with a "Superseded" comment. |
 | **Extended thinking** | Controlled by directive (`off`/`low`/`medium`/`high`/`max`) → injects magic phrase (`think hard` / `think very hard` / `ultrathink`) into the prompt. |
 | **Timeout** | 30 minutes |
 | **Key permissions** | `contents: read`, `issues: write`, `id-token: write` |
 
-### `claude-meta.yml` — Orchestrator (deterministic)
+### `claude-feature.yml` — Orchestrator (deterministic)
 
 | | |
 |---|---|
-| **Triggers** | `@claude` comment on meta issue, assign on meta issue, PR merge into `meta/*` (human merges), `workflow_dispatch` (from task worker post-step) |
-| **Implementation** | Pure bash script in `.github/scripts/meta-orchestrate.sh` |
+| **Triggers** | `@claude` comment on feature issue, assign on feature issue, PR merge into `feature/*` (human merges), `workflow_dispatch` (from task worker post-step) |
+| **Implementation** | Pure bash script in `.github/scripts/feature-orchestrate.sh` |
 | **LLM** | None |
 | **Timeout** | 10 minutes |
 | **Key permissions** | `contents: write`, `pull-requests: write`, `issues: write`, `actions: write` |
@@ -381,7 +381,7 @@ gh workflow run claude-meta.yml -f meta_issue=17
 
 | | |
 |---|---|
-| **Triggers** | `workflow_dispatch` (from meta script), `@claude` comment on non-meta issue (manual retry) |
+| **Triggers** | `workflow_dispatch` (from feature script), `@claude` comment on non-feature issue (manual retry) |
 | **Implementation** | Claude Code agent with explicit prompt |
 | **Model** | `claude-sonnet-4-6` |
 | **Timeout** | 60 minutes |
@@ -391,7 +391,7 @@ gh workflow run claude-meta.yml -f meta_issue=17
 
 | | |
 |---|---|
-| **Triggers** | `@claude fix` comment on non-meta issue |
+| **Triggers** | `@claude fix` comment on non-feature issue |
 | **Implementation** | Claude Code agent, picks up existing partial branch |
 | **Model** | `claude-sonnet-4-6` |
 | **Timeout** | 60 minutes |
@@ -403,11 +403,11 @@ gh workflow run claude-meta.yml -f meta_issue=17
 
 | Guardrail | Description |
 |---|---|
-| **Deterministic meta** | The orchestrator is a bash script — no LLM drift, no probabilistic failures |
+| **Deterministic feature** | The orchestrator is a bash script — no LLM drift, no probabilistic failures |
 | **60-minute timeout** | Task/fix agents have a hard time limit to prevent runaway costs |
-| **Failure notifications** | Failures are reported on both the meta and task issues |
+| **Failure notifications** | Failures are reported on both the feature and task issues |
 | **Fix agent** | `@claude fix` provides semi-automated recovery |
-| **Idempotent orchestrator** | Re-running the meta script is always safe — it reads current state from GitHub |
+| **Idempotent orchestrator** | Re-running the feature script is always safe — it reads current state from GitHub |
 | **Conflict resolution** | Task worker auto-resolves merge conflicts via API merge |
 | **Bot allowlist** | Only `claude[bot]` and `github-actions[bot]` can trigger workflows |
 | **Loop closure via `workflow_dispatch`** | Reliable cross-workflow triggering from `GITHUB_TOKEN` |
@@ -419,7 +419,7 @@ gh workflow run claude-meta.yml -f meta_issue=17
 | `GITHUB_TOKEN`-generated events don't trigger other workflows (neither PR merges nor bot comments) | Use `gh workflow run` (workflow_dispatch IS allowed for `GITHUB_TOKEN`) |
 | Workflow validation fails when workflow files change between trigger and execution | Re-trigger via `@claude` comment (uses the latest workflow from `main`) |
 | `git` auth not available in post-steps | Post-steps use `gh api` and `gh` CLI instead of `git` commands |
-| Git ref replication lag after branch creation | Meta script waits up to 5s; task worker pre-step polls up to 20s |
+| Git ref replication lag after branch creation | Feature script waits up to 5s; task worker pre-step polls up to 20s |
 | Parallel tasks in the same wave may touch shared files | Post-step tries direct merge, falls back to API merge; unresolvable conflicts trigger failure notification |
 | P1+ tasks need human review before merging (with branch protection) | The orchestrator comments on P0 tasks mentioning auto-merge; others wait for review |
 
@@ -474,21 +474,21 @@ By default, any `@claude` / `@plan-agent` comment from a repo collaborator trigg
 
 Non-obvious choices documented for future maintainers:
 
-- **Why is the meta orchestrator pure bash instead of an LLM?** The meta does state tracking and dispatching — not creative work. LLMs were probabilistic about parsing wave structure and updating checkboxes. A deterministic script is faster (seconds vs minutes), cheaper ($0 vs ~$0.10 per run), and never drifts.
+- **Why is the feature orchestrator pure bash instead of an LLM?** The feature does state tracking and dispatching — not creative work. LLMs were probabilistic about parsing wave structure and updating checkboxes. A deterministic script is faster (seconds vs minutes), cheaper ($0 vs ~$0.10 per run), and never drifts.
 
 - **Why YAML for the plan structure?** It's trivially parseable with `yq` (pre-installed on GitHub runners), human-editable, and naturally expresses waves. ASCII dependency graphs were visual but required LLM interpretation.
 
 - **Why `workflow_dispatch` for loop closure?** GitHub Actions deliberately blocks `GITHUB_TOKEN`-generated events from triggering other workflows (to prevent infinite loops). The exception is `workflow_dispatch` and `repository_dispatch`. Bot comments by `GITHUB_TOKEN` are also silent, so we can't use comments for cross-workflow communication.
 
-- **Why a separate meta branch per plan?** Isolation. Multiple plans can run in parallel without stepping on each other. It also makes it trivial to abandon a plan — just delete the branch.
+- **Why a separate feature branch per plan?** Isolation. Multiple plans can run in parallel without stepping on each other. It also makes it trivial to abandon a plan — just delete the branch.
 
 - **Why explicit git commands in the task worker prompt?** Earlier versions said "the workflow handles the PR" and the agent interpreted this as "I don't need to commit/push either." Being explicit eliminates the ambiguity.
 
-- **Why does the task worker poll for branch visibility?** GitHub has eventual consistency on git refs. When the meta script creates `meta/<N>` and immediately dispatches a task worker, the ref may not be visible to `actions/checkout`. Polling handles this.
+- **Why does the task worker poll for branch visibility?** GitHub has eventual consistency on git refs. When the feature script creates `feature/<N>` and immediately dispatches a task worker, the ref may not be visible to `actions/checkout`. Polling handles this.
 
 - **Why does plan-agent revision use bimodal refs (integer or `Tn`) instead of LLM-based task diffing?** Deterministic reconciliation. The plan-agent decides identity at authoring time by writing a real issue number (preserve) or a fresh placeholder (create) into each `### … —` heading. Bash then reconciles with pure set operations — no semantic matching, no "is this task the same as before" inference. The identity choice is visible in the plan body, so humans can audit it before approving with `@claude`.
 
-- **Why does the final PR body use `Closes #N` for every task?** GitHub auto-closes referenced issues only when a PR merges into the **default branch**. Task PRs target `meta/*`, not `main`, so `fixes #N` on them doesn't auto-close anything. The only merge-into-main event is the final meta PR, so it must carry closure directives for every task plus the meta issue itself.
+- **Why does the final PR body use `Closes #N` for every task?** GitHub auto-closes referenced issues only when a PR merges into the **default branch**. Task PRs target `feature/*`, not `main`, so `fixes #N` on them doesn't auto-close anything. The only merge-into-main event is the final feature PR, so it must carry closure directives for every task plus the feature issue itself.
 
 - **Why `gh api` instead of `git ls-remote` in post-steps?** Git credentials are revoked after the `claude-code-action` step completes, but `GITHUB_TOKEN` still works with the `gh` CLI.
 
