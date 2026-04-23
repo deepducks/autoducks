@@ -9,9 +9,8 @@
 #   curl -fsSL .../install.sh | bash -s -- --no-setup
 #
 # WHAT IT DOES
-#   Downloads all workflow files, prompts, and scripts into .github/ only.
-#   On a fresh install (files not present): runs setup automatically.
-#   On an update (files already present): only overwrites files, skips setup.
+#   Downloads the .autoducks/ directory tree and copies runtime workflows
+#   into .github/workflows/. On fresh install, runs setup automatically.
 # =============================================================================
 
 set -euo pipefail
@@ -35,9 +34,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Detect mode: fresh install or update
 FRESH_INSTALL=true
-if [[ -f ".github/workflows/claude-feature.yml" ]]; then
+if [[ -f ".autoducks/autoducks.json" ]]; then
   FRESH_INSTALL=false
 fi
 
@@ -48,58 +46,56 @@ else
 fi
 echo ""
 
-# Pairs of "source:destination" (bash 3 compatible, no associative arrays)
-FILE_PAIRS=(
-  ".github/workflows/claude-feature.yml:.github/workflows/claude-feature.yml"
-  ".github/workflows/claude-task.yml:.github/workflows/claude-task.yml"
-  ".github/workflows/claude-fix.yml:.github/workflows/claude-fix.yml"
-  ".github/workflows/claude-plan.yml:.github/workflows/claude-plan.yml"
-  ".github/workflows/claude-agents-revert.yml:.github/workflows/claude-agents-revert.yml"
-  ".github/workflows/claude-agents-close.yml:.github/workflows/claude-agents-close.yml"
-  ".github/scripts/feature-orchestrate.sh:.github/scripts/feature-orchestrate.sh"
-  ".github/scripts/parse-plan.py:.github/scripts/parse-plan.py"
-  ".github/scripts/parse-directive.sh:.github/scripts/parse-directive.sh"
-  ".github/scripts/react.sh:.github/scripts/react.sh"
-  ".github/prompts/plan-agent.md:.github/prompts/plan-agent.md"
-  ".github/prompts/task-worker.md:.github/prompts/task-worker.md"
-  ".github/prompts/fix-agent.md:.github/prompts/fix-agent.md"
-  ".github/ISSUE_TEMPLATE/feature-issue.yml:.github/ISSUE_TEMPLATE/feature-issue.yml"
-  ".github/ISSUE_TEMPLATE/task-issue.yml:.github/ISSUE_TEMPLATE/task-issue.yml"
-  "scripts/setup.sh:.github/scripts/setup.sh"
-  "scripts/install.sh:.github/scripts/install.sh"
-  "scripts/smoke-test.sh:scripts/smoke-test.sh"
-  "scripts/smoke-test-plan.sh:scripts/smoke-test-plan.sh"
-)
+# Download the full .autoducks/ tree via GitHub API (tarball)
+echo "Downloading .autoducks/ tree..."
+TMP_DIR=$(mktemp -d)
+curl -sL "https://api.github.com/repos/${SOURCE_REPO}/tarball/${BRANCH}" \
+  | tar xz -C "$TMP_DIR" --strip-components=1
 
-for pair in "${FILE_PAIRS[@]}"; do
-  src="${pair%%:*}"
-  dest="${pair#*:}"
-  dir=$(dirname "$dest")
-  mkdir -p "$dir"
-  if curl -sf "${BASE_URL}/${src}" -o "$dest"; then
-    echo "  ✓ $dest"
-  else
-    echo "  ✗ Failed to download ${src}" >&2
-    exit 1
+# Copy .autoducks/ directory
+cp -r "$TMP_DIR/.autoducks" .autoducks
+echo "  .autoducks/ installed"
+
+# Copy runtime workflows to .github/workflows/
+mkdir -p .github/workflows
+cp .autoducks/runtimes/github-actions/autoducks-*.yml .github/workflows/
+echo "  Workflows copied to .github/workflows/"
+
+# Copy issue templates
+mkdir -p .github/ISSUE_TEMPLATE
+if [[ -d "$TMP_DIR/.github/ISSUE_TEMPLATE" ]]; then
+  cp "$TMP_DIR/.github/ISSUE_TEMPLATE/"* .github/ISSUE_TEMPLATE/
+  echo "  Issue templates copied"
+fi
+
+# Copy scripts
+mkdir -p scripts
+for f in setup.sh install.sh smoke-test.sh smoke-test-plan.sh; do
+  if [[ -f "$TMP_DIR/scripts/$f" ]]; then
+    cp "$TMP_DIR/scripts/$f" "scripts/$f"
   fi
 done
+chmod +x scripts/*.sh
+echo "  Scripts copied"
 
-chmod +x .github/scripts/*.sh
+# Make all .sh files executable
+find .autoducks -name '*.sh' -exec chmod +x {} +
+
+rm -rf "$TMP_DIR"
 
 echo ""
-echo "All files installed to .github/"
+echo "All files installed."
 echo ""
 
 if [[ "$NO_SETUP" == "true" ]] || [[ "$FRESH_INSTALL" == "false" ]]; then
   if [[ "$FRESH_INSTALL" == "false" ]]; then
-    echo "Updated successfully. Run .github/scripts/setup.sh if you need to re-run the setup checks."
+    echo "Updated successfully. Run scripts/setup.sh to re-run setup checks."
   else
-    echo "Skipping setup (--no-setup). Run .github/scripts/setup.sh to configure your repo."
+    echo "Skipping setup (--no-setup). Run scripts/setup.sh to configure your repo."
   fi
   exit 0
 fi
 
-# Fresh install: run setup
 REPO_ARG=""
 if [[ -n "$REPO" ]]; then
   REPO_ARG="--repo $REPO"
@@ -108,4 +104,4 @@ fi
 echo "Running setup..."
 echo ""
 # shellcheck disable=SC2086
-.github/scripts/setup.sh $REPO_ARG
+scripts/setup.sh $REPO_ARG

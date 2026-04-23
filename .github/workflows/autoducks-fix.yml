@@ -1,0 +1,55 @@
+name: 'Autoducks: Fix Agent'
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  fix:
+    if: >-
+      github.event.issue.pull_request == null &&
+      startsWith(github.event.comment.body, '/agents fix')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load agent defaults
+        id: agent
+        run: |
+          cfg=".autoducks/agents/fix/defaults.json"
+          global=".autoducks/autoducks.json"
+          model=$(jq -r '.model // empty' "$cfg" 2>/dev/null || jq -r '.defaults.model // empty' "$global")
+          reasoning=$(jq -r '.reasoning // empty' "$cfg" 2>/dev/null || jq -r '.defaults.reasoning // empty' "$global")
+          echo "model=${model:-claude-sonnet-4-6}" >> "$GITHUB_OUTPUT"
+          echo "reasoning=${reasoning:-high}" >> "$GITHUB_OUTPUT"
+      - name: Parse directive
+        id: directive
+        run: source .autoducks/core/config/parse-directive.sh >> "$GITHUB_OUTPUT"
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+      - name: Pre-execution
+        run: bash .autoducks/agents/fix/pre.sh
+        env:
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          RUN_ID: ${{ github.run_id }}
+      - name: Run LLM agent
+        uses: ./.autoducks/providers/llm/claude/action.yml
+        with:
+          prompt_file: .autoducks/agents/fix/prompt.md
+          allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
+          model: ${{ steps.directive.outputs.model || steps.agent.outputs.model }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      - name: Post-execution
+        if: always()
+        run: bash .autoducks/agents/fix/post.sh
+        env:
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          RUN_ID: ${{ github.run_id }}

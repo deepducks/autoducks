@@ -1,0 +1,38 @@
+name: 'Autoducks LLM - Claude'
+description: 'Invoke Claude via claude-code-action for autoducks agents'
+
+inputs:
+  prompt_file:
+    description: 'Path to the agent prompt markdown file'
+    required: true
+  allowed_tools:
+    description: 'Comma-separated list of tools the agent can use'
+    required: true
+  model:
+    description: 'Claude model to use'
+    required: false
+    default: 'claude-sonnet-4-6'
+  max_turns:
+    description: 'Maximum number of agentic turns'
+    required: false
+    default: '25'
+  timeout_minutes:
+    description: 'Timeout in minutes'
+    required: false
+    default: '60'
+  anthropic_api_key:
+    description: 'Anthropic API key'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run Claude agent
+      uses: anthropics/claude-code-action@v1
+      with:
+        prompt_file: ${{ inputs.prompt_file }}
+        allowed_tools: ${{ inputs.allowed_tools }}
+        model: ${{ inputs.model }}
+        max_turns: ${{ inputs.max_turns }}
+        timeout_minutes: ${{ inputs.timeout_minutes }}
+        anthropic_api_key: ${{ inputs.anthropic_api_key }}

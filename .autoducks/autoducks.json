@@ -1,0 +1,12 @@
+{
+  "providers": {
+    "its": "github",
+    "git": "github",
+    "llm": "claude"
+  },
+  "defaults": {
+    "model": "claude-sonnet-4-6",
+    "reasoning": "high",
+    "base_branch": "main"
+  }
+}

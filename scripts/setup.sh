@@ -70,7 +70,9 @@ echo ""
 
 # --- Check 2: Labels ---
 echo "[2/6] Required labels"
-LABELS=("feature|6F42C1|Orchestration feature issue for implementation plans"
+LABELS=("Feature|6F42C1|Orchestration feature issue"
+        "Ready|0E8A16|Plan complete, ready for execution"
+        "Draft|CCCCCC|Draft issue, not yet designed"
         "smoke-test|FFA500|Smoke test marker"
         "priority:P0|B60205|Critical path"
         "priority:P1|D93F0B|High priority"
@@ -93,13 +95,13 @@ echo ""
 
 # --- Check 3: Secret ---
 echo "[3/6] Required secrets"
-if gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null | grep -qx "CLAUDE_CODE_OAUTH_TOKEN"; then
-  pass "Secret CLAUDE_CODE_OAUTH_TOKEN is configured"
+if gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null | grep -qx "ANTHROPIC_API_KEY"; then
+  pass "Secret ANTHROPIC_API_KEY is configured"
 else
-  manual "Secret CLAUDE_CODE_OAUTH_TOKEN is missing
+  manual "Secret ANTHROPIC_API_KEY is missing
 
-      Get your token from: https://claude.com/oauth/code
-      Then add it: gh secret set CLAUDE_CODE_OAUTH_TOKEN $REPO_ARG"
+      Get your API key from: https://console.anthropic.com/
+      Then add it: gh secret set ANTHROPIC_API_KEY $REPO_ARG"
 fi
 echo ""
 
@@ -174,11 +176,11 @@ if [[ $MANUAL -gt 0 ]]; then
   echo "⚠️  Some checks require manual action. Review the items marked ⚠️ above."
   echo ""
   echo "Once done, validate the setup by running:"
-  echo "  ./scripts/smoke-test.sh --cleanup"
+  echo "  scripts/smoke-test.sh --cleanup"
   exit 0
 fi
 
-echo "✅ All automated checks passed!"
+echo "All automated checks passed!"
 echo ""
 echo "Next step: run a smoke test to validate the full flow:"
-echo "  ./scripts/smoke-test.sh --cleanup"
+echo "  scripts/smoke-test.sh --cleanup"

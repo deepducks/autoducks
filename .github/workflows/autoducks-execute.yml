@@ -1,0 +1,87 @@
+name: 'Autoducks: Execution Agent'
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        required: true
+        type: string
+      base_branch:
+        required: true
+        type: string
+        default: 'main'
+      model:
+        required: false
+        type: string
+        default: 'claude-sonnet-4-6'
+      reasoning:
+        required: false
+        type: string
+        default: 'high'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  execute:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request == null &&
+       startsWith(github.event.comment.body, '/agents execute') &&
+       !contains(github.event.issue.labels.*.name, 'Feature') ||
+       contains(github.event.issue.labels.*.name, 'Ready'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load agent defaults
+        id: agent
+        run: |
+          cfg=".autoducks/agents/execution/defaults.json"
+          global=".autoducks/autoducks.json"
+          model=$(jq -r '.model // empty' "$cfg" 2>/dev/null || jq -r '.defaults.model // empty' "$global")
+          reasoning=$(jq -r '.reasoning // empty' "$cfg" 2>/dev/null || jq -r '.defaults.reasoning // empty' "$global")
+          echo "model=${model:-claude-sonnet-4-6}" >> "$GITHUB_OUTPUT"
+          echo "reasoning=${reasoning:-high}" >> "$GITHUB_OUTPUT"
+      - name: Set context
+        id: ctx
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "issue_num=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
+            echo "base_branch=${{ inputs.base_branch }}" >> "$GITHUB_OUTPUT"
+            echo "model=${{ inputs.model }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+            echo "base_branch=main" >> "$GITHUB_OUTPUT"
+            source .autoducks/core/config/parse-directive.sh >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
+      - name: Pre-execution
+        run: bash .autoducks/agents/execution/pre.sh
+        env:
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          BASE_BRANCH: ${{ steps.ctx.outputs.base_branch }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          RUN_ID: ${{ github.run_id }}
+      - name: Run LLM agent
+        uses: ./.autoducks/providers/llm/claude/action.yml
+        with:
+          prompt_file: .autoducks/agents/execution/prompt.md
+          allowed_tools: "Read,Write,Edit,Bash"
+          model: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      - name: Post-execution
+        if: always()
+        run: bash .autoducks/agents/execution/post.sh
+        env:
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          BASE_BRANCH: ${{ steps.ctx.outputs.base_branch }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          RUN_ID: ${{ github.run_id }}

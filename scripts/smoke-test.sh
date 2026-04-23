@@ -5,8 +5,8 @@
 #
 # PURPOSE
 # -------
-# Generic smoke test for the claude-feature / claude-task / claude-fix workflow
-# trio. Creates a feature issue with 3 trivial tasks in 2 waves, kickstarts the
+# Generic smoke test for the autoducks-wave / autoducks-execute / autoducks-fix
+# workflow trio. Creates a feature issue with 3 trivial tasks in 2 waves, kickstarts the
 # orchestrator, and optionally waits for completion.
 #
 # USAGE
@@ -22,9 +22,9 @@
 # REQUIREMENTS
 # ------------
 # - gh CLI authenticated with repo access
-# - claude-feature.yml, claude-task.yml, claude-fix.yml workflows installed
-# - `feature` and `smoke-test` labels (created automatically if missing)
-# - CLAUDE_CODE_OAUTH_TOKEN secret configured
+# - autoducks-wave.yml, autoducks-execute.yml, autoducks-fix.yml workflows installed
+# - `Feature`, `Ready`, and `smoke-test` labels (created automatically if missing)
+# - ANTHROPIC_API_KEY secret configured
 # - Claude Code GitHub App installed on the repo
 # - Actions permission "Read and write" enabled
 #
@@ -38,21 +38,21 @@
 #   Task 3: Create a second new file
 #
 # This validates:
-# - Feature orchestrator kickstart via /agents start comment
-# - Task worker triggered by feature's assignment comment
-# - Branch creation under claude/<N>-issue-<T>-*
+# - Wave orchestrator kickstart via /agents execute comment
+# - Task worker triggered by wave dispatch
+# - Branch creation under feature/<N>-<slug>/task/<T>-<slug>
 # - Auto PR creation and merge
 # - Loop closure via workflow_dispatch
 # - Wave progression (wave 1 → wave 2)
 # - Parallel task execution
-# - Final PR creation (feature/<N> → main)
-# - Reaction 👀 on /agents start trigger comment (workflow started)
+# - Final PR creation (feature/<N>-<slug> → main)
+# - Reaction 👀 on /agents execute trigger comment (workflow started)
 # - Reaction 👍 after final PR opens (workflow succeeded)
 # - /agents close tears down branches, PRs, and tasks (when --cleanup)
 #
 # NOT COVERED (planned for a separate test harness):
-# - /agents plan end-to-end (this test skips planning, creates issues directly)
-# - Native issue types (Feature / Task) — set by the plan-agent reconcile step
+# - /agents devise end-to-end (this test skips planning, creates issues directly)
+# - Native issue types (Feature / Task) — set by the tactical-agent reconcile step
 # - Sub-issue relationships — same reason
 # - /agents revert path
 # =============================================================================
@@ -97,7 +97,8 @@ echo ""
 
 # --- Ensure labels exist ---
 echo "[1/5] Ensuring labels exist..."
-gh label create "feature" --color "6F42C1" --description "Orchestration feature issue" $REPO_ARG 2>/dev/null || true
+gh label create "Feature" --color "6F42C1" --description "Orchestration feature issue" $REPO_ARG 2>/dev/null || true
+gh label create "Ready"   --color "0E8A16" --description "Plan complete, ready for execution" $REPO_ARG 2>/dev/null || true
 gh label create "smoke-test" --color "FFA500" --description "Smoke test" $REPO_ARG 2>/dev/null || true
 gh label create "priority:P0" --color "B60205" --description "Critical" $REPO_ARG 2>/dev/null || true
 
@@ -225,14 +226,14 @@ fi
 
 META_URL=$(gh issue create $REPO_ARG \
   --title "Feature: Smoke Test ${TIMESTAMP}" \
-  --label "feature,smoke-test" \
+  --label "Feature,Ready,smoke-test" \
   --body "$META_BODY")
 FEATURE=$(echo "$META_URL" | grep -oE '[0-9]+$')
 echo "  Feature: #$FEATURE"
 
 # --- Kickstart ---
 echo "[4/5] Kickstarting the loop..."
-KICKSTART_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/agents start")
+KICKSTART_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/agents execute")
 KICKSTART_ID=$(echo "$KICKSTART_URL" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+$' || echo "")
 echo "  Kickstart comment posted (id: ${KICKSTART_ID:-unknown})."
 
@@ -323,8 +324,7 @@ while [[ $WAITED -lt $MAX_WAIT ]]; do
           for i in $TASK1 $TASK2 $TASK3 $FEATURE; do
             gh issue close $i $REPO_ARG --comment "Smoke test cleanup" 2>/dev/null || true
           done
-          git push origin --delete "feature/$FEATURE" 2>/dev/null || true
-          for b in $(gh api repos/$(gh repo view ${REPO:-} --json nameWithOwner --jq '.nameWithOwner')/git/matching-refs/heads/claude/${FEATURE}-issue- --jq '.[].ref | sub("refs/heads/"; "")' 2>/dev/null); do
+          for b in $(gh api "repos/$(gh repo view ${REPO:-} --json nameWithOwner --jq '.nameWithOwner')/git/matching-refs/heads/feature/${FEATURE}-" --jq '.[].ref | sub("refs/heads/"; "")' 2>/dev/null); do
             git push origin --delete "$b" 2>/dev/null || true
           done
         fi

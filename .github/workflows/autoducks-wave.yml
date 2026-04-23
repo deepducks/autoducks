@@ -1,0 +1,67 @@
+name: 'Autoducks: Wave Orchestrator'
+
+on:
+  workflow_dispatch:
+    inputs:
+      feature_issue:
+        required: true
+        type: string
+  pull_request:
+    types: [closed]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  orchestrate:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.base.ref, 'feature/')) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request == null &&
+       startsWith(github.event.comment.body, '/agents execute') &&
+       contains(github.event.issue.labels.*.name, 'Feature') &&
+       contains(github.event.issue.labels.*.name, 'Ready'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Determine feature issue
+        id: feature
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "number=${{ inputs.feature_issue }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            NUM=$(echo "${{ github.event.pull_request.base.ref }}" | grep -oP 'feature/\K\d+')
+            echo "number=$NUM" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Parse directive
+        id: directive
+        if: github.event_name == 'issue_comment'
+        run: source .autoducks/core/config/parse-directive.sh >> "$GITHUB_OUTPUT"
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+      - name: React
+        if: github.event_name == 'issue_comment'
+        run: bash -c 'source .autoducks/core/feedback/react-to-comment.sh && react_to_comment "$1" eyes' _ "${{ github.event.comment.id }}"
+        env:
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run orchestrator
+        run: bash .autoducks/agents/waveOrchestrator/run.sh
+        env:
+          FEATURE_ISSUE: ${{ steps.feature.outputs.number }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          RUN_ID: ${{ github.run_id }}
+          WORKER_MODEL: ${{ steps.directive.outputs.model || '' }}
+          WORKER_REASONING: ${{ steps.directive.outputs.reasoning || '' }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

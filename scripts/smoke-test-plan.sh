@@ -7,17 +7,17 @@
 # -------
 # Exercises the parts of the workflow trio that scripts/smoke-test.sh skips:
 #
-#   1. /agents plan end-to-end (questions-free draft → plan written → task
+#   1. /agents devise end-to-end (questions-free draft → plan written → task
 #      issues created → labels/type/sub-issues applied).
 #   2. GitHub native issue types (Feature on the draft, Task on each child).
 #   3. Sub-issue relationships (children linked under the feature).
 #   4. /agents revert (closes tasks, strips labels, deletes comments,
 #      restores the body from userContentEdits history).
-#   5. Per-comment reactions 👀 + 👍 (both /agents plan and /agents revert).
+#   5. Per-comment reactions 👀 + 👍 (both /agents devise and /agents revert).
 #
 # COST
 # ----
-# Runs one plan-agent call at `sonnet low` reasoning to keep it cheap.
+# Runs one tactical-agent call at `sonnet low` reasoning to keep it cheap.
 # Expected wall time: 3–6 min. No task worker is triggered — this test
 # covers the planning half of the pipeline, not the shipping half.
 #
@@ -28,7 +28,7 @@
 # OPTIONS
 #   --keep          Do not run /agents revert at the end (leaves the
 #                   feature + task issues in place for manual inspection).
-#   --no-wait       Create the seed issue and kickstart /agents plan,
+#   --no-wait       Create the seed issue and kickstart /agents devise,
 #                   don't wait for completion.
 #   --repo OWNER/REPO  Target repo (default: current repo from `gh`).
 #   -h, --help      Show this help.
@@ -36,8 +36,8 @@
 # ASSERTIONS (SOFT vs HARD)
 # -------------------------
 # Hard assertions (fail the test if violated):
-#   - /agents plan run completes with success
-#   - Feature issue receives `feature` + `draft` labels
+#   - /agents devise run completes with success
+#   - Feature issue receives `Ready` label
 #   - Issue body changes (plan written into it)
 #   - At least 1 task issue created with `priority:P*` label
 #   - /agents revert closes all task issues and strips labels
@@ -46,7 +46,7 @@
 #   - Issue type = Feature on the draft, Task on children
 #     (requires org-level issue-type configuration)
 #   - Sub-issue links exist (requires sub-issues API enabled)
-#   - 👀 reaction on /agents plan comment (may miss if react.sh races)
+#   - 👀 reaction on /agents devise comment (may miss if reaction races)
 #   - Body reverts to original (requires userContentEdits coverage)
 # =============================================================================
 
@@ -122,7 +122,7 @@ wait_for_reaction() {
 }
 
 # Poll a feature issue until both terminal invariants of /agents revert
-# are satisfied: `feature`+`draft` labels stripped AND all comments
+# are satisfied: `Ready`+`draft` labels stripped AND all comments
 # deleted. We check both because the workflow removes labels first and
 # deletes comments last, so waiting on labels alone returns too early
 # and races with the comment-count assertion downstream. Used instead
@@ -143,7 +143,7 @@ wait_for_feature_unplanned() {
       --jq '. | length' 2>/dev/null || echo "?")
     local labels_clean=1
     case ",$labels," in
-      *,feature,*|*,draft,*) labels_clean=0 ;;
+      *,Ready,*|*,draft,*) labels_clean=0 ;;
     esac
     if [[ "$labels_clean" == "1" && "$comments" == "0" ]]; then
       return 0
@@ -160,8 +160,8 @@ wait_for_feature_unplanned() {
 # --- Ensure labels exist (plan agent creates priority:P* lazily but we
 #     want them ready so we can assert quickly) ---
 echo "[1/7] Ensuring labels exist..."
-gh label create "feature"     --color "6F42C1" --description "Orchestration feature issue" $REPO_ARG 2>/dev/null || true
-gh label create "draft"       --color "CCCCCC" --description "Plan drafted but not yet kickstarted" $REPO_ARG 2>/dev/null || true
+gh label create "Ready"       --color "0E8A16" --description "Plan complete, ready for execution" $REPO_ARG 2>/dev/null || true
+gh label create "Draft"       --color "CCCCCC" --description "Draft issue, not yet designed" $REPO_ARG 2>/dev/null || true
 gh label create "smoke-test"  --color "FFA500" --description "Smoke test" $REPO_ARG 2>/dev/null || true
 gh label create "priority:P0" --color "B60205" --description "Critical" $REPO_ARG 2>/dev/null || true
 pass "Labels ensured"
@@ -169,14 +169,14 @@ echo ""
 
 # --- Create the seed issue with a narrow, decomposable draft ---
 # The draft is intentionally specific (explicit file paths, exact signatures)
-# so the plan-agent goes straight to Plan Mode without asking questions.
+# so the tactical-agent goes straight to Plan Mode without asking questions.
 echo "[2/7] Creating seed feature issue..."
 SEED_BODY=$(cat <<EOF
 # Plan smoke test — ${TIMESTAMP}
 
 Add two tiny utility modules under \`scripts/smoke-plan-${TIMESTAMP}/\`, each
 with a documented signature. This is a synthetic test — no real
-implementation is needed, the goal is just to exercise the /agents plan
+implementation is needed, the goal is just to exercise the /agents devise
 pipeline end-to-end.
 
 ## Files to create
@@ -234,9 +234,9 @@ SEED_BODY_NOW=$(gh issue view $FEATURE $REPO_ARG --json body --jq '.body')
 echo "  Seed body captured (${#SEED_BODY_NOW} chars)"
 echo ""
 
-# --- Trigger /agents plan ---
-echo "[3/7] Triggering /agents plan sonnet low..."
-PLAN_COMMENT_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/agents plan sonnet low")
+# --- Trigger /agents devise ---
+echo "[3/7] Triggering /agents devise sonnet low..."
+PLAN_COMMENT_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/agents devise sonnet low")
 PLAN_COMMENT_ID=$(echo "$PLAN_COMMENT_URL" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+$' || echo "")
 echo "  Plan comment posted (id: ${PLAN_COMMENT_ID:-unknown})"
 
@@ -247,7 +247,7 @@ if [[ "$WAIT" == false ]]; then
 fi
 echo ""
 
-# --- Wait for plan-agent terminal reaction ---
+# --- Wait for tactical-agent terminal reaction ---
 # Each `/agents` comment triggers every workflow; five skip via `if:`
 # guards and one runs. GitHub occasionally emits more than one run for
 # the same comment event, and `conclusion != "skipped"` can't filter
@@ -255,43 +255,42 @@ echo ""
 # the *comment reactions* the workflow itself posts (👀 → 👍/😕)
 # instead of trying to pin a run ID. Reactions are tied to our specific
 # comment, so parallel workflows on other issues don't cross-talk.
-echo "[4/7] Waiting for plan-agent terminal reaction..."
+echo "[4/7] Waiting for tactical-agent terminal reaction..."
 if [[ -z "${PLAN_COMMENT_ID:-}" ]]; then
-  fail "cannot track plan-agent — missing PLAN_COMMENT_ID"
+  fail "cannot track tactical-agent — missing PLAN_COMMENT_ID"
   exit 1
 fi
 # `|| RC=$?` neutralizes `set -e` so non-zero returns don't abort the
 # script before we can interpret them.
 PLAN_RC=0
-wait_for_reaction "$PLAN_COMMENT_ID" 600 "plan-agent" || PLAN_RC=$?
+wait_for_reaction "$PLAN_COMMENT_ID" 600 "tactical-agent" || PLAN_RC=$?
 case $PLAN_RC in
-  0) pass "plan-agent run completed successfully" ;;
-  1) fail "plan-agent run failed (😕 reaction on /agents plan comment)"; exit 1 ;;
-  2) fail "plan-agent run did not complete within 10 min"; exit 1 ;;
+  0) pass "tactical-agent run completed successfully" ;;
+  1) fail "tactical-agent run failed (😕 reaction on /agents devise comment)"; exit 1 ;;
+  2) fail "tactical-agent run did not complete within 10 min"; exit 1 ;;
 esac
 echo ""
 
 # --- Assert: reactions, body change, labels, tasks created ---
 echo "[5/7] Asserting plan pipeline state..."
 
-# Reactions on /agents plan comment
+# Reactions on /agents devise comment
 if [[ -n "$PLAN_COMMENT_ID" ]]; then
   REACTIONS=$(gh api "repos/$REPO/issues/comments/$PLAN_COMMENT_ID/reactions" --jq '[.[].content]' 2>/dev/null || echo "[]")
-  if echo "$REACTIONS" | grep -q "eyes"; then pass "👀 reaction on /agents plan comment"; else warn "👀 reaction missing on /agents plan comment"; fi
-  if echo "$REACTIONS" | grep -q "+1";   then pass "👍 reaction on /agents plan comment"; else warn "👍 reaction missing on /agents plan comment"; fi
+  if echo "$REACTIONS" | grep -q "eyes"; then pass "👀 reaction on /agents devise comment"; else warn "👀 reaction missing on /agents devise comment"; fi
+  if echo "$REACTIONS" | grep -q "+1";   then pass "👍 reaction on /agents devise comment"; else warn "👍 reaction missing on /agents devise comment"; fi
 fi
 
 # Labels
 LABELS=$(gh issue view $FEATURE $REPO_ARG --json labels --jq '[.labels[].name] | join(",")')
-if echo "$LABELS" | grep -q "feature"; then pass "Label 'feature' applied to #$FEATURE"; else fail "Label 'feature' missing"; fi
-if echo "$LABELS" | grep -q "draft";   then pass "Label 'draft' applied to #$FEATURE";   else fail "Label 'draft' missing"; fi
+if echo "$LABELS" | grep -q "Ready"; then pass "Label 'Ready' applied to #$FEATURE"; else fail "Label 'Ready' missing"; fi
 
 # Body changed
 CURRENT_BODY=$(gh issue view $FEATURE $REPO_ARG --json body --jq '.body')
 if [[ "$CURRENT_BODY" != "$SEED_BODY_NOW" ]]; then
-  pass "Feature body updated by plan-agent (${#CURRENT_BODY} chars vs ${#SEED_BODY_NOW} initial)"
+  pass "Feature body updated by tactical-agent (${#CURRENT_BODY} chars vs ${#SEED_BODY_NOW} initial)"
 else
-  fail "Feature body unchanged — plan-agent did not write the plan"
+  fail "Feature body unchanged — tactical-agent did not write the plan"
 fi
 
 # Extract task numbers from YAML block. Use a grep-only approach so we
@@ -409,10 +408,10 @@ done
 
 # Feature labels stripped
 FINAL_LABELS=$(gh issue view $FEATURE $REPO_ARG --json labels --jq '[.labels[].name] | join(",")')
-if ! echo "$FINAL_LABELS" | grep -q "feature"; then
-  pass "Label 'feature' removed from #$FEATURE"
+if ! echo "$FINAL_LABELS" | grep -q "Ready"; then
+  pass "Label 'Ready' removed from #$FEATURE"
 else
-  fail "Label 'feature' still present (got: $FINAL_LABELS)"
+  fail "Label 'Ready' still present (got: $FINAL_LABELS)"
 fi
 if ! echo "$FINAL_LABELS" | grep -q "draft"; then
   pass "Label 'draft' removed from #$FEATURE"

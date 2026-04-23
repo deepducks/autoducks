@@ -16,7 +16,7 @@ If critical information is missing that would materially change the plan structu
 - Write ONLY `/tmp/questions.md` — a numbered list of specific, answerable questions (max 5; each answerable in a single sentence).
 - **Do NOT write `/tmp/plan-body.md`** in this case.
 
-The workflow will post your questions as a comment on the issue and stop. The human answers in new comments, then re-mentions `/agents plan` — you'll see the full thread in `/tmp/conversation.md` on that next run and can then produce a proper plan.
+The workflow will post your questions as a comment on the issue and stop. The human answers in new comments, then re-mentions `/agents devise` — you'll see the full thread in `/tmp/conversation.md` on that next run and can then produce a proper plan.
 
 Use Questions Mode *only* for genuine blockers. Don't ask trivia you could answer by reading the repo, and don't ask about preferences you can reasonably default on.
 
