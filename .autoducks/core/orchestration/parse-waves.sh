@@ -13,17 +13,19 @@ parse_yaml_plan() {
   [[ -z "$yaml_block" ]] && return 1
   echo "$yaml_block" | grep -q 'waves:' || return 1
 
-  local wave_idx=0
+  local wave_idx=0 _name _num
   while IFS= read -r line; do
     if echo "$line" | grep -qE '^  - name:'; then
-      local name
-      name=$(echo "$line" | sed 's/.*name:[[:space:]]*//')
-      echo "WAVE|${wave_idx}|${name}"
+      _name=$(echo "$line" | sed 's/.*name:[[:space:]]*//')
+      echo "WAVE|${wave_idx}|${_name}"
       ((wave_idx++)) || true
+    elif echo "$line" | grep -qE '^    tasks:'; then
+      while IFS= read -r _num; do
+        echo "TASK|$((wave_idx - 1))|${_num}"
+      done < <(echo "$line" | grep -oE '[0-9]+')
     elif echo "$line" | grep -qE '^      - [0-9]+'; then
-      local num
-      num=$(echo "$line" | grep -oE '[0-9]+')
-      echo "TASK|$((wave_idx - 1))|${num}"
+      _num=$(echo "$line" | grep -oE '[0-9]+')
+      echo "TASK|$((wave_idx - 1))|${_num}"
     fi
   done <<< "$yaml_block"
 
