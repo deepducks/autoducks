@@ -14,7 +14,7 @@ else
       break
     fi
     _dir="$(dirname "$_dir")"
-    (( _depth++ ))
+    (( _depth++ )) || true
   done
   if [[ -z "${AUTODUCKS_ROOT:-}" ]]; then
     echo "load-config: could not find autoducks.json" >&2
