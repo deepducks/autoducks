@@ -278,12 +278,12 @@ while [[ $WAITED -lt $MAX_WAIT ]]; do
   sleep $INTERVAL
   WAITED=$((WAITED + INTERVAL))
 
-  # Check if final PR is open
+  # Check if final PR is open (branch may have a slug suffix: feature/123-slug)
   FINAL_PR=$(gh pr list $REPO_ARG \
-    --head "feature/${FEATURE}" --base main \
+    --base main \
     --state all \
-    --json number,state \
-    --jq '.[0] // empty')
+    --json number,state,headRefName \
+    --jq "[.[] | select(.headRefName | startswith(\"feature/${FEATURE}\"))] | .[0] // empty")
 
   if [[ -n "$FINAL_PR" ]]; then
     PR_NUM=$(echo "$FINAL_PR" | jq -r '.number')
