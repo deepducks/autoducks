@@ -48,7 +48,7 @@ jobs:
           COMMENTER: ${{ github.event.comment.user.login || github.event.sender.login }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
-        uses: ./.autoducks/providers/llm/claude/action.yml
+        uses: ./.autoducks/providers/llm/claude
         with:
           prompt_file: .autoducks/agents/design/prompt.md
           allowed_tools: "Read,Write,Edit,Bash(read-only)"
