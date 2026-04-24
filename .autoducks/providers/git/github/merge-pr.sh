@@ -8,3 +8,9 @@ git::merge_pr() {
       -X PUT -f merge_method=merge --silent
   fi
 }
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  case "${1:-}" in
+    --help) echo "Usage: git::merge_pr PR_NUMBER"; echo "  Merge a pull request"; echo "  Requires: REPO env var"; exit 0 ;;
+  esac
+fi

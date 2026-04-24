@@ -9,3 +9,9 @@ git::push_branch() {
   fi
   git push -u origin "$branch"
 }
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  case "${1:-}" in
+    --help) echo "Usage: git::push_branch BRANCH_NAME"; echo "  Push a local branch to origin"; echo "  Requires: REPO env var"; exit 0 ;;
+  esac
+fi

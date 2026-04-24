@@ -8,3 +8,9 @@ git::list_runs() {
   [[ -n "$status" ]] && args+=(--status "$status")
   gh run list "${args[@]}"
 }
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  case "${1:-}" in
+    --help) echo "Usage: git::list_runs WORKFLOW [STATUS]"; echo "  List recent workflow runs (JSON)"; echo "  Requires: REPO env var"; exit 0 ;;
+  esac
+fi

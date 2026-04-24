@@ -12,3 +12,9 @@ its::react_to_comment() {
   gh api --method POST "repos/$REPO/issues/comments/$comment_id/reactions" \
     -f "content=$reaction" --silent || return 0
 }
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  case "${1:-}" in
+    --help) echo "Usage: its::react_to_comment COMMENT_ID REACTION"; echo "  Add an emoji reaction to a comment"; echo "  Requires: REPO env var"; exit 0 ;;
+  esac
+fi

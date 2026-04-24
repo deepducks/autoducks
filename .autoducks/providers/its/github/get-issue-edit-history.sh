@@ -15,3 +15,9 @@ its::get_issue_edit_history() {
       }
     }' -F "owner=${REPO%/*}" -F "name=${REPO#*/}" -F "num=$issue_id"
 }
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  case "${1:-}" in
+    --help) echo "Usage: its::get_issue_edit_history ISSUE_ID"; echo "  Fetch issue edit history via GraphQL (JSON)"; echo "  Requires: REPO env var"; exit 0 ;;
+  esac
+fi

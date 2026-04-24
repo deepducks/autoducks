@@ -7,6 +7,7 @@ source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/update-checkboxes.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/parse-waves.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/prevent-duplicate-dispatch.sh"
+source "$AUTODUCKS_ROOT/core/orchestration/create-final-pr.sh"
 
 log() { echo "[wave-orchestrator] $*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
@@ -115,20 +116,13 @@ if [[ $NEXT_WAVE -eq -1 ]]; then
 
   if [[ "$all_complete" == "true" ]]; then
     # All done — create final PR if needed
-    EXISTING_PR=$(gh pr list --repo "$REPO" --head "$FEATURE_BRANCH" --base "$AUTODUCKS_BASE_BRANCH" --state all --json number --jq '.[0].number // empty' 2>/dev/null || true)
-
-    if [[ -z "$EXISTING_PR" ]]; then
-      # Build closes references
-      ALL_TASKS=""
-      for ((w=0; w<TOTAL_WAVES; w++)); do
-        for t in ${WAVE_TASKS[$w]:-}; do
-          ALL_TASKS+="Closes #$t\n"
-        done
+    ALL_TASK_NUMS=()
+    for ((w=0; w<TOTAL_WAVES; w++)); do
+      for t in ${WAVE_TASKS[$w]:-}; do
+        ALL_TASK_NUMS+=("$t")
       done
-      ALL_TASKS+="Closes #$FEATURE"
-
-      git::create_pr "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "Feature #$FEATURE: $ISSUE_TITLE" "$(echo -e "$ALL_TASKS")"
-    fi
+    done
+    create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "$ISSUE_TITLE" "${ALL_TASK_NUMS[@]}"
 
     its::comment_issue "$FEATURE" "**All waves complete!** The feature PR is ready for review."
   else

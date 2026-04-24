@@ -31,3 +31,9 @@ its::create_issue() {
 
   echo "$issue_number"
 }
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  case "${1:-}" in
+    --help) echo "Usage: its::create_issue TITLE BODY_FILE [LABELS_CSV] [PARENT_ID]"; echo "  Create an issue, returns issue number"; echo "  Requires: REPO env var"; exit 0 ;;
+  esac
+fi

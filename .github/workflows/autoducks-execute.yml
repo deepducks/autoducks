@@ -44,13 +44,7 @@ jobs:
           fetch-depth: 0
       - name: Load agent defaults
         id: agent
-        run: |
-          cfg=".autoducks/agents/execution/defaults.json"
-          global=".autoducks/autoducks.json"
-          model=$(jq -r '.model // empty' "$cfg" 2>/dev/null || jq -r '.defaults.model // empty' "$global")
-          reasoning=$(jq -r '.reasoning // empty' "$cfg" 2>/dev/null || jq -r '.defaults.reasoning // empty' "$global")
-          echo "model=${model:-claude-sonnet-4-6}" >> "$GITHUB_OUTPUT"
-          echo "reasoning=${reasoning:-high}" >> "$GITHUB_OUTPUT"
+        run: AUTODUCKS_AGENT=execution bash .autoducks/core/config/load-agent-defaults.sh >> "$GITHUB_OUTPUT"
       - name: Set context
         id: ctx
         run: |

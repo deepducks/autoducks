@@ -22,13 +22,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Load agent defaults
         id: agent
-        run: |
-          cfg=".autoducks/agents/tactical/defaults.json"
-          global=".autoducks/autoducks.json"
-          model=$(jq -r '.model // empty' "$cfg" 2>/dev/null || jq -r '.defaults.model // empty' "$global")
-          reasoning=$(jq -r '.reasoning // empty' "$cfg" 2>/dev/null || jq -r '.defaults.reasoning // empty' "$global")
-          echo "model=${model:-claude-sonnet-4-6}" >> "$GITHUB_OUTPUT"
-          echo "reasoning=${reasoning:-high}" >> "$GITHUB_OUTPUT"
+        run: AUTODUCKS_AGENT=tactical bash .autoducks/core/config/load-agent-defaults.sh >> "$GITHUB_OUTPUT"
       - name: Parse directive
         id: directive
         run: |

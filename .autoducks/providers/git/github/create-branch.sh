@@ -10,3 +10,9 @@ git::create_branch() {
     -f "ref=refs/heads/$name" \
     -f "sha=$sha" --silent
 }
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  case "${1:-}" in
+    --help) echo "Usage: git::create_branch BASE_BRANCH BRANCH_NAME"; echo "  Create a new remote branch from base"; echo "  Requires: REPO env var"; exit 0 ;;
+  esac
+fi

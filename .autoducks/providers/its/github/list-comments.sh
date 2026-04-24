@@ -12,3 +12,9 @@ its::list_comments() {
 
   gh api "$url" --jq '[.[] | {id, author: .user.login, body, created_at, updated_at}]'
 }
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  case "${1:-}" in
+    --help) echo "Usage: its::list_comments ISSUE_ID [LIMIT]"; echo "  List comments on an issue (JSON)"; echo "  Requires: REPO env var"; exit 0 ;;
+  esac
+fi

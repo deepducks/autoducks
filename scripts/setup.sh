@@ -19,6 +19,7 @@
 #   4. Repository Actions workflow permissions — reports if wrong
 #   5. Claude Code GitHub App installation — reports if missing
 #   6. Issue types (Feature, Task) at the org level — reports if missing
+#   7. Runtime workflow sync — verifies .autoducks/runtimes match .github/workflows
 # =============================================================================
 
 set -euo pipefail
@@ -157,6 +158,25 @@ else
       Create them at: https://github.com/organizations/$ORG/settings/issue-types
       Workflows keep running without this — they just won't set the native type."
   fi
+fi
+echo ""
+
+# --- Check 7: Runtime sync ---
+echo "[7/7] Runtime workflow sync"
+SYNC_OK=true
+for runtime in .autoducks/runtimes/github-actions/autoducks-*.yml; do
+  bn=$(basename "$runtime")
+  target=".github/workflows/$bn"
+  if [[ ! -f "$target" ]]; then
+    fail "Missing workflow: $target (run: cp $runtime $target)"
+    SYNC_OK=false
+  elif ! diff -q "$runtime" "$target" &>/dev/null; then
+    fail "Out of sync: $target differs from $runtime"
+    SYNC_OK=false
+  fi
+done
+if [[ "$SYNC_OK" == "true" ]]; then
+  pass "All runtimes synced to .github/workflows/"
 fi
 echo ""
 
