@@ -27,12 +27,19 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Read prompt
+      id: prompt
+      shell: bash
+      run: |
+        PROMPT=$(cat "${{ inputs.prompt_file }}")
+        {
+          echo "content<<PROMPT_EOF"
+          echo "$PROMPT"
+          echo "PROMPT_EOF"
+        } >> "$GITHUB_OUTPUT"
     - name: Run Claude agent
       uses: anthropics/claude-code-action@v1
       with:
-        prompt_file: ${{ inputs.prompt_file }}
-        allowed_tools: ${{ inputs.allowed_tools }}
-        model: ${{ inputs.model }}
-        max_turns: ${{ inputs.max_turns }}
-        timeout_minutes: ${{ inputs.timeout_minutes }}
+        prompt: ${{ steps.prompt.outputs.content }}
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
+        claude_args: "--model ${{ inputs.model }} --max-turns ${{ inputs.max_turns }} --allowedTools '${{ inputs.allowed_tools }}'"
