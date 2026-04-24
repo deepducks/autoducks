@@ -49,12 +49,6 @@ jobs:
         run: source .autoducks/core/config/parse-directive.sh >> "$GITHUB_OUTPUT"
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
-      - name: React
-        if: github.event_name == 'issue_comment'
-        run: bash -c 'source .autoducks/core/feedback/react-to-comment.sh && react_to_comment "$1" eyes' _ "${{ github.event.comment.id }}"
-        env:
-          REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run orchestrator
         run: bash .autoducks/agents/waveOrchestrator/run.sh
         env:

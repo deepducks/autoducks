@@ -13,6 +13,8 @@ die() { log "ERROR: $*"; exit 1; }
 
 trap 'notify_failure "$FEATURE" "$RUN_ID" 2>/dev/null || true; exit 1' ERR
 
+react_to_comment "${COMMENT_ID:-}" "eyes"
+
 # --- Phase 1: Determine feature issue ---
 FEATURE="${FEATURE_ISSUE:?FEATURE_ISSUE env var required}"
 
