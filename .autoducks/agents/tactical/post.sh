@@ -56,7 +56,6 @@ echo "$FEATURE_BODY" > /tmp/feature-body.md
 its::update_issue_body "$ISSUE_NUM" /tmp/feature-body.md
 
 # Labels and type (idempotent — safe on both first pass and revision)
-its::add_label "$ISSUE_NUM" "Feature"
 its::add_label "$ISSUE_NUM" "Ready"
 its::set_issue_type "$ISSUE_NUM" "Feature" 2>/dev/null || true
 
