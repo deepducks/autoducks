@@ -7,6 +7,14 @@ source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/robustness/assert-changes.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/trigger-loop-closure.sh"
 
+# Reconstruct state from git (pre.sh exports don't persist across GHA steps)
+TASK_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
+FEATURE_NUM=""
+if [[ "$TASK_BRANCH" =~ ^feature/([0-9]+)-issue- ]]; then
+  FEATURE_NUM="${BASH_REMATCH[1]}"
+fi
+
 # Check for changes (allow existing commits on reused branch)
 assert_changes || true
 

@@ -33,3 +33,9 @@ if [[ "$IS_REVISION" == "true" ]]; then
 fi
 
 export IS_REVISION
+
+# Persist across GHA steps
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+  echo "IS_REVISION=$IS_REVISION" >> "$GITHUB_ENV"
+  echo "OLD_NUMBERS=${OLD_NUMBERS:-}" >> "$GITHUB_ENV"
+fi
