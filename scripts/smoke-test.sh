@@ -97,7 +97,6 @@ echo ""
 
 # --- Ensure labels exist ---
 echo "[1/5] Ensuring labels exist..."
-gh label create "Feature" --color "6F42C1" --description "Orchestration feature issue" $REPO_ARG 2>/dev/null || true
 gh label create "Ready"   --color "0E8A16" --description "Plan complete, ready for execution" $REPO_ARG 2>/dev/null || true
 gh label create "smoke-test" --color "FFA500" --description "Smoke test" $REPO_ARG 2>/dev/null || true
 gh label create "priority:P0" --color "B60205" --description "Critical" $REPO_ARG 2>/dev/null || true
@@ -226,10 +225,15 @@ fi
 
 META_URL=$(gh issue create $REPO_ARG \
   --title "Feature: Smoke Test ${TIMESTAMP}" \
-  --label "Feature,Ready,smoke-test" \
+  --label "Ready,smoke-test" \
   --body "$META_BODY")
 FEATURE=$(echo "$META_URL" | grep -oE '[0-9]+$')
 echo "  Feature: #$FEATURE"
+
+# Set issue type to Feature (workflow guards check type, not label)
+REPO_NAME="${REPO:-$(gh repo view --json nameWithOwner --jq '.nameWithOwner')}"
+gh api "repos/$REPO_NAME/issues/$FEATURE" --method PATCH -f "type=Feature" --silent 2>/dev/null \
+  || echo "  ⚠️  Could not set issue type=Feature (types may not be configured at the org)"
 
 # --- Kickstart ---
 echo "[4/5] Kickstarting the loop..."
