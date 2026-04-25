@@ -55,32 +55,33 @@ FEATURE_BODY=$(echo "$PLAN_BODY" | awk '
 echo "$FEATURE_BODY" > /tmp/feature-body.md
 its::update_issue_body "$ISSUE_NUM" /tmp/feature-body.md
 
-if [[ "${IS_REVISION:-false}" != "true" ]]; then
-  # First pass: set up labels, type, branch, PR
+# Labels and type (idempotent — safe on both first pass and revision)
+its::add_label "$ISSUE_NUM" "Feature"
+its::add_label "$ISSUE_NUM" "Ready"
+its::set_issue_type "$ISSUE_NUM" "Feature" 2>/dev/null || true
 
-  # Ensure priority labels exist
-  for p in P0 P1 P2 P3; do
-    gh label create "priority:$p" --repo "$REPO" 2>/dev/null || true
-  done
+# Feature branch and PR — create if missing (handles first pass and
+# recovery from a prior run that crashed before reaching this point)
+ISSUE_TITLE=$(its::get_issue "$ISSUE_NUM" | jq -r '.title')
+SLUG=$(git::generate_slug "$ISSUE_NUM" "$ISSUE_TITLE")
+FEATURE_BRANCH="feature/$SLUG"
 
-  # Add Ready label
-  its::add_label "$ISSUE_NUM" "Ready"
-
-  # Set issue type to Feature (if not already)
-  its::set_issue_type "$ISSUE_NUM" "Feature" 2>/dev/null || true
-
-  # Create feature branch and PR
-  ISSUE_TITLE=$(its::get_issue "$ISSUE_NUM" | jq -r '.title')
-  SLUG=$(git::generate_slug "$ISSUE_NUM" "$ISSUE_TITLE")
-  FEATURE_BRANCH="feature/$SLUG"
-
+if ! git::branch_exists "$FEATURE_BRANCH"; then
   git::create_branch "$AUTODUCKS_BASE_BRANCH" "$FEATURE_BRANCH"
+fi
 
+EXISTING_FEATURE_PR=$(gh pr list --repo "$REPO" --head "$FEATURE_BRANCH" --base "$AUTODUCKS_BASE_BRANCH" --json number --jq '.[0].number // empty' 2>/dev/null || true)
+if [[ -z "$EXISTING_FEATURE_PR" ]]; then
   PR_TITLE="Feature #$ISSUE_NUM: $ISSUE_TITLE"
   PR_BODY="Closes #$ISSUE_NUM"
   git::create_pr "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "$PR_TITLE" "$PR_BODY" || true
+fi
 
-  # Assign commenter
+if [[ "${IS_REVISION:-false}" != "true" ]]; then
+  # First pass only: priority labels and assignee
+  for p in P0 P1 P2 P3; do
+    gh label create "priority:$p" --repo "$REPO" 2>/dev/null || true
+  done
   gh issue edit "$ISSUE_NUM" --repo "$REPO" --add-assignee "$COMMENTER" 2>/dev/null || true
 fi
 
