@@ -1,0 +1,9 @@
+{
+  "name": "@embark/autoducks-docs",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "bun run --cwd docs dev",
+    "build": "bun install --cwd docs && bun run --cwd docs build && rm -rf dist && cp -r docs/dist dist"
+  }
+}
