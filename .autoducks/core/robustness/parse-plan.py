@@ -66,10 +66,57 @@ def fail(reason: str, hint: str = "", excerpt: str = "") -> None:
     sys.exit(1)
 
 
-def extract_tasks_section(content: str) -> str:
+FENCE_RE = re.compile(r"(`{3,}|~{3,})")
+
+
+def _blank(line: str) -> str:
+    """Blank a line's visible chars to spaces, keeping newlines (and offsets)."""
+    return "".join(ch if ch in "\r\n" else " " for ch in line)
+
+
+def mask_code_fences(text: str) -> str:
+    """Return a copy of `text` with fenced code blocks blanked out.
+
+    Every character inside a fenced code block (and the fence lines
+    themselves) is replaced by a space, while newlines are preserved. The
+    result is byte-for-byte the same length as the input, so match offsets
+    computed on the masked copy map 1:1 back onto the original — letting us
+    detect structure (headings, `**Name:**` markers) without being fooled by
+    marker-like lines that appear *inside* example code blocks, then slice the
+    real content (code blocks intact) from the original. Follows CommonMark:
+    a fence opens on a line of >=3 backticks/tildes (indent <=3) and closes on
+    a line of the same char, length >= the opener's, with no info string.
+    """
+    out = []
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+    for line in text.splitlines(keepends=True):
+        stripped = line.lstrip(" ")
+        indent = len(line) - len(stripped)
+        m = FENCE_RE.match(stripped) if indent <= 3 else None
+        if not in_fence:
+            if m:
+                in_fence, fence_char, fence_len = True, m.group(1)[0], len(m.group(1))
+                out.append(_blank(line))
+            else:
+                out.append(line)
+        else:
+            out.append(_blank(line))
+            if (
+                m is not None
+                and m.group(1)[0] == fence_char
+                and len(m.group(1)) >= fence_len
+                and stripped[len(m.group(1)):].strip() == ""
+            ):
+                in_fence, fence_char, fence_len = False, "", 0
+    return "".join(out)
+
+
+def extract_tasks_section(content: str, masked: str):
     m = re.search(
         r"^## Tasks\s*\n(?P<body>.*?)(?=^## |\Z)",
-        content,
+        masked,
         re.MULTILINE | re.DOTALL,
     )
     if not m:
@@ -78,25 +125,31 @@ def extract_tasks_section(content: str) -> str:
             hint="The plan must contain exactly one `## Tasks` heading with task blocks beneath it.",
             excerpt=content,
         )
-    return m.group("body")
+    s, e = m.span("body")
+    return content[s:e], masked[s:e]
 
 
-def split_task_blocks(tasks_section: str):
-    matches = list(HEADING_RE.finditer(tasks_section))
+def split_task_blocks(tasks_content: str, tasks_masked: str):
+    matches = list(HEADING_RE.finditer(tasks_masked))
     if not matches:
         fail(
             "No `### <ref> — <title> `priority:PN`` task headings found inside `## Tasks`.",
             hint="Each task must start with e.g. `### T1 — Short title `priority:P0``.",
-            excerpt=tasks_section,
+            excerpt=tasks_content,
         )
     for i, m in enumerate(matches):
         start = m.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(tasks_section)
-        yield m, tasks_section[start:end].strip()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(tasks_masked)
+        # Slices stay offset-aligned between original and masked; parse_task_body
+        # strips per-section, so we hand over the raw (unstripped) slices here.
+        yield m, tasks_content[start:end], tasks_masked[start:end]
 
 
-def parse_task_body(body: str, ref: str) -> dict:
-    sections = {sm.group("name"): sm.group("content").strip() for sm in SECTION_RE.finditer(body)}
+def parse_task_body(body: str, body_masked: str, ref: str) -> dict:
+    sections = {
+        sm.group("name"): body[slice(*sm.span("content"))].strip()
+        for sm in SECTION_RE.finditer(body_masked)
+    }
 
     for required in ("Summary", "Tasks", "Acceptance Criteria"):
         if required not in sections:
@@ -156,14 +209,19 @@ def main() -> None:
     if not content.strip():
         fail("Plan body file is empty.")
 
-    tasks_section = extract_tasks_section(content)
+    # Detect structure on a copy with code fences blanked out, so marker-like
+    # lines inside example code blocks can't be mistaken for real headings or
+    # sections; content is always sliced from the original (fences intact).
+    masked = mask_code_fences(content)
+
+    tasks_content, tasks_masked = extract_tasks_section(content, masked)
 
     entries = []
-    for heading, body in split_task_blocks(tasks_section):
+    for heading, body, body_masked in split_task_blocks(tasks_content, tasks_masked):
         ref_str = heading.group("ref")
         title = heading.group("title").strip()
         priority = heading.group("priority")
-        sections = parse_task_body(body, ref_str)
+        sections = parse_task_body(body, body_masked, ref_str)
         entries.append({
             "ref": coerce_ref(ref_str),
             "title": title,
