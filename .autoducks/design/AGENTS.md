@@ -129,7 +129,12 @@ Permissions:
 -->
 
 <!-- EXECUTION -->
-1. **[AGENT]** Creates the tactical plan, editing the issue and creating the dependent tasks. <!-- llm::deviseTacticalPlan(featureIssueId, featureIssueTitle, featureIssueDescription, featureIssueComments, featureIssueMetadata) -->
+1. **[AGENT]** Creates the tactical plan, **appending** it to the existing design spec via the tactical-zone markers — the design zone is never rewritten. <!-- llm::deviseTacticalPlan(featureIssueId, featureIssueTitle, featureIssueDescription, featureIssueComments, featureIssueMetadata) -->
+
+   The feature issue body is split into two zones by a pair of HTML-comment sentinels:
+   - **Design zone** — everything above `<!-- autoducks:tactical:begin -->`. Owned by the Design Agent and humans; the Tactical Agent preserves it byte-for-byte.
+   - **Tactical zone** — content between the sentinels. Owned by the Tactical Agent; contains the YAML wave plan, `## Progress` checkboxes, and `## Notes`.
+
 <!-- POST EXECUTION -->
 2. Each dependent task is created with the `Task` type and associated with the parent issue. <!-- its::createChildIssue(featureIssueId, taskTitle, taskDescription, taskType="Task") -->
 3. The `Ready` label is added to the issue. <!-- its::addLabel(featureIssueId, "Ready") -->

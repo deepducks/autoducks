@@ -52,17 +52,35 @@ The Tactical agent reads a designed feature issue and produces a tactical plan: 
 
 The agent reads the issue spec (and revision context if applicable) and produces:
 
-**Option A — a plan** written to `/tmp/plan-body.md`, with a `## Tasks` section containing task entries in the format:
+**Option A — a tactical zone** written to `/tmp/tactical-body.md`, containing only the tactical content (no design summary). Structure:
 ```markdown
-### T1 — Title
+## Plan
+
+```yaml
+waves:
+  - name: Wave 1
+    tasks: [T1]
+```
+
+## Tasks
+
+### T1 — Title `priority:P0`
 
 **Summary:** What this task does.
 
 **Tasks:**
 - [ ] Specific implementation step
 
-**AcceptanceCriteria:**
+**Acceptance Criteria:**
 - [ ] Testable criterion
+
+## Progress
+
+- [ ] #T1 Title `P0`
+
+## Notes
+
+Optional tactical caveats (design spec is NOT re-summarized here).
 ```
 
 **Option B — questions** written to `/tmp/questions.md` if critical information is missing to produce a good plan.
@@ -73,9 +91,9 @@ The agent reads the issue spec (and revision context if applicable) and produces
 <summary>Post-execution</summary>
 
 5. **Questions mode:** posts questions as a comment and exits (waits for human clarification).
-6. **Parse the plan:** `parse-plan.py` extracts tasks from the `## Tasks` section, validates structure, and produces `/tmp/tasks.jsonl`. On parse failure: posts error as comment and exits.
+6. **Parse the tactical body:** `parse-plan.py` extracts tasks from the `## Tasks` section, validates structure, and produces `/tmp/tasks.jsonl`. On parse failure: posts error as comment and exits.
 7. **Reconcile tasks:** creates new task issues, updates existing ones if changed, closes dropped tasks. Maps `T1`/`T2` placeholders to real issue numbers.
-8. Replaces `T1`/`T2` placeholders in the plan body with real issue numbers. Strips the `## Tasks` section (tasks are now separate issues). Updates the feature issue body.
+8. Replaces `T1`/`T2` placeholders with real issue numbers. Strips the `## Tasks` section (tasks are now separate issues). Assembles the final body by merging the design zone with the new tactical zone (separated by sentinel markers). Updates the feature issue body.
 9. **First pass only** (not revision): adds `Ready` label, sets issue type to `Feature`, creates feature branch `feature/{id}-{slug}`, creates a draft PR targeting `main`, assigns the commenter.
 10. Reacts with 👍 and posts a comment listing created tasks with a suggestion to run `/agents execute`.
 
@@ -88,6 +106,31 @@ The agent reads the issue spec (and revision context if applicable) and produces
 - **`Ready` label added** to the feature issue
 - **Feature branch created:** `feature/{id}-{slug}`
 - **Draft PR created** targeting `main` (first pass only)
+
+## Issue body zones
+
+After the first `/agents devise` run, the feature issue body is split into two zones separated by HTML-comment sentinels (invisible in rendered Markdown):
+
+```
+<!-- autoducks:tactical:begin -->
+...tactical zone content...
+<!-- autoducks:tactical:end -->
+```
+
+| Zone | Owned by | Content |
+|------|----------|---------|
+| **Design zone** — everything *above* the begin marker | Design Agent / humans | Problem statement, proposed solution, technical design, constraints, out-of-scope |
+| **Tactical zone** — content *between* the markers | Tactical Agent | `## Plan` (YAML waves), `## Progress` (task checkboxes), `## Notes` |
+
+The Tactical Agent **never rewrites the design zone**. On each `/agents devise` run it reads the design zone as read-only context and only updates the tactical zone.
+
+<Aside type="caution">
+If you manually remove or misplace the sentinel markers, the next `/agents devise` run will fail loudly with a `confused` reaction rather than silently overwriting your edits. Keep both markers intact.
+</Aside>
+
+<Aside>
+If you paste a snippet that duplicates the markers, the agent takes the first `begin` and the first `end` after it on the next revision. Any content after the first `end` marker is discarded. This is a known limitation.
+</Aside>
 
 ## Wave structure
 

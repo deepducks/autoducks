@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Parse /tmp/plan-body.md into /tmp/tasks.jsonl deterministically.
+Parse /tmp/tactical-body.md into /tmp/tasks.jsonl deterministically.
 
 Replaces the former LLM-based splitter-agent. Runs in <1s instead of ~8min.
 
@@ -9,7 +9,7 @@ On failure, writes a human-readable error report to /tmp/parse-error.md
 feedback about what to fix) and exits 1.
 
 Usage:
-  parse-plan.py <plan-body.md> <tasks.jsonl>
+  parse-plan.py <tactical-body.md> <tasks.jsonl>
 """
 import json
 import os
@@ -56,7 +56,7 @@ def fail(reason: str, hint: str = "", excerpt: str = "") -> None:
         parts.append(f"\n**Excerpt from your output:**\n\n```\n{snippet}\n```\n")
     parts.append(f"\n{TEMPLATE_HINT}\n")
     parts.append(
-        "\nPlease re-emit `/tmp/plan-body.md` matching this template exactly. "
+        "\nPlease re-emit `/tmp/tactical-body.md` matching this template exactly. "
         "Preserve your plan's content — only fix the formatting issue above.\n"
     )
     Path(ERROR_FILE).write_text("".join(parts))
@@ -197,7 +197,7 @@ def coerce_ref(ref_str: str):
 
 def main() -> None:
     if len(sys.argv) != 3:
-        sys.stderr.write("usage: parse-plan.py <plan-body.md> <tasks.jsonl>\n")
+        sys.stderr.write("usage: parse-plan.py <tactical-body.md> <tasks.jsonl>\n")
         sys.exit(2)
 
     plan_path, out_path = sys.argv[1], sys.argv[2]
