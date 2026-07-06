@@ -58,6 +58,7 @@ its::update_issue_body "$ISSUE_NUM" /tmp/feature-body.md
 # Labels and type (idempotent — safe on both first pass and revision)
 its::add_label "$ISSUE_NUM" "Ready"
 its::set_issue_type "$ISSUE_NUM" "Feature" 2>/dev/null || true
+its::add_label "$ISSUE_NUM" "Feature"
 
 # Feature branch and PR — create if missing (handles first pass and
 # recovery from a prior run that crashed before reaching this point)

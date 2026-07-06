@@ -15,8 +15,10 @@ fi
 # Update issue body with the design spec
 its::update_issue_body "$ISSUE_NUM" /tmp/design-spec.md
 
-# Set issue type to Feature
-its::set_issue_type "$ISSUE_NUM" "Feature"
+# Route-critical: label makes routing work on every repo kind.
+# Type is best-effort (org-only feature — silently no-ops on user repos).
+its::set_issue_type "$ISSUE_NUM" "Feature" 2>/dev/null || true
+its::add_label       "$ISSUE_NUM" "Feature"
 
 # Remove Draft label if present
 its::remove_label "$ISSUE_NUM" "Draft" 2>/dev/null || true

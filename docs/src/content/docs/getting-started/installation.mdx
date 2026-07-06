@@ -77,7 +77,7 @@ The script checks and auto-creates what it can, and reports what requires manual
 
 5. **Claude Code GitHub App** — reminds you to install the app at [github.com/apps/claude](https://github.com/apps/claude). Cannot be verified programmatically.
 
-6. **Issue types (Feature, Task)** — checks org-level issue types. Workflows run without them, but typed issue relationships won't appear in the issue tracker UI.
+6. **Issue types (Feature, Task)** — checks org-level issue types. Workflows run without them, but typed issue relationships won't appear in the issue tracker UI. Routing is driven by the `Feature` label (which the tactical and design agents apply automatically); the native type is a visual enhancement for org repos.
 
 7. **Runtime workflow sync** — verifies that `.github/workflows/autoducks-*.yml` match `.autoducks/runtimes/github-actions/`. Fails if out of sync.
 

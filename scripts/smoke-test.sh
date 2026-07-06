@@ -225,7 +225,7 @@ fi
 
 META_URL=$(gh issue create $REPO_ARG \
   --title "Feature: Smoke Test ${TIMESTAMP}" \
-  --label "Ready,smoke-test" \
+  --label "Feature,Ready,smoke-test" \
   --body "$META_BODY")
 FEATURE=$(echo "$META_URL" | grep -oE '[0-9]+$')
 echo "  Feature: #$FEATURE"
