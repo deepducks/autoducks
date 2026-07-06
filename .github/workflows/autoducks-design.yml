@@ -40,7 +40,7 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ github.event.comment.user.login || github.event.sender.login }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
         uses: ./.autoducks/providers/llm/claude
         with:
@@ -61,4 +61,4 @@ jobs:
           COMMENTER: ${{ github.event.comment.user.login || github.event.sender.login }}
           MODEL: ${{ steps.directive.outputs.model || steps.agent.outputs.model }}
           REASONING: ${{ steps.directive.outputs.reasoning || steps.agent.outputs.reasoning }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
