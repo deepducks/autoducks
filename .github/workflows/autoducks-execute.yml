@@ -63,6 +63,7 @@ jobs:
         env:
           COMMENT_BODY: ${{ github.event.comment.body || '' }}
       - name: Pre-execution
+        id: pre
         run: bash .autoducks/agents/execution/pre.sh
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
@@ -72,6 +73,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
+        if: steps.pre.outputs.duplicate_skip != 'true'
         uses: ./.autoducks/providers/llm/claude
         with:
           prompt_file: .autoducks/agents/execution/prompt.md
@@ -81,7 +83,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       - name: Post-execution
-        if: always()
+        if: always() && steps.pre.outputs.duplicate_skip != 'true'
         run: bash .autoducks/agents/execution/post.sh
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}

@@ -17,6 +17,23 @@ if [[ "$BASE_BRANCH" =~ ^feature/([0-9]+) ]]; then
   FEATURE_NUM="${BASH_REMATCH[1]}"
 fi
 
+# Idempotency guard: bail if this task already has an open PR on the feature branch.
+# Closes the window between orchestrator dispatch and PR creation, where two
+# orchestrator runs may both pass prevent_duplicate_dispatch's open-PR check.
+if [[ -n "$FEATURE_NUM" ]]; then
+  EXISTING_PR=$(git::list_open_prs "$BASE_BRANCH" \
+    | jq -r --arg t "$ISSUE_NUM" \
+        '[.[] | select(.body | test("(?i)(fixes|closes|resolves)\\s+#" + $t + "\\b"))] | .[0].number // empty')
+  if [[ -n "$EXISTING_PR" ]]; then
+    echo "::notice::Task #$ISSUE_NUM already has open PR #$EXISTING_PR — skipping duplicate execution."
+    react_to_comment "${COMMENT_ID:-}" "+1" 2>/dev/null || true
+    if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+      echo "duplicate_skip=true" >> "$GITHUB_OUTPUT"
+    fi
+    exit 0
+  fi
+fi
+
 # Wait for base branch to be visible
 if [[ "$BASE_BRANCH" != "$AUTODUCKS_BASE_BRANCH" ]]; then
   wait_for_branch "$BASE_BRANCH"

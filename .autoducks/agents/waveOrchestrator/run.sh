@@ -139,7 +139,7 @@ else
     [[ -z "$t" ]] && continue
     is_done "$t" && { SKIPPED+=("$t"); continue; }
 
-    if ! prevent_duplicate_dispatch "$t" "$FEATURE_BRANCH" "autoducks-execute.yml" 2>/dev/null; then
+    if ! prevent_duplicate_dispatch "$t" "$FEATURE_BRANCH" 2>/dev/null; then
       SKIPPED+=("$t")
       continue
     fi
