@@ -271,6 +271,64 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test 10: split_body — a marker string mentioned inside content (prose / code
+# block) must NOT be treated as a real sentinel (regressions: unanchored match)
+# ---------------------------------------------------------------------------
+echo "[10] split_body — marker mentioned in design prose is not a sentinel"
+{
+  printf '## Design\n\n'
+  printf 'We split the body with `<!-- autoducks:tactical:begin -->` as the sentinel.\n'
+  printf 'This whole paragraph is design content that MUST be preserved.\n\n'
+  printf '<!-- autoducks:tactical:begin -->\n'
+  printf '## Plan\nreal tactical\n'
+  printf '<!-- autoducks:tactical:end -->\n'
+} > "$SCRATCH/t10_body.md"
+RC=0
+split_body "$SCRATCH/t10_body.md" "$SCRATCH/t10_d.md" "$SCRATCH/t10_t.md" || RC=$?
+if [[ "$RC" -eq 0 ]]; then
+  pass "exit code 0 (real markers found, mention ignored)"
+else
+  fail "expected exit code 0, got $RC"
+fi
+if grep -q "MUST be preserved" "$SCRATCH/t10_d.md"; then
+  pass "design zone keeps content that mentions the marker"
+else
+  fail "design zone truncated at the mention: '$(cat "$SCRATCH/t10_d.md")'"
+fi
+if grep -q "MUST be preserved" "$SCRATCH/t10_t.md"; then
+  fail "design content leaked into tactical zone: '$(cat "$SCRATCH/t10_t.md")'"
+else
+  pass "tactical zone free of leaked design content"
+fi
+if grep -q "real tactical" "$SCRATCH/t10_t.md"; then
+  pass "tactical zone holds the real tactical content"
+else
+  fail "tactical zone missing real content: '$(cat "$SCRATCH/t10_t.md")'"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 11: assemble_body — tactical zone without a trailing newline must not
+# glue the END marker onto the last tactical line
+# ---------------------------------------------------------------------------
+echo "[11] assemble_body — END marker stays at column 0 without trailing newline"
+printf '## Design content\n' > "$SCRATCH/t11_d.md"
+printf 'no trailing newline' > "$SCRATCH/t11_t.md"   # deliberately no final \n
+assemble_body "$SCRATCH/t11_d.md" "$SCRATCH/t11_t.md" "$SCRATCH/t11_out.md"
+if grep -qE '^<!-- autoducks:tactical:end -->$' "$SCRATCH/t11_out.md"; then
+  pass "END marker on its own line at column 0"
+else
+  fail "END marker glued: '$(tail -1 "$SCRATCH/t11_out.md")'"
+fi
+# And the assembled body must still round-trip cleanly
+RC=0
+split_body "$SCRATCH/t11_out.md" "$SCRATCH/t11_d2.md" "$SCRATCH/t11_t2.md" || RC=$?
+if [[ "$RC" -eq 0 ]] && grep -q "no trailing newline" "$SCRATCH/t11_t2.md"; then
+  pass "assembled body splits back cleanly"
+else
+  fail "round-trip after no-newline tactical failed (rc=$RC)"
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""

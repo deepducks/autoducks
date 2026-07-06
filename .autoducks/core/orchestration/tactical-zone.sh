@@ -23,9 +23,12 @@ split_body() {
   local design_out="$2"
   local tactical_out="$3"
 
+  # Match markers only as whole lines (leading/trailing whitespace tolerated) so a
+  # marker string merely *mentioned* in prose or a code block inside the design or
+  # tactical content can't be mistaken for a real sentinel and corrupt the split.
   local has_begin has_end
-  has_begin=$(grep -cF '<!-- autoducks:tactical:begin -->' "$body_file" || true)
-  has_end=$(grep -cF '<!-- autoducks:tactical:end -->' "$body_file" || true)
+  has_begin=$(grep -cE '^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$' "$body_file" || true)
+  has_end=$(grep -cE '^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$' "$body_file" || true)
 
   if [[ "$has_begin" -eq 0 && "$has_end" -eq 0 ]]; then
     cp "$body_file" "$design_out"
@@ -40,8 +43,8 @@ split_body() {
   fi
 
   local begin_line end_line
-  begin_line=$(grep -nF '<!-- autoducks:tactical:begin -->' "$body_file" | head -1 | cut -d: -f1)
-  end_line=$(grep -nF '<!-- autoducks:tactical:end -->' "$body_file" | head -1 | cut -d: -f1)
+  begin_line=$(grep -nE '^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$' "$body_file" | head -1 | cut -d: -f1)
+  end_line=$(grep -nE '^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$' "$body_file" | head -1 | cut -d: -f1)
 
   if [[ "$begin_line" -ge "$end_line" ]]; then
     printf 'tactical-zone: malformed body — end marker (line %s) is not after begin marker (line %s)\n' \
@@ -49,13 +52,14 @@ split_body() {
     return 2
   fi
 
-  # Design zone: every line before the begin marker (tolerates leading whitespace on markers)
-  awk '/[[:space:]]*<!-- autoducks:tactical:begin -->/{exit} {print}' "$body_file" > "$design_out"
+  # Design zone: every line before the begin marker (marker matched as a whole line,
+  # leading/trailing whitespace tolerated)
+  awk '/^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$/{exit} {print}' "$body_file" > "$design_out"
 
   # Tactical zone: lines strictly between the two markers
   awk '
-    /[[:space:]]*<!-- autoducks:tactical:begin -->/ { found=1; next }
-    /[[:space:]]*<!-- autoducks:tactical:end -->/   { exit }
+    /^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$/ { found=1; next }
+    /^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$/   { exit }
     found { print }
   ' "$body_file" > "$tactical_out"
 
@@ -88,7 +92,13 @@ assemble_body() {
       { printf "%s", blanks; blanks = ""; print }
     ' "$design_file"
     printf '\n%s\n' "$TACTICAL_ZONE_BEGIN"
-    cat "$tactical_file"
+    # `awk '{print}'` guarantees the content ends with exactly one newline, so a
+    # tactical zone lacking a trailing newline can't glue itself onto the END
+    # marker (which must stay on its own line at column 0). Skip for an empty
+    # zone so begin/end stay adjacent.
+    if [[ -s "$tactical_file" ]]; then
+      awk '{print}' "$tactical_file"
+    fi
     printf '%s\n' "$TACTICAL_ZONE_END"
   } > "$output_file"
 }
@@ -97,6 +107,6 @@ assemble_body() {
 # Returns 0 if both markers are present, 1 otherwise.
 body_has_markers() {
   local body_file="$1"
-  grep -qF '<!-- autoducks:tactical:begin -->' "$body_file" && \
-  grep -qF '<!-- autoducks:tactical:end -->'   "$body_file"
+  grep -qE '^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$' "$body_file" && \
+  grep -qE '^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$'   "$body_file"
 }
