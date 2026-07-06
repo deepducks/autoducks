@@ -8,5 +8,6 @@ trigger_loop_closure() {
 
   [[ -z "$feature_issue" || "$feature_issue" == "0" ]] && return 0
 
-  git::dispatch_workflow "autoducks-wave.yml" -f "feature_issue=$feature_issue"
+  # No-op: pull_request: closed on autoducks-wave.yml is the canonical advancement trigger
+  return 0
 }
