@@ -17,6 +17,14 @@ permissions:
   pull-requests: write
   actions: write
 
+concurrency:
+  group: >-
+    autoducks-wave-${{
+      github.event_name == 'workflow_dispatch' && inputs.feature_issue ||
+      github.event_name == 'pull_request'      && github.event.pull_request.base.ref ||
+      github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   orchestrate:
     if: >-
