@@ -17,16 +17,8 @@ permissions:
   pull-requests: write
   actions: write
 
-concurrency:
-  group: >-
-    autoducks-wave-${{
-      github.event_name == 'workflow_dispatch' && inputs.feature_issue ||
-      github.event_name == 'pull_request'      && github.event.pull_request.base.ref ||
-      github.event.issue.number }}
-  cancel-in-progress: false
-
 jobs:
-  orchestrate:
+  resolve:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
@@ -39,8 +31,9 @@ jobs:
         contains(github.event.issue.labels.*.name, 'Feature')) &&
        contains(github.event.issue.labels.*.name, 'Ready'))
     runs-on: ubuntu-latest
+    outputs:
+      feature_number: ${{ steps.feature.outputs.number }}
     steps:
-      - uses: actions/checkout@v4
       - name: Determine feature issue
         id: feature
         run: |
@@ -52,6 +45,16 @@ jobs:
           else
             echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
           fi
+
+  orchestrate:
+    needs: resolve
+    if: needs.resolve.outputs.feature_number != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: autoducks-wave-${{ needs.resolve.outputs.feature_number }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
       - name: Parse directive
         id: directive
         if: github.event_name == 'issue_comment'
@@ -61,7 +64,7 @@ jobs:
       - name: Run orchestrator
         run: bash .autoducks/agents/waveOrchestrator/run.sh
         env:
-          FEATURE_ISSUE: ${{ steps.feature.outputs.number }}
+          FEATURE_ISSUE: ${{ needs.resolve.outputs.feature_number }}
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           RUN_ID: ${{ github.run_id }}
