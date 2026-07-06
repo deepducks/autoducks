@@ -6,6 +6,7 @@ source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/robustness/ask-questions.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/reconcile-tasks.sh"
+source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 
 # Questions mode: if the agent wrote questions instead of a plan
 if [[ -f /tmp/questions.md ]]; then
@@ -14,16 +15,16 @@ if [[ -f /tmp/questions.md ]]; then
   exit 0
 fi
 
-# Validate plan was produced
-if [[ ! -f /tmp/plan-body.md ]]; then
+# Validate tactical zone was produced
+if [[ ! -f /tmp/tactical-body.md ]]; then
   notify_failure "$ISSUE_NUM" "$RUN_ID"
   react_to_comment "$COMMENT_ID" "confused"
   exit 1
 fi
 
-# Parse the plan
+# Parse the tactical body
 PARSE_ERROR_FILE=/tmp/parse-error.md
-if ! python3 "$AUTODUCKS_ROOT/core/robustness/parse-plan.py" /tmp/plan-body.md /tmp/tasks.jsonl; then
+if ! python3 "$AUTODUCKS_ROOT/core/robustness/parse-plan.py" /tmp/tactical-body.md /tmp/tasks.jsonl; then
   # Parse failed — post error and exit (runtime may retry)
   if [[ -f "$PARSE_ERROR_FILE" ]]; then
     its::comment_issue "$ISSUE_NUM" "$(cat "$PARSE_ERROR_FILE")"
@@ -38,21 +39,23 @@ RECONCILE_OUTPUT=$(reconcile_tasks "$ISSUE_NUM" /tmp/tasks.jsonl "${OLD_NUMBERS:
 # Extract task numbers and placeholder mappings
 TASK_NUMBERS=$(echo "$RECONCILE_OUTPUT" | grep '^TASK_NUMBERS=' | sed 's/^TASK_NUMBERS=//')
 
-# Replace placeholders in plan body
-PLAN_BODY=$(cat /tmp/plan-body.md)
+# Replace placeholders in tactical body
+TACTICAL_BODY=$(cat /tmp/tactical-body.md)
 while IFS='|' read -r _ placeholder real_num; do
-  PLAN_BODY=$(echo "$PLAN_BODY" | perl -pe "s/\\b\\Q${placeholder}\\E\\b/${real_num}/g")
+  TACTICAL_BODY=$(echo "$TACTICAL_BODY" | perl -pe "s/\\b\\Q${placeholder}\\E\\b/${real_num}/g")
 done < <(echo "$RECONCILE_OUTPUT" | grep '^PLACEHOLDER|')
 
-# Strip ## Tasks section from the plan body (tasks are now separate issues)
-FEATURE_BODY=$(echo "$PLAN_BODY" | awk '
+# Strip ## Tasks block (tasks are now separate issues)
+TACTICAL_STRIPPED=$(echo "$TACTICAL_BODY" | awk '
   /^## Tasks/ { skip=1; next }
-  /^## / { if(skip) skip=0 }
+  /^## /      { if (skip) skip=0 }
   !skip { print }
 ')
+echo "$TACTICAL_STRIPPED" > /tmp/tactical-zone-new.md
 
-# Write updated feature body
-echo "$FEATURE_BODY" > /tmp/feature-body.md
+# Assemble design zone + new tactical zone → feature body
+assemble_body /tmp/design-zone.md /tmp/tactical-zone-new.md /tmp/feature-body.md
+
 its::update_issue_body "$ISSUE_NUM" /tmp/feature-body.md
 
 # Labels and type (idempotent — safe on both first pass and revision)

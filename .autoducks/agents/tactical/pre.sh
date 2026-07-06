@@ -4,25 +4,49 @@ export AUTODUCKS_AGENT="tactical"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/build-revision-context.sh"
+source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 
 react_to_comment "$COMMENT_ID" "eyes"
 
-# Fetch issue content
+# Fetch issue content — full body with title prefix for the LLM's main input
 its::get_issue "$ISSUE_NUM" | jq -r '"# " + .title + "\n\n" + .body' > /tmp/issue-request.md
 
-# Determine if this is a revision
+# Fetch raw body (no title prefix) for zone splitting
 ISSUE_DATA=$(its::get_issue "$ISSUE_NUM")
 ISSUE_LABELS=$(echo "$ISSUE_DATA" | jq -r '.labels[]')
-IS_REVISION="false"
+echo "$ISSUE_DATA" | jq -r '.body' > /tmp/issue-body-raw.md
 
+# Determine if this is a revision
+IS_REVISION="false"
 if echo "$ISSUE_LABELS" | grep -q "Ready"; then
   IS_REVISION="true"
 fi
 
+# Split body into design and tactical zones.
+# Case A: markers present — normal split.
+# Case B: no markers, no Ready label — first tactical run on a design spec;
+#         design zone = full body, tactical zone = empty.
+# Case C: no markers, Ready label — legacy issue created before this change;
+#         design zone = empty, tactical zone = full body (one-hop migration).
+if body_has_markers /tmp/issue-body-raw.md; then
+  SPLIT_RC=0
+  split_body /tmp/issue-body-raw.md /tmp/design-zone.md /tmp/tactical-zone-current.md || SPLIT_RC=$?
+  if [[ "$SPLIT_RC" -eq 2 ]]; then
+    its::comment_issue "$ISSUE_NUM" "❌ Tactical zone markers are malformed (mismatched or out of order). Please restore the \`<!-- autoducks:tactical:begin -->\` and \`<!-- autoducks:tactical:end -->\` markers in the issue body and re-run \`/agents devise\`."
+    react_to_comment "$COMMENT_ID" "confused"
+    exit 1
+  fi
+elif [[ "$IS_REVISION" == "true" ]]; then
+  : > /tmp/design-zone.md
+  cp /tmp/issue-body-raw.md /tmp/tactical-zone-current.md
+else
+  cp /tmp/issue-body-raw.md /tmp/design-zone.md
+  : > /tmp/tactical-zone-current.md
+fi
+
 if [[ "$IS_REVISION" == "true" ]]; then
-  # Get existing task numbers from YAML block in issue body
-  ISSUE_BODY=$(echo "$ISSUE_DATA" | jq -r '.body')
-  YAML_BLOCK=$(echo "$ISSUE_BODY" | awk '/^```yaml[[:space:]]*$/{flag=1;next}/^```[[:space:]]*$/{flag=0}flag')
+  # Get existing task numbers from YAML block in the tactical zone
+  YAML_BLOCK=$(awk '/^```yaml[[:space:]]*$/{flag=1;next}/^```[[:space:]]*$/{flag=0}flag' /tmp/tactical-zone-current.md)
   OLD_NUMBERS=""
   if [[ -n "$YAML_BLOCK" ]]; then
     OLD_NUMBERS=$(echo "$YAML_BLOCK" | yq '.waves[].tasks[]' 2>/dev/null | grep -E '^[0-9]+$' | tr '\n' ' ')

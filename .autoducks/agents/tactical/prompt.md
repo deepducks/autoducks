@@ -3,18 +3,21 @@ implementation plan. Take time to explore the codebase and reason about
 architecture, dependencies, and correct wave ordering before writing.
 
 ## Input
-- `/tmp/issue-request.md` — the feature / problem description
+
+- `/tmp/issue-request.md` — the feature / problem description (title + full issue body)
+- `/tmp/design-zone.md` — the design zone that will be **preserved verbatim** in the issue body above your output. Read this as read-only context.
 - The repository is checked out at the current working directory — use
   Read/Glob/Grep freely to understand existing code before planning
 - If the repository has any CLAUDE.md, AGENTS.md, VISION.md or CONSTITUTION.md files, read them first for important context about how this project is structured and how agents should operate within it.
-- `/tmp/conversation.md` — **present only on revisions** (when this is a re-invocation on an existing `feature+draft` issue). Contains (1) the current plan body (with real issue numbers already in its YAML), (2) the titles+bodies of existing task issues, (3) recent comments with human feedback, answers, or revision requests. Read it carefully and produce a plan that incorporates the feedback.
+- `/tmp/conversation.md` — **present only on revisions** (when this is a re-invocation on an existing `feature+Ready` issue). Contains (1) the design zone (read-only), (2) the current tactical zone (the artifact you are revising), (3) the titles+bodies of existing task issues, (4) recent comments with human feedback, answers, or revision requests. Read it carefully and produce a plan that incorporates the feedback.
+- `/tmp/tactical-zone-current.md` — **present only on revisions** — the tactical zone as it currently exists in the issue body. This is the artifact you are revising.
 
 ## Questions Mode (read before writing anything)
 
 If critical information is missing that would materially change the plan structure — which library to use, what auth model to adopt, which of two conflicting interpretations of the request is intended, etc. — **DO NOT write a plan**. Instead:
 
 - Write ONLY `/tmp/questions.md` — a numbered list of specific, answerable questions (max 5; each answerable in a single sentence).
-- **Do NOT write `/tmp/plan-body.md`** in this case.
+- **Do NOT write `/tmp/tactical-body.md`** in this case.
 
 The workflow will post your questions as a comment on the issue and stop. The human answers in new comments, then re-mentions `/agents devise` — you'll see the full thread in `/tmp/conversation.md` on that next run and can then produce a proper plan.
 
@@ -22,13 +25,9 @@ Use Questions Mode *only* for genuine blockers. Don't ask trivia you could answe
 
 ## Output (Plan Mode)
 
-Write your plan to `/tmp/plan-body.md` using EXACTLY this structure:
+Write your tactical zone to `/tmp/tactical-body.md` using EXACTLY this structure:
 
 ````markdown
-## Purpose
-
-<Synthesis of what this plan accomplishes and why. If the input draft already contains rich motivation, constraints, or decisions, preserve that content — do not compress away details the human wrote deliberately.>
-
 ## Plan
 
 ```yaml
@@ -66,7 +65,7 @@ waves:
 
 ## Notes
 
-<Optional extra context, constraints, links. Preserve caveats, non-obvious decisions, and downstream-impact notes from the input draft rather than paraphrasing them away. Omit the section only if there is truly nothing to carry over.>
+<Optional. Tactical-only caveats, links, non-obvious decisions. Do NOT re-summarize the design spec — it lives above this zone in the issue body and will be preserved verbatim. Omit the section only if there is truly nothing to add.>
 ````
 
 ## Rules
@@ -74,7 +73,7 @@ waves:
   in the Progress checkboxes use `#T1`.
 - Placeholders and preserved issue numbers must ONLY appear in the YAML
   tasks list, the `### … —` headings, and the Progress checkboxes. Do not
-  reference them in Purpose or Notes.
+  reference them in Notes.
 - Each task must be atomically implementable by a single agent (~1 PR).
 - Wave order = dependency order; tasks in the same wave run in parallel.
 - **What counts as a deliverable task:** an atomic unit of implementation (~1 PR) a single agent can complete end-to-end without needing to read another in-flight task's code. Decompose along natural boundaries — separate files/modules, independent subsystems, logically distinct concerns. **Litmus test:** *if two pieces of work can be implemented without either one reading the other's code, they are separate tasks.*
@@ -83,12 +82,12 @@ waves:
   - Install + configure + verify for a single dependency is usually ONE task, not three — they share state and review context.
   - Steps whose only "dependency" is sequential order *within the same file or module* belong in the same task.
   - **"Ships as one cohesive PR" in the draft does NOT imply "one task".** Waves can be merge-coordinated; a cohesive shipping unit is a merge concern, not a task-count constraint. When parallelism is available, split.
-- **Preserve the draft's voice.** When the input draft already contains detailed motivation, constraints, rationale, or caveats, carry that content into Purpose and Notes with minimal compression. The human wrote it deliberately — paraphrasing loses context that downstream task agents cannot recover from the repo alone.
+- **The design zone is preserved verbatim above your output.** Do NOT copy, paraphrase, or re-summarize it into `/tmp/tactical-body.md`. If tactical-only caveats are worth recording, use `## Notes`. The human wrote the design spec deliberately — downstream agents read it directly from the issue body.
 - **Preserve the draft's specs in the task that implements them.** When the draft includes code blocks, type definitions, exact function/class signatures, constant tables, error messages, or validation rules that define *what an artifact must look like*, copy them verbatim into the Summary of the task responsible for that artifact. Do not translate spec-as-code into imperative bullets — the worker agent will re-derive and diverge. If the draft is "here's the shape, implement it", the task body must contain that shape. This applies per-task: if a snippet belongs to task T3, it goes only in T3, not duplicated across the plan.
 - **Never embed "confirm with author before …" or "pending approval" phrases in the plan.** If you need confirmation, use Questions Mode above.
 - Priority: `P0` = critical path (auto-merged). `P1`–`P3` lower priority.
 - Do NOT run `git` or `gh`. Do NOT modify source code. Only Write to
-  `/tmp/plan-body.md` (Plan Mode) or `/tmp/questions.md` (Questions Mode).
+  `/tmp/tactical-body.md` (Plan Mode) or `/tmp/questions.md` (Questions Mode).
 
 ## Example — decomposing a multi-file refactor (illustrative)
 
