@@ -102,9 +102,11 @@ flowchart LR
 
 #### Triggers
 
-- **Issue assignment**: agent `@tactical` + issue type `Feature` + issue labels don't include `Draft` or `Ready`
+- **Issue assignment**: agent `@tactical` + issue type `Feature` **or** issue label `Feature` + issue labels don't include `Draft` or `Ready`
 - **Issue comment**: slash command `/agents devise`
-- **Issue comment**: slash command `/agents execute` + issue type `Feature` + issue labels don't include `Draft` or `Ready` (opt-out available via config file)
+- **Issue comment**: slash command `/agents execute` + issue type `Feature` **or** issue label `Feature` + issue labels don't include `Draft` or `Ready` (opt-out available via config file)
+
+> Routing is label-first: the `Feature` label is the primary routing signal and works on all repositories. The native issue type is an optional UI layer available only on organization-owned repositories.
 
 #### Behavior
 
@@ -166,8 +168,10 @@ flowchart LR
 
 #### Triggers
 
-- **Issue comment**: slash command `/agents execute` + issue type `Feature` + label `Ready`
-- **PR assignment**: agent `@execution` + association to an issue of type `Feature` + label `Ready`
+- **Issue comment**: slash command `/agents execute` + issue type `Feature` **or** issue label `Feature` + label `Ready`
+- **PR assignment**: agent `@execution` + association to an issue of type `Feature` **or** label `Feature` + label `Ready`
+
+> Routing is label-first: the `Feature` label is the primary routing signal and works on all repositories. The native issue type is an optional UI layer available only on organization-owned repositories.
 
 #### Behavior
 
@@ -211,7 +215,7 @@ flowchart LR
 #### Triggers
 
 - **Issue assignment**: agent `@execution`
-- **Issue comment**: slash command `/agents execute` + issue type is not `Feature`
+- **Issue comment**: slash command `/agents execute` + issue is not a Feature (native type **or** label)
 
 #### Behavior
 
@@ -393,7 +397,7 @@ All branches follow a predictable convention rooted in issue IDs.
 |-------|---------|
 | `Draft` | Issue needs design work before tactical planning |
 | `Ready` | Tactical plan is complete; issue is ready for execution |
-| `type=Feature` | Issue represents a feature (set via issue type, not label where supported) |
+| `Feature` | Routing signal — set as both a label (route-critical) and the native issue type (best-effort, org-only) |
 
 ---
 

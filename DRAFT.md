@@ -16,7 +16,7 @@ flowchart LR
 ```
 
 #### Triggers
-- **Issue comment**: slash command `/agents execute` + issue is not a PR + issue is not labeled `Feature`
+- **Issue comment**: slash command `/agents execute` + issue is not a PR + issue is not a Feature (native type **or** label)
 - **Workflow dispatch**: `issue_number` + `base_branch` (used by wave orchestrator to dispatch tasks)
 
 #### Behaviors
@@ -121,7 +121,7 @@ flowchart LR
 
 
 #### Triggers
-- **Issue comment**: slash command `/agents execute` + issue labeled `Feature` + label `Ready`
+- **Issue comment**: slash command `/agents execute` + issue is a Feature (native type **or** label) + label `Ready`
 - **PR merge**: PR merged into a branch starting with `feature/` (loop closure)
 - **Workflow dispatch**: `feature_issue` number (manual trigger or loop closure callback)
 
@@ -186,7 +186,7 @@ flowchart LR
 #### Triggers
 
 - **Issue comment**: slash command `/agents devise`
-- **Issue comment**: slash command `/agents execute` + issue labeled `Feature` + issue not labeled `Ready` (auto-escalation: redirects to tactical planning first)
+- **Issue comment**: slash command `/agents execute` + issue is a Feature (native type **or** label) + issue not labeled `Ready` (auto-escalation: redirects to tactical planning first)
 
 #### Behavior
 

@@ -143,8 +143,9 @@ if [[ -z "$TYPES_JSON" ]]; then
   manual "Could not list issue types for org '$ORG' (not an org, or no admin access).
       If '$ORG' is a user account, types are only available under organizations.
       If it's an org and you're not an admin, ask an admin to define them.
-      Workflows will run fine without types — the feature/task distinction
-      will only come from labels, not the native issue-type UI."
+      Routing is label-first: the tactical and design agents automatically apply the
+      \`Feature\` label, so no manual labeling is needed. The native issue type is a
+      visual enhancement for org repos and is not required for routing."
 else
   TYPES=$(echo "$TYPES_JSON" | jq -r '.[].name')
   MISSING=()
