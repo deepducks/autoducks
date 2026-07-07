@@ -22,11 +22,18 @@
 #      verbatim below a freshly-written design zone, and a markerless body
 #      must still get no tactical markers on the fallback path.
 #
+# With --single, runs a separate variant instead: seeds a draft narrow
+# enough to yield exactly one task, and asserts the tactical-agent's
+# single-task fast path (no child issue, no YAML `waves:` block, no
+# sub-issue links, `Tactics:single` label, task content merged into the
+# feature body) plus its revert. See OPTIONS below.
+#
 # COST
 # ----
 # Runs four tactical/design-agent calls at `sonnet low` reasoning to keep it
 # cheap. Expected wall time: 8–13 min. No task worker is triggered — this
 # test covers the planning half of the pipeline, not the shipping half.
+# (--single runs a single, cheaper tactical-agent call instead.)
 #
 # USAGE
 # -----
@@ -37,6 +44,13 @@
 #                   feature + task issues in place for manual inspection).
 #   --no-wait       Create the seed issue and kickstart /agents devise,
 #                   don't wait for completion.
+#   --single        Run the single-task fast-path variant instead of the
+#                   default multi-task pipeline: seeds a draft narrow
+#                   enough to yield exactly one task, then asserts the
+#                   single-task contract (no child issue, no YAML `waves:`
+#                   block, `Tactics:single` label) and its revert. Does
+#                   not run the multi-task assertions below — run the
+#                   script without this flag to cover that regression.
 #   --repo OWNER/REPO  Target repo (default: current repo from `gh`).
 #   -h, --help      Show this help.
 #
@@ -72,6 +86,7 @@ set -euo pipefail
 
 KEEP=false
 WAIT=true
+SINGLE=false
 REPO=""
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
@@ -79,6 +94,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --keep) KEEP=true; shift ;;
     --no-wait) WAIT=false; shift ;;
+    --single) SINGLE=true; shift ;;
     --repo) REPO="$2"; shift 2 ;;
     -h|--help)
       sed -n '2,60p' "$0"
@@ -184,6 +200,224 @@ gh label create "smoke-test"  --color "FFA500" --description "Smoke test" $REPO_
 gh label create "priority:P0" --color "B60205" --description "Critical" $REPO_ARG 2>/dev/null || true
 pass "Labels ensured"
 echo ""
+
+# =============================================================================
+# Single-task variant (--single): exercises the tactical-agent's single-task
+# fast path instead of the default multi-task pipeline below. Seeds a draft
+# narrow enough (single file, one documented function) to yield exactly one
+# task and specific enough to skip Questions Mode, then asserts the
+# single-task contract (no child issue, no YAML `waves:` block, no sub-issue
+# links, `Tactics:single` label, task content merged into the feature body)
+# and its revert. Exits before reaching the multi-task flow below, so running
+# without --single exercises that flow unchanged (regression guard).
+# =============================================================================
+if [[ "$SINGLE" == true ]]; then
+  echo "[2/6] Creating seed feature issue (single-task draft)..."
+  SEED_BODY=$(cat <<EOF
+# Single-task smoke test — ${TIMESTAMP}
+
+Add one tiny utility module at \`scripts/smoke-single-${TIMESTAMP}/only.sh\`.
+This is a synthetic test — no real implementation is needed, the goal is
+just to exercise the /agents devise single-task fast path end-to-end.
+
+## File to create
+
+### \`scripts/smoke-single-${TIMESTAMP}/only.sh\`
+
+A bash script with one documented function \`only_echo\` that echoes its
+single positional argument.
+
+\`\`\`bash
+#!/usr/bin/env bash
+# Usage: ./only.sh <value>
+# Echoes: value
+set -euo pipefail
+# only_echo echoes its single argument verbatim.
+only_echo() {
+  echo "\$1"
+}
+only_echo "\${1:-}"
+\`\`\`
+
+## Acceptance Criteria
+
+- \`scripts/smoke-single-${TIMESTAMP}/only.sh\` exists and is executable
+- \`./only.sh hi\` echoes \`hi\`
+
+## Notes
+
+This issue is created by \`smoke-test-plan.sh --single\` and will be
+reverted via \`/agents revert\` once the single-task assertions pass. Do
+not expect the code to actually ship.
+EOF
+)
+
+  SEED_URL=$(gh issue create $REPO_ARG \
+    --title "Smoke [single-task pipeline] ${TIMESTAMP}" \
+    --label "smoke-test" \
+    --body "$SEED_BODY")
+  FEATURE=$(echo "$SEED_URL" | grep -oE '[0-9]+$')
+  echo "  Seed issue: #$FEATURE → $SEED_URL"
+
+  SEED_BODY_NOW=$(gh issue view $FEATURE $REPO_ARG --json body --jq '.body')
+  echo "  Seed body captured (${#SEED_BODY_NOW} chars)"
+  echo ""
+
+  # --- Trigger /agents devise ---
+  echo "[3/6] Triggering /agents devise sonnet low..."
+  PLAN_COMMENT_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/agents devise sonnet low")
+  PLAN_COMMENT_ID=$(echo "$PLAN_COMMENT_URL" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+$' || echo "")
+  echo "  Plan comment posted (id: ${PLAN_COMMENT_ID:-unknown})"
+
+  if [[ "$WAIT" == false ]]; then
+    echo ""
+    echo "Skipping wait (--no-wait). Seed: $SEED_URL"
+    exit 0
+  fi
+  echo ""
+
+  echo "[4/6] Waiting for tactical-agent terminal reaction..."
+  if [[ -z "${PLAN_COMMENT_ID:-}" ]]; then
+    fail "cannot track tactical-agent — missing PLAN_COMMENT_ID"
+    exit 1
+  fi
+  PLAN_RC=0
+  wait_for_reaction "$PLAN_COMMENT_ID" 600 "tactical-agent (single)" || PLAN_RC=$?
+  case $PLAN_RC in
+    0) pass "tactical-agent run completed successfully" ;;
+    1) fail "tactical-agent run failed (😕 reaction on /agents devise comment)"; exit 1 ;;
+    2) fail "tactical-agent run did not complete within 10 min"; exit 1 ;;
+  esac
+  echo ""
+
+  # --- Assert the single-task contract ---
+  echo "[5/6] Asserting single-task contract..."
+  CURRENT_BODY=$(gh issue view $FEATURE $REPO_ARG --json body --jq '.body')
+
+  if [[ "$CURRENT_BODY" != "$SEED_BODY_NOW" ]]; then
+    pass "Feature body updated by tactical-agent (${#CURRENT_BODY} chars vs ${#SEED_BODY_NOW} initial)"
+  else
+    fail "Feature body unchanged — tactical-agent did not write the plan"
+  fi
+
+  LABELS=$(gh issue view $FEATURE $REPO_ARG --json labels --jq '[.labels[].name] | join(",")')
+  if echo "$LABELS" | grep -q "Ready"; then pass "Label 'Ready' applied to #$FEATURE"; else fail "Label 'Ready' missing"; fi
+  if echo "$LABELS" | grep -q "Tactics:ready"; then pass "Label 'Tactics:ready' applied to #$FEATURE"; else fail "Label 'Tactics:ready' missing"; fi
+  if echo "$LABELS" | grep -q "Tactics:single"; then pass "Label 'Tactics:single' applied to #$FEATURE"; else fail "Label 'Tactics:single' missing"; fi
+
+  if echo "$CURRENT_BODY" | grep -qE '^```yaml[[:space:]]*$'; then
+    fail "Feature body contains a \`\`\`yaml waves: block — single-task fast path must skip wave YAML"
+  else
+    pass "No \`\`\`yaml waves: block in feature body (single-task fast path)"
+  fi
+
+  for h in "## Summary" "## Tasks" "## Acceptance Criteria"; do
+    if echo "$CURRENT_BODY" | grep -qF "$h"; then
+      pass "Feature body contains '$h'"
+    else
+      fail "Feature body missing '$h'"
+    fi
+  done
+
+  BEGIN_LINE=$(echo "$CURRENT_BODY" | grep -nE '^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$' | head -1 | cut -d: -f1 || echo "")
+  END_LINE=$(echo "$CURRENT_BODY" | grep -nE '^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$' | head -1 | cut -d: -f1 || echo "")
+  if [[ -n "$BEGIN_LINE" && -n "$END_LINE" ]]; then
+    pass "Tactical zone markers present"
+    SUMMARY_LINE=$(echo "$CURRENT_BODY" | grep -nE '^## Summary[[:space:]]*$' | head -1 | cut -d: -f1 || echo "")
+    ACCEPT_LINE=$(echo "$CURRENT_BODY" | grep -nE '^## Acceptance Criteria[[:space:]]*$' | head -1 | cut -d: -f1 || echo "")
+    if [[ -n "$SUMMARY_LINE" && -n "$ACCEPT_LINE" && "$SUMMARY_LINE" -gt "$BEGIN_LINE" && "$SUMMARY_LINE" -lt "$END_LINE" && "$ACCEPT_LINE" -gt "$BEGIN_LINE" && "$ACCEPT_LINE" -lt "$END_LINE" ]]; then
+      pass "Task content ('## Summary' … '## Acceptance Criteria') is between the tactical sentinels"
+    else
+      fail "Task content is not between the tactical sentinels"
+    fi
+  else
+    fail "Tactical zone markers missing"
+  fi
+
+  # No child Task issue / no sub-issues linked
+  PROBE_STATUS=$(gh api "repos/$REPO/issues/$FEATURE/sub_issues" \
+                 --include 2>/dev/null | awk 'NR==1 { print $2 }' || echo "")
+  if [[ "$PROBE_STATUS" =~ ^2 ]]; then
+    SUB_ISSUE_COUNT=$(gh api "repos/$REPO/issues/$FEATURE/sub_issues" --jq '[.[].number] | length' 2>/dev/null || echo "0")
+    if [[ "$SUB_ISSUE_COUNT" -eq 0 ]]; then
+      pass "No sub-issues linked to #$FEATURE (single-task fast path)"
+    else
+      fail "$SUB_ISSUE_COUNT sub-issue(s) linked to #$FEATURE — expected none for single-task fast path"
+    fi
+  else
+    warn "Sub-issues API not available on this repository (HTTP ${PROBE_STATUS:-none}); skipping sub-issue assertion"
+  fi
+  echo ""
+
+  # --- Trigger /agents revert (unless --keep) ---
+  if [[ "$KEEP" == true ]]; then
+    echo "[6/6] Skipping /agents revert (--keep). Test complete."
+    echo ""
+    echo "=== Summary ==="
+    echo "  Fail:    $FAIL"
+    echo "  Warn:    $WARN"
+    [[ $FAIL -eq 0 ]] && echo "✅ Single-task assertions passed (kept state)." && exit 0 || { echo "❌ Single-task assertions failed."; exit 1; }
+  fi
+
+  echo "[6/6] Triggering /agents revert..."
+  REVERT_COMMENT_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/agents revert")
+  REVERT_COMMENT_ID=$(echo "$REVERT_COMMENT_URL" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+$' || echo "")
+  echo "  Revert comment posted (id: ${REVERT_COMMENT_ID:-unknown})"
+
+  REVERT_RC=0
+  wait_for_feature_unplanned "$FEATURE" 120 || REVERT_RC=$?
+  case $REVERT_RC in
+    0) pass "revert completed (labels stripped + comments deleted on #$FEATURE)" ;;
+    2) fail "revert did not reach terminal state within 2 min" ;;
+  esac
+  echo ""
+
+  echo "Asserting revert state..."
+  FINAL_LABELS=$(gh issue view $FEATURE $REPO_ARG --json labels --jq '[.labels[].name] | join(",")')
+  if ! echo "$FINAL_LABELS" | grep -q "Tactics:single"; then
+    pass "Label 'Tactics:single' removed from #$FEATURE"
+  else
+    fail "Label 'Tactics:single' still present (got: $FINAL_LABELS)"
+  fi
+  if ! echo "$FINAL_LABELS" | grep -q "Ready"; then
+    pass "Label 'Ready' removed from #$FEATURE"
+  else
+    fail "Label 'Ready' still present (got: $FINAL_LABELS)"
+  fi
+
+  COMMENT_COUNT=$(gh api "repos/$REPO/issues/$FEATURE/comments" --jq '. | length' 2>/dev/null || echo "999")
+  if [[ "$COMMENT_COUNT" -eq 0 ]]; then
+    pass "All comments deleted from #$FEATURE"
+  else
+    fail "$COMMENT_COUNT comment(s) still present on #$FEATURE (expected 0)"
+  fi
+
+  POST_REVERT_BODY=$(gh issue view $FEATURE $REPO_ARG --json body --jq '.body')
+  if [[ "$POST_REVERT_BODY" == "$SEED_BODY_NOW" ]]; then
+    pass "Feature body matches original seed after revert"
+  else
+    warn "Feature body differs from seed after revert (expected if userContentEdits didn't track creation)"
+  fi
+
+  gh issue close $FEATURE $REPO_ARG --comment "Smoke test complete — closing." 2>/dev/null || true
+  echo ""
+
+  echo "=== Summary ==="
+  echo "  Fail:    $FAIL"
+  echo "  Warn:    $WARN"
+
+  if [[ $FAIL -eq 0 ]]; then
+    if [[ $WARN -eq 0 ]]; then
+      echo "✅ Single-task smoke test passed with no warnings."
+    else
+      echo "✅ Single-task smoke test passed with $WARN soft warning(s)."
+    fi
+    exit 0
+  else
+    echo "❌ Single-task smoke test FAILED — $FAIL hard assertion(s) violated."
+    exit 1
+  fi
+fi
 
 # --- Create the seed issue with a narrow, decomposable draft ---
 # The draft is intentionally specific (explicit file paths, exact signatures)
