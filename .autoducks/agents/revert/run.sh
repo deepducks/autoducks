@@ -29,7 +29,7 @@ done
 its::remove_label "$FEATURE" "Ready" 2>/dev/null || true
 its::remove_label "$FEATURE" "draft" 2>/dev/null || true
 for lbl in "Spec:draft" "Spec:plan" "Tactics:crafting" "Tactics:ready" \
-           "Work:progress" "Work:done"; do
+           "Work:progress" "Work:done" "Tactics:single"; do
   its::remove_label "$FEATURE" "$lbl" 2>/dev/null || true
 done
 
