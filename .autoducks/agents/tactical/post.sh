@@ -93,7 +93,7 @@ EXISTING_FEATURE_PR=$(gh pr list --repo "$REPO" --head "$FEATURE_BRANCH" --base 
 if [[ -z "$EXISTING_FEATURE_PR" ]]; then
   PR_TITLE="Feature #$ISSUE_NUM: $ISSUE_TITLE"
   PR_BODY="Closes #$ISSUE_NUM"
-  git::create_pr "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "$PR_TITLE" "$PR_BODY" || true
+  git::create_pr "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "$PR_TITLE" "$PR_BODY" true || true
 fi
 
 if [[ "${IS_REVISION:-false}" != "true" ]]; then
