@@ -24,6 +24,14 @@ create_final_pr() {
   done
   closes_body+="Closes #$feature_issue"
 
+  # git::create_pr already recovers its own "already exists"/read:org errors
+  # by searching for an *open* PR (git::_find_open_pr_number); it only
+  # surfaces a failure here if that open-state search comes up empty. This
+  # fallback is not a double-wrap of the same error — it re-checks with
+  # `--state all` to catch the case where the existing PR isn't open
+  # (e.g. already merged/closed), which git::create_pr's narrower open-state
+  # lookup can't find. A genuine (non-"already exists") failure still falls
+  # through to the final `cat "$err_file" >&2; return 1` below undisturbed.
   local pr_num err_file
   err_file=$(mktemp)
   if pr_num=$(git::create_pr "$feature_branch" "$base_branch" "Feature #$feature_issue: $issue_title" "$(echo -e "$closes_body")" 2>"$err_file"); then
