@@ -65,6 +65,12 @@ AUTODUCKS_REASONING="$(echo "$_merged" | jq -r '.reasoning // empty')"
 export AUTODUCKS_BASE_BRANCH
 AUTODUCKS_BASE_BRANCH="$(echo "$_merged" | jq -r '.base_branch // empty')"
 
+export AUTODUCKS_INTEGRATION_BRANCH
+AUTODUCKS_INTEGRATION_BRANCH="$(echo "$_merged" | jq -r '.integration_branch // empty')"
+if [[ -z "$AUTODUCKS_INTEGRATION_BRANCH" ]]; then
+  AUTODUCKS_INTEGRATION_BRANCH="$AUTODUCKS_BASE_BRANCH"
+fi
+
 export AUTODUCKS_MERGE_METHOD
 AUTODUCKS_MERGE_METHOD="$(echo "$_merged" | jq -r '.merge_method // "auto"')"
 
