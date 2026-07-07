@@ -6,10 +6,16 @@ set -euo pipefail
 #
 # Input:  COMMENT_BODY env var (or stdin)
 # Output: key=value lines to stdout
-#   command      — plan, start, work, execute, fix, revert, close, design, devise
-#   model        — claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5, or empty
-#   reasoning    — off, low, medium, high, max, or empty
-#   think_phrase — mapped from reasoning level (empty when reasoning is empty)
+#   command         — canonical verb: design, devise, execute, fix, revert, close
+#   original_command — the raw verb the user typed, before alias normalization
+#   model           — claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5, or empty
+#   reasoning       — off, low, medium, high, max, or empty
+#   think_phrase    — mapped from reasoning level (empty when reasoning is empty)
+#
+# Command normalization: built-in synonyms (plan→design, drilldown/specify→devise,
+# work/run/start→execute) and per-agent custom aliases from
+# .autoducks/autoducks.json `triggers.<agent>[]` are resolved to their canonical
+# verb here, so every downstream `command=` consumer sees a consistent value.
 #
 # Empty model/reasoning means "no override" — the caller's `||` chain falls
 # through to agent defaults / global config / provider action default.
@@ -21,6 +27,7 @@ DIRECTIVE=$(printf '%s\n' "$BODY" \
   | head -1 || echo "")
 
 COMMAND=""
+ORIGINAL_COMMAND=""
 MODEL=""
 REASONING=""
 
@@ -28,6 +35,38 @@ if [[ -n "$DIRECTIVE" ]]; then
   read -ra TOKENS <<< "$DIRECTIVE"
   COMMAND="${TOKENS[1]:-}"
   COMMAND=$(echo "$COMMAND" | tr '[:upper:]' '[:lower:]' | tr -d ',.!?:;')
+
+  # ── Alias → canonical verb normalization (built-in) ─────────────────
+  # Aliases only ever occupy token [1]; this never touches the model/reasoning
+  # token loop below (which parses tokens [2:]).
+  ORIGINAL_COMMAND="$COMMAND"
+  case "$COMMAND" in
+    plan)                   COMMAND="design"  ;;
+    drilldown|specify)      COMMAND="devise"  ;;
+    work|run|start)         COMMAND="execute" ;;
+  esac
+
+  # ── Custom alias resolution (config-driven, Tier 2) ─────────────────
+  # Read the same config the setup-time generator baked into the workflow
+  # guards, and resolve any custom alias to its canonical verb. Guarded so a
+  # missing/malformed `triggers` key cannot abort this sourced script
+  # (runs under `set -euo pipefail`).
+  if [[ -f ".autoducks/autoducks.json" ]] && command -v jq &>/dev/null; then
+    # config key → canonical verb
+    declare -A _CANON=(
+      [design]=design [tactical]=devise [execute]=execute
+      [fix]=fix [revert]=revert [close]=close
+    )
+    for _agent in design tactical execute fix revert close; do
+      while IFS= read -r _alias; do
+        if [[ -n "$_alias" && "$COMMAND" == "$_alias" ]]; then
+          COMMAND="${_CANON[$_agent]}"
+          break 2
+        fi
+      done < <(jq -r --arg a "$_agent" '.triggers[$a][]? // empty' \
+                .autoducks/autoducks.json 2>/dev/null)
+    done
+  fi
 
   for tok in "${TOKENS[@]:2}"; do
     t=$(echo "$tok" | tr '[:upper:]' '[:lower:]' | tr -d ',.!?:;')
@@ -58,6 +97,7 @@ case "$REASONING" in
 esac
 
 echo "command=$COMMAND"
+echo "original_command=$ORIGINAL_COMMAND"
 echo "model=$MODEL"
 echo "reasoning=$REASONING"
 echo "think_phrase=$THINK_PHRASE"
