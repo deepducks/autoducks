@@ -26,12 +26,11 @@ if echo "$ISSUE_LABELS" | grep -q "Ready"; then
   IS_REVISION="true"
 fi
 
-# Split body into design and tactical zones.
+# Split body into design and tactical zones. The tactical-zone markers are the
+# single source of truth for the zone boundary — a label never overrides them.
 # Case A: markers present — normal split.
-# Case B: no markers, no Ready label — first tactical run on a design spec;
-#         design zone = full body, tactical zone = empty.
-# Case C: no markers, Ready label — legacy issue created before this change;
-#         design zone = empty, tactical zone = full body (one-hop migration).
+# Case B: no markers — the whole body is the author-owned design zone,
+#         preserved verbatim regardless of any label; tactical zone starts empty.
 if body_has_markers /tmp/issue-body-raw.md; then
   SPLIT_RC=0
   split_body /tmp/issue-body-raw.md /tmp/design-zone.md /tmp/tactical-zone-current.md || SPLIT_RC=$?
@@ -40,9 +39,6 @@ if body_has_markers /tmp/issue-body-raw.md; then
     react_to_comment "$COMMENT_ID" "confused"
     exit 1
   fi
-elif [[ "$IS_REVISION" == "true" ]]; then
-  : > /tmp/design-zone.md
-  cp /tmp/issue-body-raw.md /tmp/tactical-zone-current.md
 else
   cp /tmp/issue-body-raw.md /tmp/design-zone.md
   : > /tmp/tactical-zone-current.md
