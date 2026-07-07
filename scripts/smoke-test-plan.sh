@@ -345,9 +345,11 @@ for t in "${TASK_NUMBERS[@]:-}"; do
   fi
 done
 
-# Sub-issue relationships — soft assertion
-SUB_ISSUES=$(gh api "repos/$REPO/issues/$FEATURE/sub_issues" --jq '[.[].number]' 2>/dev/null || echo "[]")
-if [[ "$SUB_ISSUES" != "[]" ]]; then
+PROBE_STATUS=$(gh api "repos/$REPO/issues/$FEATURE/sub_issues" \
+               --include 2>/dev/null | awk 'NR==1 { print $2 }' || echo "")
+if [[ "$PROBE_STATUS" =~ ^2 ]]; then
+  # API available — partial linkage is a hard failure
+  SUB_ISSUES=$(gh api "repos/$REPO/issues/$FEATURE/sub_issues" --jq '[.[].number]' 2>/dev/null || echo "[]")
   MATCHED=0
   for t in "${TASK_NUMBERS[@]:-}"; do
     [[ -z "$t" ]] && continue
@@ -358,10 +360,10 @@ if [[ "$SUB_ISSUES" != "[]" ]]; then
   if [[ $MATCHED -eq ${#TASK_NUMBERS[@]:-0} ]]; then
     pass "All ${#TASK_NUMBERS[@]} tasks linked as sub-issues of #$FEATURE"
   else
-    warn "Only $MATCHED/${#TASK_NUMBERS[@]} tasks linked as sub-issues (API partial)"
+    fail "Sub-issues API is available but only $MATCHED/${#TASK_NUMBERS[@]} tasks are linked to #$FEATURE"
   fi
 else
-  warn "No sub-issues found on #$FEATURE (sub-issues API may be unavailable)"
+  warn "Sub-issues API not available on this repository (HTTP ${PROBE_STATUS:-none}); skipping sub-issue assertion"
 fi
 echo ""
 
