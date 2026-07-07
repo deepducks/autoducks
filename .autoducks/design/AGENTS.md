@@ -160,8 +160,8 @@ Permissions:
 4. Each dependent task is created, associated with the parent issue, labeled `Task`, and — best-effort on organizations with issue types configured — assigned the native `Task` type. <!-- its::createChildIssue(featureIssueId, taskTitle, taskDescription, labels=["priority:PN","Task"]) + its::setIssueType(taskId, "Task") -->
 5. The `Ready` label is added to the issue. <!-- its::addLabel(featureIssueId, "Ready") -->
 6. A slug is generated: `feature/<issue_id>-<slugified_title>`. <!-- generateSlug(featureIssueId, featureIssueTitle) -->
-7. A branch is created from `main` named `feature/<issue_id>-<slugified_title>`. <!-- git::createBranch("main", featureSlug) -->
-8. A pull request is created from the feature branch into `main`, titled `Feature <issue_id>: <issue_title>`. <!-- its::createPullRequest(featureBranch, "main", prTitle) -->
+7. A branch is created from `base_branch` (the cut-point, e.g. `main`) named `feature/<issue_id>-<slugified_title>`. <!-- git::createBranch(baseBranch, featureSlug) -->
+8. A pull request is created from the feature branch into `integration_branch` (the PR target, defaulting to `base_branch`), titled `Feature <issue_id>: <issue_title>`. <!-- its::createPullRequest(featureBranch, integrationBranch, prTitle) -->
 9. The PR is linked to the parent issue. <!-- its::linkPRToIssue(prId, featureIssueId) -->
 10. A comment on the issue mentions the feature author, suggesting work can begin with `/agents execute` or by assigning the PR to the agents. <!-- its::commentIssue(featureIssueId, featureAuthor, message) -->
 
@@ -218,7 +218,7 @@ Permissions:
 2. Filter tasks that are not yet completed (no merged PR). <!-- filterPendingTasks(childIssues) -->
 3. Group tasks into execution waves based on dependency order or labels. <!-- groupTasksIntoWaves(pendingTasks) -->
 4. On the first wave dispatch, adds `Work:progress` to the feature issue to signal that execution is underway. <!-- its::addLabel(featureIssueId, "Work:progress") -->
-5. For each wave, dispatch execution agents in parallel for each task. <!-- dispatchExecutionAgents(wave, featureIssueId) -->
+5. For each wave, dispatch execution agents in parallel for each task, each cutting its task branch from the feature branch (the feature branch itself was already cut from `base_branch` and PR'd into `integration_branch` by the Tactical agent). <!-- dispatchExecutionAgents(wave, featureIssueId) -->
 6. Wait for all execution agents in the current wave to complete before starting the next wave. <!-- awaitWaveCompletion(waveId) -->
 7. After all waves are complete, removes `Work:progress` and adds `Work:done` to the feature issue. <!-- its::removeLabel(featureIssueId, "Work:progress") + its::addLabel(featureIssueId, "Work:done") -->
 8. Comments on the feature issue with a summary. <!-- its::commentIssue(featureIssueId, summary) -->
@@ -250,7 +250,7 @@ flowchart LR
 The Execution Agent has two scenarios depending on whether the task has a parent feature issue.
 
 <details>
-<summary><strong>Scenario A: Orphan task (no parent issue) -- PR to <code>main</code>, human review</strong></summary>
+<summary><strong>Scenario A: Orphan task (no parent issue) -- PR to <code>integration_branch</code>, human review</strong></summary>
 
 <!--
 executionAgent_taskOrphan.sh
@@ -271,8 +271,8 @@ Permissions:
 
 <!-- PRE EXECUTION -->
 1. A slug is generated: `<task_id>-<slugified_title>`. <!-- generateSlug(taskId, taskTitle) -->
-2. A branch is created from `main` named `feature/<task_id>-<slugified_title>`. <!-- git::createBranch("main", slug) -->
-3. A pull request is created from the branch, titled `Task <task_id>: <taskTitle>`. <!-- its::createPullRequest(branch, "main", prTitle) -->
+2. A branch is created from `base_branch` (the cut-point, e.g. `main`) named `feature/<task_id>-<slugified_title>`. <!-- git::createBranch(baseBranch, slug) -->
+3. A pull request is created from the branch into `integration_branch` (the PR target, defaulting to `base_branch`), titled `Task <task_id>: <taskTitle>`. <!-- its::createPullRequest(branch, integrationBranch, prTitle) -->
 4. Adds the `Work:progress` label to the task issue to signal that execution is underway. <!-- its::addLabel(taskId, "Work:progress") -->
 <!-- EXECUTION -->
 5. The agent executes the task. <!-- llm::executeTask(taskId, taskTitle, taskDescription, taskComments, taskMetadata) -->
@@ -307,7 +307,7 @@ Permissions:
 1. Get the parent issue information (title, labels, etc.). <!-- its::getIssue(parentIssueId) -->
 2. Generate a slug for the task: `<task_id>-<slugified_task_title>`. <!-- generateSlug(taskId, taskTitle) -->
 3. Generate a slug for the feature: `<feature_id>-<slugified_feature_title>`. <!-- generateSlug(featureId, featureTitle) -->
-4. If the parent issue does not have an associated branch, create one from `main` named `feature/<feature_id>-<slugified_feature_title>` and create its PR. <!-- git::createBranch("main", featureSlug) + its::createPullRequest(featureBranch, "main", prTitle) -->
+4. If the parent issue does not have an associated branch, create one from `base_branch` (the cut-point, e.g. `main`) named `feature/<feature_id>-<slugified_feature_title>` and create its PR into `integration_branch` (the PR target, defaulting to `base_branch`). <!-- git::createBranch(baseBranch, featureSlug) + its::createPullRequest(featureBranch, integrationBranch, prTitle) -->
 5. Create a branch from the feature branch named `feature/<feature_id>-<slugified_feature_title>/task/<task_id>-<task_slug>`. <!-- git::createBranch(featureBranch, taskSlug) -->
 6. Create a pull request from the task branch into the feature branch, titled `Task <task_id>: <task_title>`. <!-- its::createPullRequest(taskBranch, featureBranch, prTitle) -->
 7. Adds the `Work:progress` label to the task issue to signal that execution is underway. <!-- its::addLabel(taskId, "Work:progress") -->
@@ -323,7 +323,7 @@ Permissions:
    <!-- its::close_issue(taskIssueId, comment, "completed") -->
 </details>
 
-> **Auto-merge policy:** Auto-merge is imperative for Scenario B only, where task PRs merge into a feature branch that will itself undergo human review before reaching `main`. Scenario A PRs target `main` directly and require human review.
+> **Auto-merge policy:** Auto-merge is imperative for Scenario B only, where task PRs merge into a feature branch that will itself undergo human review before reaching `integration_branch`. Scenario A PRs target `integration_branch` (defaulting to `base_branch`) directly and require human review.
 
 ---
 
