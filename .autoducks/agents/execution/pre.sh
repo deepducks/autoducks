@@ -40,6 +40,10 @@ if [[ -n "$FEATURE_NUM" ]]; then
   fi
 fi
 
+source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
+progress_labels::ensure
+progress_labels::start "$ISSUE_NUM" "Work:progress" "Work:done"
+
 # Wait for base branch to be visible
 if [[ "$BASE_BRANCH" != "$AUTODUCKS_BASE_BRANCH" ]]; then
   wait_for_branch "$BASE_BRANCH"
