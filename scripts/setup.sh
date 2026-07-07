@@ -18,8 +18,9 @@
 #   3. CLAUDE_CODE_OAUTH_TOKEN secret — reports if missing
 #   4. Repository Actions workflow permissions — reports if wrong
 #   5. Claude Code GitHub App installation — reports if missing
-#   6. Issue types (Feature, Task) at the org level — reports if missing
-#   7. Runtime workflow sync — verifies .autoducks/runtimes match .github/workflows
+#   6. Sub-issues API availability — probes the sub_issues endpoint; reports if unavailable
+#   7. Issue types (Feature, Task) at the org level — reports if missing
+#   8. Runtime workflow sync — verifies .autoducks/runtimes match .github/workflows
 # =============================================================================
 
 set -euo pipefail
@@ -29,7 +30,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) REPO="$2"; shift 2 ;;
     -h|--help)
-      sed -n '2,20p' "$0"
+      sed -n '2,25p' "$0"
       exit 0
       ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -60,7 +61,7 @@ echo "=== Setup check for $REPO ==="
 echo ""
 
 # --- Check 1: gh CLI auth ---
-echo "[1/6] GitHub CLI authentication"
+echo "[1/8] GitHub CLI authentication"
 if gh auth status &>/dev/null; then
   pass "gh CLI is authenticated"
 else
@@ -70,7 +71,7 @@ fi
 echo ""
 
 # --- Check 2: Labels ---
-echo "[2/6] Required labels"
+echo "[2/8] Required labels"
 LABELS=("Feature|6F42C1|Orchestration feature issue"
         "Task|1D76DB|Autoducks task issue"
         "Ready|0E8A16|Plan complete, ready for execution"
@@ -96,7 +97,7 @@ done
 echo ""
 
 # --- Check 3: Secret ---
-echo "[3/6] Required secrets"
+echo "[3/8] Required secrets"
 if gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null | grep -qx "ANTHROPIC_API_KEY"; then
   pass "Secret ANTHROPIC_API_KEY is configured"
 else
@@ -108,7 +109,7 @@ fi
 echo ""
 
 # --- Check 4: Actions permissions ---
-echo "[4/6] Actions workflow permissions"
+echo "[4/8] Actions workflow permissions"
 PERMS=$(gh api "repos/$REPO/actions/permissions/workflow" --jq '.default_workflow_permissions + "|" + (.can_approve_pull_request_reviews | tostring)' 2>/dev/null || echo "")
 
 if [[ -z "$PERMS" ]]; then
@@ -124,7 +125,7 @@ fi
 echo ""
 
 # --- Check 5: Claude Code GitHub App ---
-echo "[5/6] Claude Code GitHub App"
+echo "[5/8] Claude Code GitHub App"
 # There is no public API to list installations on a repo without proper auth.
 # Best we can do is check if the workflows can authenticate — which only happens at runtime.
 manual "Verify the Claude Code GitHub App is installed on this repository
@@ -133,11 +134,38 @@ manual "Verify the Claude Code GitHub App is installed on this repository
       Make sure 'All repositories' or this specific repo is selected."
 echo ""
 
-# --- Check 6: Issue types (Feature, Task) ---
+# --- Check 6: Sub-issues API availability ---
+echo "[6/8] Sub-issues API availability"
+# Probe against an arbitrary issue in the repo. If the repo has zero issues,
+# the check is inconclusive — report a soft manual item.
+FIRST_ISSUE=$(gh issue list $REPO_ARG --state all --limit 1 --json number \
+              --jq '.[0].number // empty' 2>/dev/null || echo "")
+if [[ -z "$FIRST_ISSUE" ]]; then
+  manual "Sub-issues API check skipped — repository has no issues to probe.
+      Re-run scripts/setup.sh after your first issue exists, or trust the
+      Tactical agent's runtime probe to report the state on the first
+      \`/agents devise\` run."
+else
+  HTTP=$(gh api "repos/$REPO/issues/$FIRST_ISSUE/sub_issues" \
+         --include -H "Accept: application/vnd.github+json" 2>/dev/null \
+         | awk 'NR==1 { print $2 }' || echo "")
+  case "${HTTP:-}" in
+    2*) pass "Sub-issues API is available on $REPO" ;;
+    401|403) manual "Sub-issues API responded 401/403 — token needs 'issues:write'." ;;
+    404|410) manual "Sub-issues API responded 404 — the feature is not enabled for this repository.
+      The Tactical agent will fall back to the markdown-based '## Progress' checklist.
+      This is not fatal; native linking is a UX enhancement." ;;
+    *) manual "Sub-issues API probe was inconclusive (HTTP ${HTTP:-none}).
+      Autoducks will still function; native linking may or may not work." ;;
+  esac
+fi
+echo ""
+
+# --- Check 7: Issue types (Feature, Task) ---
 # Issue types are an org-level feature. Workflows degrade gracefully if
 # types aren't configured — the type parameter is silently ignored by the
 # API. But without them, typed feature/task relationships don't render.
-echo "[6/6] Issue types (Feature, Task)"
+echo "[7/8] Issue types (Feature, Task)"
 ORG=$(echo "$REPO" | cut -d/ -f1)
 TYPES_JSON=$(gh api "orgs/$ORG/issue-types" 2>/dev/null || echo "")
 if [[ -z "$TYPES_JSON" ]]; then
@@ -163,8 +191,8 @@ else
 fi
 echo ""
 
-# --- Check 7: Runtime sync ---
-echo "[7/7] Runtime workflow sync"
+# --- Check 8: Runtime sync ---
+echo "[8/8] Runtime workflow sync"
 SYNC_OK=true
 for runtime in .autoducks/runtimes/github-actions/autoducks-*.yml; do
   bn=$(basename "$runtime")
