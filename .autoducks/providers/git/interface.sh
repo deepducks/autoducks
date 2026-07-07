@@ -26,7 +26,7 @@ done
 #
 #   git::create_branch(base, name)
 #   git::branch_exists(name)                         → exit code 0/1
-#   git::create_pr(head, base, title, body)           → pr_number
+#   git::create_pr(head, base, title, body, draft?)   → pr_number
 #   git::merge_pr(pr_number)                          → 0 ok / 2 method-not-allowed / 1 other
 #   git::close_pr(pr_number, comment)
 #   git::list_open_prs(base_branch?)                  → JSON array
@@ -38,6 +38,9 @@ done
 #   git::configure_identity()
 #   git::push_branch(branch_name)
 #   git::find_branches_matching(pattern)              → branch names, one per line
+#   git::update_pr_body(pr_number, body)
+#   git::mark_pr_ready(pr_number)
+#   git::get_pr(pr_number)                            → JSON object
 
 REQUIRED_FUNCTIONS=(
   "git::create_branch"
@@ -54,6 +57,9 @@ REQUIRED_FUNCTIONS=(
   "git::configure_identity"
   "git::push_branch"
   "git::find_branches_matching"
+  "git::update_pr_body"
+  "git::mark_pr_ready"
+  "git::get_pr"
 )
 
 missing=0

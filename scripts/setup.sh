@@ -14,7 +14,7 @@
 #
 # CHECKS
 #   1. gh CLI authentication
-#   2. Required labels (feature, smoke-test, priority:P0-P3) — CREATES if missing
+#   2. Required labels (feature, smoke-test, priority:P0-P3, progress) — CREATES if missing
 #   3. CLAUDE_CODE_OAUTH_TOKEN secret — reports if missing
 #   4. Repository Actions workflow permissions — reports if wrong
 #   5. Claude Code GitHub App installation — reports if missing
@@ -82,6 +82,11 @@ LABELS=("Feature|6F42C1|Orchestration feature issue"
         "priority:P1|D93F0B|High priority"
         "priority:P2|FBCA04|Medium priority"
         "priority:P3|0E8A16|Low priority")
+
+# Progress labels: sourced from progress-labels.sh so the two lists can't drift apart.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../.autoducks/core/feedback/progress-labels.sh"
+LABELS+=("${AUTODUCKS_PROGRESS_LABELS[@]}")
 
 for entry in "${LABELS[@]}"; do
   IFS='|' read -r name color desc <<< "$entry"
