@@ -125,3 +125,9 @@ Agent-level defaults override the global defaults. Directive arguments in slash 
 1. Directive argument in comment (`--model`, `--reasoning`)
 2. Agent-level `defaults.json`
 3. Global `.autoducks/autoducks.json`
+
+## Security
+
+autoducks gates every trigger through the [Authorization Gate](/reference/security) before any agent runs. The `security` block in `.autoducks/autoducks.json` controls who is allowed to trigger which agents — trusted GitHub author associations, per-agent overrides, and optional CODEOWNERS integration.
+
+See the [Security reference](/reference/security) for the full threat model, config schema, and testing instructions.
