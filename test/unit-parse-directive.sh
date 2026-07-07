@@ -22,21 +22,24 @@ run_case() {
   local exp_model="$4"
   local exp_reasoning="$5"
   local exp_think="$6"
+  local exp_max_turns="${7:-}"
 
   echo "[$label]"
   local out
   out=$(COMMENT_BODY="$body" bash "$SCRIPT" </dev/null)
 
-  local got_command got_model got_reasoning got_think
+  local got_command got_model got_reasoning got_think got_max_turns
   got_command=$(printf '%s\n' "$out" | grep '^command=' || true)
   got_model=$(printf '%s\n' "$out" | grep '^model=' || true)
   got_reasoning=$(printf '%s\n' "$out" | grep '^reasoning=' || true)
   got_think=$(printf '%s\n' "$out" | grep '^think_phrase=' || true)
+  got_max_turns=$(printf '%s\n' "$out" | grep '^max_turns=' || true)
 
   local want_command="command=$exp_command"
   local want_model="model=$exp_model"
   local want_reasoning="reasoning=$exp_reasoning"
   local want_think="think_phrase=$exp_think"
+  local want_max_turns="max_turns=$exp_max_turns"
 
   if [[ "$got_command" == "$want_command" ]]; then
     pass "command line matches ($got_command)"
@@ -58,6 +61,11 @@ run_case() {
   else
     fail "think_phrase mismatch — want '$want_think', got '$got_think'"
   fi
+  if [[ "$got_max_turns" == "$want_max_turns" ]]; then
+    pass "max_turns line matches ($got_max_turns)"
+  else
+    fail "max_turns mismatch — want '$want_max_turns', got '$got_max_turns'"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -66,10 +74,10 @@ run_case() {
 echo "[1] no /agents line — all empty"
 out=$(COMMENT_BODY="" bash "$SCRIPT" </dev/null)
 line_count=$(printf '%s\n' "$out" | wc -l | tr -d ' ')
-if [[ "$line_count" == "5" ]]; then
-  pass "emits exactly 5 lines"
+if [[ "$line_count" == "6" ]]; then
+  pass "emits exactly 6 lines"
 else
-  fail "expected 5 lines, got $line_count: '$out'"
+  fail "expected 6 lines, got $line_count: '$out'"
 fi
 if [[ "$(printf '%s\n' "$out" | grep '^original_command=')" == "original_command=" ]]; then
   pass "original_command= is empty"
@@ -95,6 +103,11 @@ if [[ "$(printf '%s\n' "$out" | grep '^think_phrase=')" == "think_phrase=" ]]; t
   pass "think_phrase= is empty"
 else
   fail "think_phrase not empty: '$(printf '%s\n' "$out" | grep '^think_phrase=')'"
+fi
+if [[ "$(printf '%s\n' "$out" | grep '^max_turns=')" == "max_turns=" ]]; then
+  pass "max_turns= is empty"
+else
+  fail "max_turns not empty: '$(printf '%s\n' "$out" | grep '^max_turns=')'"
 fi
 
 # ---------------------------------------------------------------------------
@@ -231,6 +244,37 @@ else
   fail "custom alias mismatch: '$(printf '%s\n' "$out" | grep '^command=')'"
 fi
 rm -rf "$_tmp_cwd"
+
+# ---------------------------------------------------------------------------
+# Test 21-27: max_turns token parsing
+# ---------------------------------------------------------------------------
+run_case "21] /agents execute sonnet high turns=80" \
+  "/agents execute sonnet high turns=80" \
+  "execute" "claude-sonnet-5" "high" "Think very hard before writing." "80"
+
+run_case "22] /agents execute turns=abc — malformed, stays empty" \
+  "/agents execute turns=abc" \
+  "execute" "" "" "" ""
+
+run_case "23] /agents execute max-turns=200" \
+  "/agents execute max-turns=200" \
+  "execute" "" "" "" "200"
+
+run_case "24] /agents execute max_turns=50" \
+  "/agents execute max_turns=50" \
+  "execute" "" "" "" "50"
+
+run_case "25] /agents execute turns:30" \
+  "/agents execute turns:30" \
+  "execute" "" "" "" "30"
+
+run_case "26] /agents execute turns=9999 — over upper bound, stays empty" \
+  "/agents execute turns=9999" \
+  "execute" "" "" "" ""
+
+run_case "27] /agents execute turns=0 — not positive, stays empty" \
+  "/agents execute turns=0" \
+  "execute" "" "" "" ""
 
 # ---------------------------------------------------------------------------
 # Summary
