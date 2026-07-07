@@ -8,11 +8,12 @@ source "$AUTODUCKS_ROOT/core/feedback/update-checkboxes.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/parse-waves.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/prevent-duplicate-dispatch.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/create-final-pr.sh"
+source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
 log() { echo "[wave-orchestrator] $*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
-trap 'notify_failure "$FEATURE" "$RUN_ID" 2>/dev/null || true; exit 1' ERR
+trap 'progress_labels::abort "$FEATURE" "Work:progress" 2>/dev/null || true; notify_failure "$FEATURE" "$RUN_ID" 2>/dev/null || true; exit 1' ERR
 
 react_to_comment "${COMMENT_ID:-}" "eyes"
 
@@ -44,6 +45,7 @@ TOTAL_WAVES=${#WAVE_NAMES[@]}
 log "Found $TOTAL_WAVES waves"
 
 # --- Phase 3: Ensure feature branch ---
+progress_labels::ensure
 SLUG=$(git::generate_slug "$FEATURE" "$ISSUE_TITLE")
 FEATURE_BRANCH="feature/$SLUG"
 
@@ -123,7 +125,7 @@ if [[ $NEXT_WAVE -eq -1 ]]; then
       done
     done
     create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "$ISSUE_TITLE" "${ALL_TASK_NUMS[@]}"
-
+    progress_labels::finish "$FEATURE" "Work:progress" "Work:done"
     its::comment_issue "$FEATURE" "**All waves complete!** The feature PR is ready for review."
   else
     # Blocked — not all previous waves done
@@ -132,6 +134,7 @@ if [[ $NEXT_WAVE -eq -1 ]]; then
 else
   # Dispatch next wave
   log "Dispatching wave $NEXT_WAVE: ${WAVE_NAMES[$NEXT_WAVE]}"
+  progress_labels::start "$FEATURE" "Work:progress" "Work:done"
   ASSIGNED=()
   SKIPPED=()
 

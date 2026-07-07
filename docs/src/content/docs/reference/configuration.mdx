@@ -19,7 +19,8 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
   "defaults": {
     "model": "claude-sonnet-4-6",
     "reasoning": "high",
-    "base_branch": "main"
+    "base_branch": "main",
+    "merge_method": "auto"
   }
 }
 ```
@@ -88,6 +89,23 @@ The branch that feature branches and orphan task branches are created from, and 
 
 <Aside type="note">
 The `base_branch` default can be overridden at runtime via the `BASE_BRANCH` environment variable passed to workflow dispatch. The wave orchestrator always reads this from the feature branch name.
+</Aside>
+
+### `defaults.merge_method`
+
+The method used when agents auto-merge a task or fix PR into its feature branch.
+
+**Default:** `auto`
+
+| Value | Description |
+|-------|-------------|
+| `auto` | Detect an allowed method from the repository settings, preferring `merge` → `squash` → `rebase` (default) |
+| `merge` | Always create a merge commit |
+| `squash` | Always squash-merge |
+| `rebase` | Always rebase-merge |
+
+<Aside type="note">
+GitHub rejects a merge whose method the repository disallows (`HTTP 405 — Merge commits are not allowed on this repository`). Leaving this at `auto` keeps autoducks working on any repo regardless of which merge methods are enabled — including squash-only or rebase-only repos — without forking configuration. Pin a specific value only when you want to force one method.
 </Aside>
 
 ## Per-agent defaults

@@ -4,11 +4,13 @@ export AUTODUCKS_AGENT="design"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
 # Check if design spec was produced
 if [[ ! -f /tmp/design-spec.md ]]; then
   notify_failure "$ISSUE_NUM" "$RUN_ID"
   react_to_comment "$COMMENT_ID" "confused"
+  progress_labels::abort "$ISSUE_NUM" "Spec:draft"
   exit 1
 fi
 
@@ -22,6 +24,8 @@ its::add_label       "$ISSUE_NUM" "Feature"
 
 # Remove Draft label if present
 its::remove_label "$ISSUE_NUM" "Draft" 2>/dev/null || true
+
+progress_labels::finish "$ISSUE_NUM" "Spec:draft" "Spec:plan"
 
 react_to_comment "$COMMENT_ID" "+1"
 

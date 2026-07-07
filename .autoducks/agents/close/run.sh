@@ -45,6 +45,9 @@ for t in "${TASK_NUMBERS[@]:-}"; do
   done <<< "$BRANCHES"
 
   # Close task issue
+  for lbl in "Work:progress" "Work:done"; do
+    its::remove_label "$t" "$lbl" 2>/dev/null || true
+  done
   its::close_issue "$t" "Closed via \`/agents close\` on feature #$FEATURE" 2>/dev/null || true
   ((TASKS_CLOSED++)) || true
 done
@@ -65,6 +68,12 @@ if git::branch_exists "$FEATURE_BRANCH" 2>/dev/null; then
   git::delete_branch "$FEATURE_BRANCH"
   ((BRANCHES_DELETED++)) || true
 fi
+
+# Remove progress labels from feature issue
+for lbl in "Spec:draft" "Spec:plan" "Tactics:crafting" "Tactics:ready" \
+           "Work:progress" "Work:done"; do
+  its::remove_label "$FEATURE" "$lbl" 2>/dev/null || true
+done
 
 # Close the feature issue
 its::close_issue "$FEATURE" "Feature closed by @$COMMENTER via \`/agents close\`.

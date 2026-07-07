@@ -44,6 +44,7 @@ The Tactical agent reads a designed feature issue and produces a tactical plan: 
 1. Reacts to the trigger comment with 👀.
 2. Fetches the issue content and writes it to `/tmp/issue-request.md`.
 3. **Revision detection:** if the issue already has the `Ready` label, this is a plan revision. The agent extracts existing task numbers from the YAML block and builds revision context (prior plan + recent comments).
+4. Adds `Tactics:crafting` to the issue to indicate that tactical planning is in progress.
 
 </details>
 
@@ -94,7 +95,7 @@ Optional tactical caveats (design spec is NOT re-summarized here).
 6. **Parse the tactical body:** `parse-plan.py` extracts tasks from the `## Tasks` section, validates structure, and produces `/tmp/tasks.jsonl`. On parse failure: posts error as comment and exits.
 7. **Reconcile tasks:** creates new task issues, updates existing ones if changed, closes dropped tasks. Maps `T1`/`T2` placeholders to real issue numbers.
 8. Replaces `T1`/`T2` placeholders with real issue numbers. Strips the `## Tasks` section (tasks are now separate issues). Assembles the final body by merging the design zone with the new tactical zone (separated by sentinel markers). Updates the feature issue body.
-9. **First pass only** (not revision): adds `Ready` label, sets issue type to `Feature`, creates feature branch `feature/{id}-{slug}`, creates a draft PR targeting `main`, assigns the commenter.
+9. **First pass only** (not revision): removes `Tactics:crafting` and adds `Tactics:ready` (planning complete) and `Ready` (execution routing signal). `Tactics:ready` and `Ready` coexist — `Tactics:ready` records that planning finished; `Ready` is the signal the Wave Orchestrator checks to route execution. Also sets issue type to `Feature`, creates feature branch `feature/{id}-{slug}`, creates a draft PR targeting `main`, assigns the commenter.
 10. Reacts with 👍 and posts a comment listing created tasks with a suggestion to run `/agents execute`.
 
 </details>
@@ -103,7 +104,8 @@ Optional tactical caveats (design spec is NOT re-summarized here).
 
 - **Task issues created** as children of the feature issue, each with type `Task`
 - **Feature issue body updated** with wave structure (YAML block) and task references
-- **`Ready` label added** to the feature issue
+- **`Tactics:crafting` removed; `Tactics:ready` added** — tactical phase complete
+- **`Ready` label added** to the feature issue (execution routing signal; coexists with `Tactics:ready`)
 - **Feature branch created:** `feature/{id}-{slug}`
 - **Draft PR created** targeting `main` (first pass only)
 
@@ -144,6 +146,35 @@ waves:
 ```
 
 Tasks in the same wave run in parallel. Each wave starts only after the previous wave is fully done (all task PRs merged).
+
+## Native sub-issue linking
+
+Every task issue is linked to its parent Feature via GitHub's native
+sub-issues relationship (visible as a "Sub-issues" panel and progress bar
+on the Feature, and a "Parent issue" link on each Task).
+
+The linkage is created by `its::link_sub_issue` inside the Tactical agent's
+reconcile step, immediately after each task issue is created (or, on
+revision, after each existing task is re-verified). The behavior is:
+
+| Repository state | Outcome | Reported in completion comment |
+|-------------------|---------|--------------------------------|
+| Sub-issues API available, token has `issues:write` | Every task linked | "All tasks linked as native sub-issues" |
+| Sub-issues API unavailable (feature disabled) | Nothing linked; markdown checklist is the source of truth | "Native sub-issue linking is not available for this repository" |
+| Token missing `issues:write` | Nothing linked | "Native sub-issue linking was refused" |
+| Partial failure (e.g. GitHub outage) | Whatever tasks were linked stay linked; the rest are retried on next `/agents devise` | Explicit count and per-category breakdown |
+
+The `## Progress` checklist inside the tactical zone remains the source of
+truth for wave parsing and the Wave Orchestrator. Native sub-issue linking
+is a visual layer, not a control-plane substitute — the same relationship
+autoducks currently maintains via label + parent-issue reference.
+
+<Aside>
+The Tactical agent probes the API once per run and caches the result. If
+you enable the sub-issues API mid-project (or your token gains
+`issues:write`), the first `/agents devise` after the change reconciles
+every task, including previously created ones that had no native link.
+</Aside>
 
 ## Required permissions
 

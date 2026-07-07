@@ -6,6 +6,7 @@ source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/robustness/assert-changes.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/trigger-loop-closure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
 # Reconstruct state from git (pre.sh exports don't persist across GHA steps)
 TASK_BRANCH=$(git rev-parse --abbrev-ref HEAD)
@@ -19,6 +20,7 @@ fi
 if ! assert_changes; then
   notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:+$FEATURE_NUM}"
   react_to_comment "${COMMENT_ID:-}" "confused"
+  progress_labels::abort "$ISSUE_NUM" "Work:progress"
   exit 1
 fi
 
@@ -38,8 +40,16 @@ if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
   # Scenario B: task with feature parent — auto-merge with rebase retry
   MERGE_OK=false
   for attempt in 1 2 3; do
-    if git::merge_pr "$PR_NUM"; then
+    merge_rc=0
+    git::merge_pr "$PR_NUM" || merge_rc=$?
+    if [[ "$merge_rc" -eq 0 ]]; then
       MERGE_OK=true
+      break
+    fi
+    if [[ "$merge_rc" -eq 2 ]]; then
+      # Merge method not allowed — a config problem, not a stale branch.
+      # Rebasing won't help, so stop retrying.
+      echo "Merge method not allowed on $REPO — aborting retries (see merge_method config)."
       break
     fi
     echo "Merge attempt $attempt failed — rebasing onto $BASE_BRANCH..."
@@ -55,6 +65,7 @@ if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
   if [[ "$MERGE_OK" != "true" ]]; then
     notify_failure "$ISSUE_NUM" "$RUN_ID" "$FEATURE_NUM"
     react_to_comment "${COMMENT_ID:-}" "confused"
+    progress_labels::abort "$ISSUE_NUM" "Work:progress"
     exit 1
   fi
 
@@ -72,6 +83,8 @@ fi
 # Scenario A (orphan task): PR goes to main, no auto-merge — human review needed
 
 react_to_comment "${COMMENT_ID:-}" "+1"
+
+progress_labels::finish "$ISSUE_NUM" "Work:progress" "Work:done"
 
 its::comment_issue "$ISSUE_NUM" "✅ Implementation complete. PR #$PR_NUM created.
 

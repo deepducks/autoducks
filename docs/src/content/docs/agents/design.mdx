@@ -41,6 +41,7 @@ The Design agent reads a feature request, explores the codebase, and writes a co
 
 1. Reacts to the trigger comment with 👀.
 2. Fetches the issue content (title + body) and writes it to `/tmp/issue-request.md`.
+3. Adds the `Spec:draft` label to the issue to indicate that design work is in progress.
 
 </details>
 
@@ -66,7 +67,8 @@ It writes a full design specification to `/tmp/design-spec.md` covering:
 5. Updates the issue body with the design specification.
 6. Sets the issue type to `Feature`.
 7. Removes the `Draft` label.
-8. Reacts with 👍 and posts a comment suggesting `/agents devise` to create the tactical plan.
+8. Removes `Spec:draft` and adds `Spec:plan` to the issue to record that the design phase is complete.
+9. Reacts with 👍 and posts a comment suggesting `/agents devise` to create the tactical plan.
 
 </details>
 
@@ -75,6 +77,7 @@ It writes a full design specification to `/tmp/design-spec.md` covering:
 - **Issue body updated** with the full design specification
 - **Issue type** set to `Feature`
 - **`Draft` label removed**
+- **`Spec:draft` removed; `Spec:plan` added** — design phase marked complete
 
 ## Required permissions
 

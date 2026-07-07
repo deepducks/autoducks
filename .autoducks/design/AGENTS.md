@@ -69,12 +69,15 @@ Permissions:
 - author information
 -->
 
+<!-- PRE EXECUTION -->
+1. Adds the `Spec:draft` label to signal that design work is in progress. <!-- its::addLabel(issueId, "Spec:draft") -->
 <!-- EXECUTION -->
-1. **[AGENT]** Creates the full issue specification (design/architecture) and edits the issue description. <!-- llm::designSpecification(issueId, issueTitle, issueDescription, issueComments, issueMetadata) + its::editIssueDescription(issueId, specification) -->
+2. **[AGENT]** Creates the full issue specification (design/architecture) and edits the issue description. <!-- llm::designSpecification(issueId, issueTitle, issueDescription, issueComments, issueMetadata) + its::editIssueDescription(issueId, specification) -->
 <!-- POST EXECUTION -->
-2. Assigns the `Feature` type to the issue. <!-- its::setIssueType(issueId, "Feature") -->
-3. Removes the `Draft` label from the issue. <!-- its::removeLabel(issueId, "Draft") -->
-4. Runs the Tactical agent to create the tactical plan and dependent tasks. <!-- invokeTacticalAgent(issueId) -->
+3. Removes `Spec:draft` and adds `Spec:plan` to record that the design layer is complete. <!-- its::removeLabel(issueId, "Spec:draft") + its::addLabel(issueId, "Spec:plan") -->
+4. Assigns the `Feature` type to the issue. <!-- its::setIssueType(issueId, "Feature") -->
+5. Removes the `Draft` label from the issue. <!-- its::removeLabel(issueId, "Draft") -->
+6. Runs the Tactical agent to create the tactical plan and dependent tasks. <!-- invokeTacticalAgent(issueId) -->
 
 ---
 
@@ -129,21 +132,24 @@ Permissions:
 - author information
 -->
 
+<!-- PRE EXECUTION -->
+1. Adds the `Tactics:crafting` label to signal that tactical planning is in progress. <!-- its::addLabel(featureIssueId, "Tactics:crafting") -->
 <!-- EXECUTION -->
-1. **[AGENT]** Creates the tactical plan, **appending** it to the existing design spec via the tactical-zone markers — the design zone is never rewritten. <!-- llm::deviseTacticalPlan(featureIssueId, featureIssueTitle, featureIssueDescription, featureIssueComments, featureIssueMetadata) -->
+2. **[AGENT]** Creates the tactical plan, **appending** it to the existing design spec via the tactical-zone markers — the design zone is never rewritten. <!-- llm::deviseTacticalPlan(featureIssueId, featureIssueTitle, featureIssueDescription, featureIssueComments, featureIssueMetadata) -->
 
    The feature issue body is split into two zones by a pair of HTML-comment sentinels:
    - **Design zone** — everything above `<!-- autoducks:tactical:begin -->`. Owned by the Design Agent and humans; the Tactical Agent preserves it byte-for-byte.
    - **Tactical zone** — content between the sentinels. Owned by the Tactical Agent; contains the YAML wave plan, `## Progress` checkboxes, and `## Notes`.
 
 <!-- POST EXECUTION -->
-2. Each dependent task is created, associated with the parent issue, labeled `Task`, and — best-effort on organizations with issue types configured — assigned the native `Task` type. <!-- its::createChildIssue(featureIssueId, taskTitle, taskDescription, labels=["priority:PN","Task"]) + its::setIssueType(taskId, "Task") -->
-3. The `Ready` label is added to the issue. <!-- its::addLabel(featureIssueId, "Ready") -->
-4. A slug is generated: `feature/<issue_id>-<slugified_title>`. <!-- generateSlug(featureIssueId, featureIssueTitle) -->
-5. A branch is created from `main` named `feature/<issue_id>-<slugified_title>`. <!-- git::createBranch("main", featureSlug) -->
-6. A pull request is created from the feature branch into `main`, titled `Feature <issue_id>: <issue_title>`. <!-- its::createPullRequest(featureBranch, "main", prTitle) -->
-7. The PR is linked to the parent issue. <!-- its::linkPRToIssue(prId, featureIssueId) -->
-8. A comment on the issue mentions the feature author, suggesting work can begin with `/agents execute` or by assigning the PR to the agents. <!-- its::commentIssue(featureIssueId, featureAuthor, message) -->
+3. Removes `Tactics:crafting` and adds `Tactics:ready` to record that the tactical layer is complete. `Tactics:ready` is distinct from `Ready`: `Ready` is the execution routing signal; `Tactics:ready` records that the planning phase finished. <!-- its::removeLabel(featureIssueId, "Tactics:crafting") + its::addLabel(featureIssueId, "Tactics:ready") -->
+4. Each dependent task is created, associated with the parent issue, labeled `Task`, and — best-effort on organizations with issue types configured — assigned the native `Task` type. <!-- its::createChildIssue(featureIssueId, taskTitle, taskDescription, labels=["priority:PN","Task"]) + its::setIssueType(taskId, "Task") -->
+5. The `Ready` label is added to the issue. <!-- its::addLabel(featureIssueId, "Ready") -->
+6. A slug is generated: `feature/<issue_id>-<slugified_title>`. <!-- generateSlug(featureIssueId, featureIssueTitle) -->
+7. A branch is created from `main` named `feature/<issue_id>-<slugified_title>`. <!-- git::createBranch("main", featureSlug) -->
+8. A pull request is created from the feature branch into `main`, titled `Feature <issue_id>: <issue_title>`. <!-- its::createPullRequest(featureBranch, "main", prTitle) -->
+9. The PR is linked to the parent issue. <!-- its::linkPRToIssue(prId, featureIssueId) -->
+10. A comment on the issue mentions the feature author, suggesting work can begin with `/agents execute` or by assigning the PR to the agents. <!-- its::commentIssue(featureIssueId, featureAuthor, message) -->
 
 ---
 
@@ -197,9 +203,11 @@ Permissions:
 1. Get the parent feature issue and its dependent tasks. <!-- its::getIssue(featureIssueId) + its::listChildIssues(featureIssueId) -->
 2. Filter tasks that are not yet completed (no merged PR). <!-- filterPendingTasks(childIssues) -->
 3. Group tasks into execution waves based on dependency order or labels. <!-- groupTasksIntoWaves(pendingTasks) -->
-4. For each wave, dispatch execution agents in parallel for each task. <!-- dispatchExecutionAgents(wave, featureIssueId) -->
-5. Wait for all execution agents in the current wave to complete before starting the next wave. <!-- awaitWaveCompletion(waveId) -->
-6. After all waves are complete, comment on the feature issue with a summary. <!-- its::commentIssue(featureIssueId, summary) -->
+4. On the first wave dispatch, adds `Work:progress` to the feature issue to signal that execution is underway. <!-- its::addLabel(featureIssueId, "Work:progress") -->
+5. For each wave, dispatch execution agents in parallel for each task. <!-- dispatchExecutionAgents(wave, featureIssueId) -->
+6. Wait for all execution agents in the current wave to complete before starting the next wave. <!-- awaitWaveCompletion(waveId) -->
+7. After all waves are complete, removes `Work:progress` and adds `Work:done` to the feature issue. <!-- its::removeLabel(featureIssueId, "Work:progress") + its::addLabel(featureIssueId, "Work:done") -->
+8. Comments on the feature issue with a summary. <!-- its::commentIssue(featureIssueId, summary) -->
 
 ---
 
@@ -251,10 +259,12 @@ Permissions:
 1. A slug is generated: `<task_id>-<slugified_title>`. <!-- generateSlug(taskId, taskTitle) -->
 2. A branch is created from `main` named `feature/<task_id>-<slugified_title>`. <!-- git::createBranch("main", slug) -->
 3. A pull request is created from the branch, titled `Task <task_id>: <taskTitle>`. <!-- its::createPullRequest(branch, "main", prTitle) -->
+4. Adds the `Work:progress` label to the task issue to signal that execution is underway. <!-- its::addLabel(taskId, "Work:progress") -->
 <!-- EXECUTION -->
-4. The agent executes the task. <!-- llm::executeTask(taskId, taskTitle, taskDescription, taskComments, taskMetadata) -->
+5. The agent executes the task. <!-- llm::executeTask(taskId, taskTitle, taskDescription, taskComments, taskMetadata) -->
 <!-- POST EXECUTION -->
-5. A comment on the PR mentions the task author/requester and assigns the PR to them for **human review**. No auto-merge. <!-- its::commentPR(prId, taskAuthor) + its::assignPR(prId, taskAuthor) -->
+6. Removes `Work:progress` and adds `Work:done` to the task issue to record successful execution. <!-- its::removeLabel(taskId, "Work:progress") + its::addLabel(taskId, "Work:done") -->
+7. A comment on the PR mentions the task author/requester and assigns the PR to them for **human review**. No auto-merge. <!-- its::commentPR(prId, taskAuthor) + its::assignPR(prId, taskAuthor) -->
 </details>
 
 <details>
@@ -286,11 +296,13 @@ Permissions:
 4. If the parent issue does not have an associated branch, create one from `main` named `feature/<feature_id>-<slugified_feature_title>` and create its PR. <!-- git::createBranch("main", featureSlug) + its::createPullRequest(featureBranch, "main", prTitle) -->
 5. Create a branch from the feature branch named `feature/<feature_id>-<slugified_feature_title>/task/<task_id>-<task_slug>`. <!-- git::createBranch(featureBranch, taskSlug) -->
 6. Create a pull request from the task branch into the feature branch, titled `Task <task_id>: <task_title>`. <!-- its::createPullRequest(taskBranch, featureBranch, prTitle) -->
+7. Adds the `Work:progress` label to the task issue to signal that execution is underway. <!-- its::addLabel(taskId, "Work:progress") -->
 <!-- EXECUTION -->
-7. The agent executes the task. <!-- llm::executeTask(taskId, taskTitle, taskDescription, taskComments, taskMetadata) -->
+8. The agent executes the task. <!-- llm::executeTask(taskId, taskTitle, taskDescription, taskComments, taskMetadata) -->
 <!-- POST EXECUTION -->
-8. The task PR is **auto-merged** (only CI checks run, no code review) and the branch is deleted by policy. <!-- its::mergePR(prId) -->
-9. The task issue is closed as `completed` with a comment linking to the
+9. The task PR is **auto-merged** (only CI checks run, no code review) and the branch is deleted by policy. <!-- its::mergePR(prId) -->
+10. Removes `Work:progress` and adds `Work:done` to the task issue to record successful execution. <!-- its::removeLabel(taskId, "Work:progress") + its::addLabel(taskId, "Work:done") -->
+11. The task issue is closed as `completed` with a comment linking to the
    merged sub-PR. This is required because the sub-PR merged into the
    feature branch, not the default branch, so the `fixes #N` keyword does
    not auto-close the issue.
@@ -412,6 +424,12 @@ All branches follow a predictable convention rooted in issue IDs.
 | `Ready` | Tactical plan is complete; issue is ready for execution |
 | `Feature` | Routing signal — set as both a label (route-critical) and the native issue type (best-effort, org-only) |
 | `Task` | Marks a task issue split from a Feature — set as both a label (works everywhere) and the native issue type (best-effort, org-only) |
+| `Spec:draft` | Design agent is currently writing the spec |
+| `Spec:plan` | Design spec is written (design layer complete) |
+| `Tactics:crafting` | Tactical agent is currently building the plan |
+| `Tactics:ready` | Tactical plan is complete (tasks issued, waves defined) |
+| `Work:progress` | Execution / Wave Orchestrator is currently active on this issue |
+| `Work:done` | Execution complete (task PR merged, or all waves finished) |
 
 ---
 

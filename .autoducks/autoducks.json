@@ -7,6 +7,7 @@
   "defaults": {
     "model": "claude-sonnet-4-6",
     "reasoning": "high",
-    "base_branch": "main"
+    "base_branch": "main",
+    "merge_method": "auto"
   }
 }

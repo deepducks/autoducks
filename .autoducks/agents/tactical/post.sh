@@ -7,11 +7,13 @@ source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/robustness/ask-questions.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/reconcile-tasks.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
+source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
 # Questions mode: if the agent wrote questions instead of a plan
 if [[ -f /tmp/questions.md ]]; then
   ask_questions "$ISSUE_NUM" /tmp/questions.md
   react_to_comment "$COMMENT_ID" "+1"
+  progress_labels::abort "$ISSUE_NUM" "Tactics:crafting"
   exit 0
 fi
 
@@ -19,6 +21,7 @@ fi
 if [[ ! -f /tmp/tactical-body.md ]]; then
   notify_failure "$ISSUE_NUM" "$RUN_ID"
   react_to_comment "$COMMENT_ID" "confused"
+  progress_labels::abort "$ISSUE_NUM" "Tactics:crafting"
   exit 1
 fi
 
@@ -30,6 +33,7 @@ if ! python3 "$AUTODUCKS_ROOT/core/robustness/parse-plan.py" /tmp/tactical-body.
     its::comment_issue "$ISSUE_NUM" "$(cat "$PARSE_ERROR_FILE")"
   fi
   react_to_comment "$COMMENT_ID" "confused"
+  progress_labels::abort "$ISSUE_NUM" "Tactics:crafting"
   exit 1
 fi
 
@@ -60,6 +64,7 @@ its::update_issue_body "$ISSUE_NUM" /tmp/feature-body.md
 
 # Labels and type (idempotent — safe on both first pass and revision)
 its::add_label "$ISSUE_NUM" "Ready"
+progress_labels::finish "$ISSUE_NUM" "Tactics:crafting" "Tactics:ready"
 its::set_issue_type "$ISSUE_NUM" "Feature" 2>/dev/null || true
 its::add_label "$ISSUE_NUM" "Feature"
 
@@ -90,7 +95,27 @@ fi
 
 react_to_comment "$COMMENT_ID" "+1"
 
+# Summarize sub-issue linking outcome
+LINK_SUMMARY=""
+if [[ -s /tmp/link-outcomes.tsv ]]; then
+  TOTAL=$(wc -l < /tmp/link-outcomes.tsv)
+  LINKED=$(grep -cE $'\tlinked$|\talready-linked$' /tmp/link-outcomes.tsv || true)
+  UNAVAIL=$(grep -cE $'\tunavailable$' /tmp/link-outcomes.tsv || true)
+  FORBID=$(grep -cE $'\tforbidden$' /tmp/link-outcomes.tsv || true)
+  ERR=$(grep -cE $'\terror$' /tmp/link-outcomes.tsv || true)
+
+  if (( UNAVAIL == TOTAL )); then
+    LINK_SUMMARY=$'\n> Native sub-issue linking is not available for this repository — the `## Progress` checklist above is the primary progress view.'
+  elif (( FORBID == TOTAL )); then
+    LINK_SUMMARY=$'\n> Native sub-issue linking was refused (token missing `issues:write` scope on this repository).'
+  elif (( LINKED == TOTAL )); then
+    LINK_SUMMARY=$'\n> All tasks linked as native sub-issues — the parent issue now shows a progress bar in the GitHub UI.'
+  else
+    LINK_SUMMARY=$"\n> Sub-issue linking: $LINKED/$TOTAL tasks linked ($ERR errors, $FORBID forbidden, $UNAVAIL unavailable). Retry with \`/agents devise\` to reconcile."
+  fi
+fi
+
 # Notify
 its::comment_issue "$ISSUE_NUM" "✅ Tactical plan complete. Tasks created: $TASK_NUMBERS
-
+${LINK_SUMMARY}
 _Ran with \`${MODEL:-unknown}\` at reasoning \`${REASONING:-unknown}\`._"

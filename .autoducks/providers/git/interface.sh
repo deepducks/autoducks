@@ -27,7 +27,7 @@ done
 #   git::create_branch(base, name)
 #   git::branch_exists(name)                         → exit code 0/1
 #   git::create_pr(head, base, title, body)           → pr_number
-#   git::merge_pr(pr_number)
+#   git::merge_pr(pr_number)                          → 0 ok / 2 method-not-allowed / 1 other
 #   git::close_pr(pr_number, comment)
 #   git::list_open_prs(base_branch?)                  → JSON array
 #   git::list_merged_prs(base_branch)                 → JSON array
