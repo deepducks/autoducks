@@ -15,11 +15,11 @@ on:
       model:
         required: false
         type: string
-        default: 'claude-sonnet-4-6'
+        default: ''
       reasoning:
         required: false
         type: string
-        default: 'high'
+        default: ''
 
 permissions:
   contents: write
@@ -62,6 +62,7 @@ jobs:
             echo "issue_num=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
             echo "base_branch=${{ inputs.base_branch }}" >> "$GITHUB_OUTPUT"
             echo "model=${{ inputs.model }}" >> "$GITHUB_OUTPUT"
+            echo "reasoning=${{ inputs.reasoning }}" >> "$GITHUB_OUTPUT"
           else
             echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
             echo "base_branch=main" >> "$GITHUB_OUTPUT"
@@ -86,6 +87,7 @@ jobs:
           prompt_file: .autoducks/agents/execution/prompt.md
           allowed_tools: "Read,Write,Edit,Bash"
           model: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
+          reasoning: ${{ steps.ctx.outputs.reasoning || steps.agent.outputs.reasoning }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       - name: Post-execution
@@ -97,4 +99,6 @@ jobs:
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           RUN_ID: ${{ github.run_id }}
+          MODEL: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
+          REASONING: ${{ steps.ctx.outputs.reasoning || steps.agent.outputs.reasoning }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}

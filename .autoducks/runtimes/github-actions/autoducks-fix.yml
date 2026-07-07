@@ -41,6 +41,7 @@ jobs:
           prompt_file: .autoducks/agents/fix/prompt.md
           allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
           model: ${{ steps.directive.outputs.model || steps.agent.outputs.model }}
+          reasoning: ${{ steps.directive.outputs.reasoning || steps.agent.outputs.reasoning }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       - name: Post-execution
@@ -51,4 +52,6 @@ jobs:
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id }}
           RUN_ID: ${{ github.run_id }}
+          MODEL: ${{ steps.directive.outputs.model || steps.agent.outputs.model }}
+          REASONING: ${{ steps.directive.outputs.reasoning || steps.agent.outputs.reasoning }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
