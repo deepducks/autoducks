@@ -17,12 +17,16 @@
 #   6. The #164 stale-`Ready` regression: rewriting the body to a fresh,
 #      marker-free design spec while `Ready` lingers must not lose the
 #      rewritten design zone on the next /agents devise run.
+#   7. The tactical-zone-preservation fix for /agents design re-runs: an
+#      existing tactical zone (markers + YAML wave plan) must survive
+#      verbatim below a freshly-written design zone, and a markerless body
+#      must still get no tactical markers on the fallback path.
 #
 # COST
 # ----
-# Runs two tactical-agent calls at `sonnet low` reasoning to keep it cheap.
-# Expected wall time: 5–10 min. No task worker is triggered — this test
-# covers the planning half of the pipeline, not the shipping half.
+# Runs four tactical/design-agent calls at `sonnet low` reasoning to keep it
+# cheap. Expected wall time: 8–13 min. No task worker is triggered — this
+# test covers the planning half of the pipeline, not the shipping half.
 #
 # USAGE
 # -----
@@ -49,6 +53,12 @@
 #     rewritten design zone must survive verbatim with a fresh tactical
 #     zone appended below it (sentinel present, markers present, sentinel
 #     above the begin marker)
+#   - /agents design re-run regression: an existing tactical zone (markers +
+#     YAML wave plan) must survive verbatim below a freshly-written design
+#     zone (markers present, tactical sentinel below the begin marker, fresh
+#     design-spec heading above it)
+#   - /agents design on a markerless body writes the design spec as the full
+#     body and introduces no tactical markers
 #
 # Soft assertions (logged as warning if violated, test still passes):
 #   - Issue type = Feature on the draft, Task on children
@@ -167,7 +177,7 @@ wait_for_feature_unplanned() {
 
 # --- Ensure labels exist (plan agent creates priority:P* lazily but we
 #     want them ready so we can assert quickly) ---
-echo "[1/8] Ensuring labels exist..."
+echo "[1/9] Ensuring labels exist..."
 gh label create "Ready"       --color "0E8A16" --description "Plan complete, ready for execution" $REPO_ARG 2>/dev/null || true
 gh label create "Draft"       --color "CCCCCC" --description "Draft issue, not yet designed" $REPO_ARG 2>/dev/null || true
 gh label create "smoke-test"  --color "FFA500" --description "Smoke test" $REPO_ARG 2>/dev/null || true
@@ -178,7 +188,7 @@ echo ""
 # --- Create the seed issue with a narrow, decomposable draft ---
 # The draft is intentionally specific (explicit file paths, exact signatures)
 # so the tactical-agent goes straight to Plan Mode without asking questions.
-echo "[2/8] Creating seed feature issue..."
+echo "[2/9] Creating seed feature issue..."
 SEED_BODY=$(cat <<EOF
 # Plan smoke test — ${TIMESTAMP}
 
@@ -243,7 +253,7 @@ echo "  Seed body captured (${#SEED_BODY_NOW} chars)"
 echo ""
 
 # --- Trigger /agents devise ---
-echo "[3/8] Triggering /agents devise sonnet low..."
+echo "[3/9] Triggering /agents devise sonnet low..."
 PLAN_COMMENT_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/agents devise sonnet low")
 PLAN_COMMENT_ID=$(echo "$PLAN_COMMENT_URL" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+$' || echo "")
 echo "  Plan comment posted (id: ${PLAN_COMMENT_ID:-unknown})"
@@ -263,7 +273,7 @@ echo ""
 # the *comment reactions* the workflow itself posts (👀 → 👍/😕)
 # instead of trying to pin a run ID. Reactions are tied to our specific
 # comment, so parallel workflows on other issues don't cross-talk.
-echo "[4/8] Waiting for tactical-agent terminal reaction..."
+echo "[4/9] Waiting for tactical-agent terminal reaction..."
 if [[ -z "${PLAN_COMMENT_ID:-}" ]]; then
   fail "cannot track tactical-agent — missing PLAN_COMMENT_ID"
   exit 1
@@ -280,7 +290,7 @@ esac
 echo ""
 
 # --- Assert: reactions, body change, labels, tasks created ---
-echo "[5/8] Asserting plan pipeline state..."
+echo "[5/9] Asserting plan pipeline state..."
 
 # Reactions on /agents devise comment
 if [[ -n "$PLAN_COMMENT_ID" ]]; then
@@ -383,7 +393,7 @@ echo ""
 # lose the rewritten design content. Post-fix, markers (not the label) are
 # the single source of truth: no markers means the whole body is the design
 # zone, which must survive verbatim with a fresh tactical zone appended below.
-echo "[6/8] Reproducing #164 regression (stale Ready + rewritten markerless body)..."
+echo "[6/9] Reproducing #164 regression (stale Ready + rewritten markerless body)..."
 SENTINEL="REWRITTEN-DESIGN-${TIMESTAMP}"
 REWRITE_BODY=$(cat <<EOF
 # ${SENTINEL}
@@ -488,9 +498,150 @@ else
 fi
 echo ""
 
+# --- Reproduce the tactical-zone-preservation fix for /agents design re-runs ---
+# Companion to the #164 regression above, but for the *other* re-entrant
+# workflow: /agents design re-run on a feature that already has a tactical
+# zone (markers + YAML wave plan) must preserve that zone verbatim while
+# rewriting only the design zone above it. Starts from the state this script
+# already reached above (the feature body has markers and a real YAML wave
+# plan from the second /agents devise run). Captures a task-number sentinel
+# from the tactical zone, re-runs /agents design, and asserts the tactical
+# zone survives verbatim below a freshly-written design zone.
+echo "[7/9] Reproducing /agents design re-run regression (tactical zone must survive)..."
+if [[ "$REDEVISE_RC" -ne 0 ]]; then
+  fail "Skipping design re-run assertions — second tactical-agent run did not complete"
+elif [[ ${#TASK_NUMBERS[@]:-0} -eq 0 ]]; then
+  fail "Skipping design re-run assertions — no task numbers to use as a tactical sentinel"
+else
+  DESIGN_TACTICAL_SENTINEL="#${TASK_NUMBERS[0]}"
+  PRE_DESIGN_BODY=$(gh issue view $FEATURE $REPO_ARG --json body --jq '.body')
+
+  if echo "$PRE_DESIGN_BODY" | grep -qF "$DESIGN_TACTICAL_SENTINEL"; then
+    pass "Tactical sentinel ($DESIGN_TACTICAL_SENTINEL) present before /agents design re-run"
+  else
+    fail "Tactical sentinel ($DESIGN_TACTICAL_SENTINEL) missing before /agents design re-run — cannot set up the test"
+  fi
+
+  DESIGN_COMMENT_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/agents design sonnet low")
+  DESIGN_COMMENT_ID=$(echo "$DESIGN_COMMENT_URL" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+$' || echo "")
+  echo "  /agents design comment posted (id: ${DESIGN_COMMENT_ID:-unknown})"
+
+  DESIGN_RC=0
+  if [[ -z "${DESIGN_COMMENT_ID:-}" ]]; then
+    fail "cannot track design-agent run — missing DESIGN_COMMENT_ID"
+    DESIGN_RC=1
+  else
+    wait_for_reaction "$DESIGN_COMMENT_ID" 600 "design-agent" || DESIGN_RC=$?
+    case $DESIGN_RC in
+      0) pass "design-agent run completed successfully" ;;
+      1) fail "design-agent run failed (😕 reaction on /agents design comment)" ;;
+      2) fail "design-agent run did not complete within 10 min" ;;
+    esac
+  fi
+
+  if [[ "$DESIGN_RC" -eq 0 ]]; then
+    DESIGN_BODY=$(gh issue view $FEATURE $REPO_ARG --json body --jq '.body')
+
+    if echo "$DESIGN_BODY" | grep -qE '^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$' && \
+       echo "$DESIGN_BODY" | grep -qE '^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$'; then
+      pass "Tactical zone markers present after /agents design re-run"
+    else
+      fail "Tactical zone markers LOST after /agents design re-run"
+    fi
+
+    if echo "$DESIGN_BODY" | grep -qF "$DESIGN_TACTICAL_SENTINEL"; then
+      pass "Tactical sentinel ($DESIGN_TACTICAL_SENTINEL) survived the /agents design re-run"
+    else
+      fail "Tactical sentinel ($DESIGN_TACTICAL_SENTINEL) LOST after /agents design re-run"
+    fi
+
+    BEGIN_LINE=$(echo "$DESIGN_BODY" | grep -nE '^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$' | head -1 | cut -d: -f1 || echo "")
+    SENTINEL_LINE=$(echo "$DESIGN_BODY" | grep -nF "$DESIGN_TACTICAL_SENTINEL" | head -1 | cut -d: -f1 || echo "")
+    if [[ -n "$SENTINEL_LINE" && -n "$BEGIN_LINE" && "$SENTINEL_LINE" -gt "$BEGIN_LINE" ]]; then
+      pass "Tactical sentinel appears below the tactical:begin marker (tactical zone preserved in place)"
+    else
+      fail "Tactical sentinel does not appear below the tactical:begin marker (tactical zone corrupted or misplaced)"
+    fi
+
+    # "## Problem Statement" is a required section of every design spec the
+    # design-agent writes (.autoducks/agents/design/prompt.md) — a stable,
+    # LLM-independent sentinel that the design zone was actually rewritten,
+    # not just left stale above the preserved tactical zone.
+    DESIGN_SENTINEL_LINE=$(echo "$DESIGN_BODY" | grep -nE '^## Problem Statement[[:space:]]*$' | head -1 | cut -d: -f1 || echo "")
+    if [[ -n "$DESIGN_SENTINEL_LINE" && -n "$BEGIN_LINE" && "$DESIGN_SENTINEL_LINE" -lt "$BEGIN_LINE" ]]; then
+      pass "Fresh design spec ('## Problem Statement') appears above the tactical:begin marker"
+    else
+      fail "Fresh design spec heading missing or not above the tactical:begin marker"
+    fi
+  else
+    fail "Skipping tactical-zone-survival assertions — design-agent run did not complete"
+  fi
+fi
+echo ""
+
+# --- Markerless-body /agents design run must add no tactical markers ---
+# Inverse case, on a throwaway issue so it doesn't disturb the feature's
+# revert flow below: /agents design on a body with no markers at all must
+# write the design spec as the full body and introduce no tactical markers
+# (mirrors the markerless fallback path pre.sh/post.sh take when
+# body_has_markers is false).
+echo "  Verifying markerless-body /agents design run adds no tactical markers..."
+MARKERLESS_BODY=$(cat <<EOF
+# Design markerless smoke test — ${TIMESTAMP}
+
+A tiny, narrow feature description with no tactical markers at all, used to
+confirm \`/agents design\` on a markerless body writes the design spec as the
+full issue body and does not introduce tactical zone markers.
+EOF
+)
+MARKERLESS_URL=$(gh issue create $REPO_ARG \
+  --title "Smoke [design markerless] ${TIMESTAMP}" \
+  --label "smoke-test" \
+  --body "$MARKERLESS_BODY")
+MARKERLESS_ISSUE=$(echo "$MARKERLESS_URL" | grep -oE '[0-9]+$')
+echo "  Markerless issue: #$MARKERLESS_ISSUE → $MARKERLESS_URL"
+
+MARKERLESS_COMMENT_URL=$(gh issue comment $MARKERLESS_ISSUE $REPO_ARG --body "/agents design sonnet low")
+MARKERLESS_COMMENT_ID=$(echo "$MARKERLESS_COMMENT_URL" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+$' || echo "")
+echo "  /agents design comment posted (id: ${MARKERLESS_COMMENT_ID:-unknown})"
+
+MARKERLESS_RC=0
+if [[ -z "${MARKERLESS_COMMENT_ID:-}" ]]; then
+  fail "cannot track markerless design-agent run — missing MARKERLESS_COMMENT_ID"
+  MARKERLESS_RC=1
+else
+  wait_for_reaction "$MARKERLESS_COMMENT_ID" 600 "design-agent (markerless)" || MARKERLESS_RC=$?
+  case $MARKERLESS_RC in
+    0) pass "markerless design-agent run completed successfully" ;;
+    1) fail "markerless design-agent run failed (😕 reaction on /agents design comment)" ;;
+    2) fail "markerless design-agent run did not complete within 10 min" ;;
+  esac
+fi
+
+if [[ "$MARKERLESS_RC" -eq 0 ]]; then
+  MARKERLESS_RESULT_BODY=$(gh issue view $MARKERLESS_ISSUE $REPO_ARG --json body --jq '.body')
+
+  if echo "$MARKERLESS_RESULT_BODY" | grep -qE '<!-- autoducks:tactical:(begin|end) -->'; then
+    fail "Tactical markers introduced on a markerless /agents design run (expected none)"
+  else
+    pass "No tactical markers introduced on markerless /agents design run"
+  fi
+
+  if [[ "$MARKERLESS_RESULT_BODY" != "$MARKERLESS_BODY" ]]; then
+    pass "Design spec written as the full body on markerless /agents design run"
+  else
+    fail "Body unchanged — design-agent did not write a design spec on the markerless issue"
+  fi
+else
+  fail "Skipping markerless-body assertions — design-agent run did not complete"
+fi
+
+gh issue close $MARKERLESS_ISSUE $REPO_ARG --comment "Smoke test complete — closing." 2>/dev/null || true
+echo ""
+
 # --- Trigger /agents revert (unless --keep) ---
 if [[ "$KEEP" == true ]]; then
-  echo "[7/8] Skipping /agents revert (--keep). Test complete."
+  echo "[8/9] Skipping /agents revert (--keep). Test complete."
   echo ""
   echo "=== Summary ==="
   echo "  Fail:    $FAIL"
@@ -498,7 +649,7 @@ if [[ "$KEEP" == true ]]; then
   [[ $FAIL -eq 0 ]] && echo "✅ Plan-pipeline assertions passed (kept state)." && exit 0 || { echo "❌ Plan-pipeline assertions failed."; exit 1; }
 fi
 
-echo "[7/8] Triggering /agents revert..."
+echo "[8/9] Triggering /agents revert..."
 REVERT_COMMENT_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/agents revert")
 REVERT_COMMENT_ID=$(echo "$REVERT_COMMENT_URL" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+$' || echo "")
 echo "  Revert comment posted (id: ${REVERT_COMMENT_ID:-unknown})"
@@ -516,7 +667,7 @@ esac
 echo ""
 
 # --- Assert revert effects ---
-echo "[8/8] Asserting revert state..."
+echo "[9/9] Asserting revert state..."
 
 # Tasks should be closed
 for t in "${TASK_NUMBERS[@]:-}"; do
