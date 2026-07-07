@@ -82,7 +82,7 @@ Undoes the work of the Tactical agent: closes all task issues and restores the f
 1. Reacts with 👀.
 2. Extracts task numbers from the YAML `waves:` block in the feature issue body.
 3. Closes all task issues with a comment referencing the revert.
-4. Removes `Ready` and `draft` labels from the feature issue.
+4. Removes `Ready`, `draft`, and all six progress labels (`Spec:draft`, `Spec:plan`, `Tactics:crafting`, `Tactics:ready`, `Work:progress`, `Work:done`) from the feature issue.
 5. Restores the original issue body from edit history (last non-bot edit).
 6. Deletes all bot comments on the feature issue.
 7. Reacts with 👍.
@@ -121,8 +121,9 @@ Full teardown of a feature and all associated work.
 2. Extracts task numbers from the YAML `waves:` block.
 3. For each task: finds branches, closes open PRs, deletes branches, closes the task issue.
 4. Closes the feature PR (if open) and deletes the feature branch.
-5. Closes the feature issue with a cleanup summary.
-6. Reacts with 👍.
+5. Strips all progress labels (`Spec:draft`, `Spec:plan`, `Tactics:crafting`, `Tactics:ready`, `Work:progress`, `Work:done`) along with `Ready` and `draft` from the feature issue as part of cleanup.
+6. Closes the feature issue with a cleanup summary.
+7. Reacts with 👍.
 
 ### What gets removed
 
