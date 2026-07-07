@@ -59,7 +59,6 @@ export default defineConfig({
           items: [
             { label: 'Overview', slug: 'agents' },
             { label: 'Design agent', slug: 'agents/design' },
-            { label: 'Tactical agent', slug: 'agents/tactical' },
             { label: 'Wave orchestrator', slug: 'agents/wave-orchestrator' },
             { label: 'Execution agent', slug: 'agents/execution' },
             { label: 'Utility commands', slug: 'agents/utilities' },
@@ -73,6 +72,12 @@ export default defineConfig({
             { label: 'Runtimes', slug: 'reference/runtimes' },
             { label: 'Branch naming', slug: 'reference/branch-naming' },
             { label: 'Security', slug: 'reference/security' },
+          ],
+        },
+        {
+          label: 'Tools',
+          items: [
+            { label: 'Dashboard', link: '/dashboard' },
           ],
         },
         {
