@@ -1,0 +1,311 @@
+---
+// Pure client-side factory. The board (314) calls createColumn(view), appends
+// the returned root itself, and drives state through the handle — this
+// component never imports IssueCard so 312 and 313 stay independent.
+---
+
+<style is:global>
+  /*
+   * Scoped Astro styles only reach elements rendered by this component's
+   * template. createColumn() builds its DOM with document.createElement at
+   * runtime, so these rules must stay global to reach it.
+   */
+  .kanban-column {
+    display: flex;
+    flex-direction: column;
+    width: 280px;
+    min-width: 280px;
+    flex-shrink: 0;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    background: var(--sl-color-gray-6);
+    overflow: hidden;
+  }
+
+  .kanban-column__bar {
+    height: 4px;
+    width: 100%;
+  }
+
+  .kanban-column__header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--sl-color-gray-5);
+  }
+
+  .kanban-column__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.1em;
+    height: 1.1em;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+  }
+
+  .kanban-column__icon--fallback {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--sl-color-gray-3);
+  }
+
+  .kanban-column__name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--sl-color-white);
+  }
+
+  .kanban-column__count {
+    flex-shrink: 0;
+    padding: 0.05rem 0.5rem;
+    border-radius: 999px;
+    background: var(--sl-color-gray-5);
+    color: var(--sl-color-gray-2);
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .kanban-column__dot {
+    flex-shrink: 0;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--sl-color-accent);
+    opacity: 0;
+  }
+
+  .kanban-column__dot.is-pulsing {
+    opacity: 1;
+    animation: kanban-column-pulse 1.2s ease-in-out infinite;
+  }
+
+  .kanban-column__list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.6rem;
+    overflow-y: auto;
+    max-height: calc(100vh - 200px);
+  }
+
+  .kanban-column__skeleton {
+    height: 4.5rem;
+    border-radius: 0.4rem;
+    flex-shrink: 0;
+    background: linear-gradient(
+      90deg,
+      var(--sl-color-gray-5) 25%,
+      var(--sl-color-gray-4) 37%,
+      var(--sl-color-gray-5) 63%
+    );
+    background-size: 400% 100%;
+    animation: kanban-column-shimmer 1.4s ease infinite;
+  }
+
+  .kanban-column__empty {
+    margin: auto;
+    padding: 1.5rem 0;
+    text-align: center;
+    color: var(--sl-color-gray-3);
+    font-size: 0.85rem;
+  }
+
+  .kanban-column__error {
+    margin: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem 0.5rem;
+    text-align: center;
+    color: var(--sl-color-gray-3);
+    font-size: 0.85rem;
+  }
+
+  .kanban-column__error-title {
+    margin: 0;
+    font-weight: 600;
+    color: var(--sl-color-gray-2);
+  }
+
+  .kanban-column__error-detail {
+    margin: 0;
+    word-break: break-word;
+  }
+
+  .kanban-column__retry {
+    border: 1px solid var(--sl-color-gray-4);
+    border-radius: 0.35rem;
+    padding: 0.3rem 0.9rem;
+    background: var(--sl-color-gray-5);
+    color: var(--sl-color-white);
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+
+  .kanban-column__retry:hover {
+    background: var(--sl-color-gray-4);
+  }
+
+  @keyframes kanban-column-shimmer {
+    0% {
+      background-position: 100% 50%;
+    }
+    100% {
+      background-position: 0 50%;
+    }
+  }
+
+  @keyframes kanban-column-pulse {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(1.4);
+      opacity: 0.5;
+    }
+  }
+</style>
+
+<script>
+  import type { ColumnHandle, RepoView } from '../../lib/dashboard/types';
+
+  // Small set of known GitHub view icon names. Anything unmapped falls back
+  // to a neutral circle rather than guessing.
+  const ICON_GLYPHS: Record<string, string> = {
+    rocket: '🚀',
+    label: '🏷️',
+    bug: '🐛',
+    star: '⭐',
+    milestone: '🏁',
+    flame: '🔥',
+    checklist: '✅',
+    eye: '👀',
+    alert: '⚠️',
+    clock: '🕐',
+  };
+
+  function applyIcon(el: HTMLElement, iconName: string): void {
+    const glyph = ICON_GLYPHS[iconName];
+    if (glyph) {
+      el.textContent = glyph;
+      el.classList.remove('kanban-column__icon--fallback');
+    } else {
+      el.textContent = '';
+      el.classList.add('kanban-column__icon--fallback');
+    }
+  }
+
+  export function createColumn(view: RepoView): ColumnHandle {
+    const root = document.createElement('div');
+    root.className = 'kanban-column';
+
+    const bar = document.createElement('div');
+    bar.className = 'kanban-column__bar';
+    bar.style.backgroundColor = view.color;
+    root.appendChild(bar);
+
+    const header = document.createElement('div');
+    header.className = 'kanban-column__header';
+    root.appendChild(header);
+
+    const icon = document.createElement('span');
+    icon.className = 'kanban-column__icon';
+    icon.setAttribute('aria-hidden', 'true');
+    applyIcon(icon, view.icon);
+    header.appendChild(icon);
+
+    const name = document.createElement('span');
+    name.className = 'kanban-column__name';
+    name.textContent = view.name;
+    header.appendChild(name);
+
+    const count = document.createElement('span');
+    count.className = 'kanban-column__count';
+    count.textContent = '0';
+    header.appendChild(count);
+
+    const dot = document.createElement('span');
+    dot.className = 'kanban-column__dot';
+    dot.setAttribute('aria-hidden', 'true');
+    header.appendChild(dot);
+
+    let list = document.createElement('div');
+    list.className = 'kanban-column__list';
+    root.appendChild(list);
+
+    function swapList(next: HTMLElement): void {
+      list.replaceWith(next);
+      list = next;
+    }
+
+    function setLoading(): void {
+      const next = document.createElement('div');
+      next.className = 'kanban-column__list';
+      for (let i = 0; i < 3; i += 1) {
+        const skeleton = document.createElement('div');
+        skeleton.className = 'kanban-column__skeleton';
+        next.appendChild(skeleton);
+      }
+      swapList(next);
+    }
+
+    function setIssues(cards: HTMLElement[], totalCount: number): void {
+      const next = document.createElement('div');
+      next.className = 'kanban-column__list';
+      if (cards.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'kanban-column__empty';
+        empty.textContent = 'No issues';
+        next.appendChild(empty);
+      } else {
+        for (const card of cards) next.appendChild(card);
+      }
+      swapList(next);
+      count.textContent = String(totalCount);
+    }
+
+    function setError(message: string, onRetry: () => void): void {
+      const next = document.createElement('div');
+      next.className = 'kanban-column__list';
+
+      const error = document.createElement('div');
+      error.className = 'kanban-column__error';
+
+      const title = document.createElement('p');
+      title.className = 'kanban-column__error-title';
+      title.textContent = 'Failed to load';
+      error.appendChild(title);
+
+      const detail = document.createElement('p');
+      detail.className = 'kanban-column__error-detail';
+      detail.textContent = message;
+      error.appendChild(detail);
+
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'kanban-column__retry';
+      retry.textContent = 'Retry';
+      retry.addEventListener('click', () => onRetry());
+      error.appendChild(retry);
+
+      next.appendChild(error);
+      swapList(next);
+    }
+
+    function setPulsing(on: boolean): void {
+      dot.classList.toggle('is-pulsing', on);
+    }
+
+    return { root, setLoading, setIssues, setError, setPulsing };
+  }
+</script>
