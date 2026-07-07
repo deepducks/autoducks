@@ -122,11 +122,11 @@ if ! git::branch_exists "$FEATURE_BRANCH"; then
   git::create_branch "$AUTODUCKS_BASE_BRANCH" "$FEATURE_BRANCH"
 fi
 
-EXISTING_FEATURE_PR=$(gh pr list --repo "$REPO" --head "$FEATURE_BRANCH" --base "$AUTODUCKS_BASE_BRANCH" --json number --jq '.[0].number // empty' 2>/dev/null || true)
+EXISTING_FEATURE_PR=$(gh pr list --repo "$REPO" --head "$FEATURE_BRANCH" --base "$AUTODUCKS_INTEGRATION_BRANCH" --json number --jq '.[0].number // empty' 2>/dev/null || true)
 if [[ -z "$EXISTING_FEATURE_PR" ]]; then
   PR_TITLE="Feature #$ISSUE_NUM: $ISSUE_TITLE"
   PR_BODY="Closes #$ISSUE_NUM"
-  git::create_pr "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "$PR_TITLE" "$PR_BODY" true || true
+  git::create_pr "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$PR_TITLE" "$PR_BODY" true || true
 fi
 
 if [[ "${IS_REVISION:-false}" != "true" ]]; then
