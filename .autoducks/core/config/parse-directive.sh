@@ -7,9 +7,12 @@ set -euo pipefail
 # Input:  COMMENT_BODY env var (or stdin)
 # Output: key=value lines to stdout
 #   command      — plan, start, work, execute, fix, revert, close, design, devise
-#   model        — claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5-20251001
-#   reasoning    — off, low, medium, high, max
-#   think_phrase — mapped from reasoning level
+#   model        — claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5-20251001, or empty
+#   reasoning    — off, low, medium, high, max, or empty
+#   think_phrase — mapped from reasoning level (empty when reasoning is empty)
+#
+# Empty model/reasoning means "no override" — the caller's `||` chain falls
+# through to agent defaults / global config / provider action default.
 
 BODY="${COMMENT_BODY:-$(cat)}"
 
@@ -18,8 +21,8 @@ DIRECTIVE=$(printf '%s\n' "$BODY" \
   | head -1 || echo "")
 
 COMMAND=""
-MODEL="claude-opus-4-7"
-REASONING="high"
+MODEL=""
+REASONING=""
 
 if [[ -n "$DIRECTIVE" ]]; then
   read -ra TOKENS <<< "$DIRECTIVE"
@@ -44,6 +47,8 @@ if [[ -n "$DIRECTIVE" ]]; then
 fi
 
 # ── Map reasoning level → think phrase ──────────────────────────────
+# Empty REASONING must yield empty THINK_PHRASE so downstream defaults win.
+THINK_PHRASE=""
 case "$REASONING" in
   off)    THINK_PHRASE="" ;;
   low)    THINK_PHRASE="Think before writing." ;;

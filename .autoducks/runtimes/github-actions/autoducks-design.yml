@@ -47,6 +47,7 @@ jobs:
           prompt_file: .autoducks/agents/design/prompt.md
           allowed_tools: "Read,Write,Edit,Bash(read-only)"
           model: ${{ steps.directive.outputs.model || steps.agent.outputs.model }}
+          reasoning: ${{ steps.directive.outputs.reasoning || steps.agent.outputs.reasoning }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       - name: Post-execution
@@ -58,4 +59,6 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ github.event.comment.user.login || github.event.sender.login }}
+          MODEL: ${{ steps.directive.outputs.model || steps.agent.outputs.model }}
+          REASONING: ${{ steps.directive.outputs.reasoning || steps.agent.outputs.reasoning }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
