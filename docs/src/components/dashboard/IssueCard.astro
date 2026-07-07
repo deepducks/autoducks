@@ -1,0 +1,127 @@
+<script>
+  import type { IssueCard } from '../../lib/dashboard/types';
+
+  function createLabelChip(label: { name: string; color: string }): HTMLSpanElement {
+    const chip = document.createElement('span');
+    chip.className = 'label';
+    chip.style.background = `#${label.color}22`;
+    chip.style.color = `#${label.color}`;
+    chip.textContent = label.name;
+    return chip;
+  }
+
+  export function createIssueCard(issue: IssueCard): HTMLElement {
+    const card = document.createElement('a');
+    card.href = issue.htmlUrl;
+    card.target = '_blank';
+    card.rel = 'noopener noreferrer';
+    card.className = 'issue-card';
+
+    const number = document.createElement('span');
+    number.className = 'issue-number';
+    number.textContent = `#${issue.number}`;
+    card.append(number);
+
+    const title = document.createElement('p');
+    title.className = 'issue-title';
+    title.textContent = issue.title;
+    card.append(title);
+
+    if (issue.bodyExcerpt) {
+      const excerpt = document.createElement('p');
+      excerpt.className = 'issue-excerpt';
+      excerpt.textContent = issue.bodyExcerpt;
+      card.append(excerpt);
+    }
+
+    if (issue.labels.length > 0) {
+      const labels = document.createElement('div');
+      labels.className = 'issue-labels';
+
+      const sorted = [...issue.labels].sort((a, b) => a.name.length - b.name.length);
+      const visible = sorted.slice(0, 3);
+      const overflow = sorted.slice(3);
+
+      for (const label of visible) {
+        labels.append(createLabelChip(label));
+      }
+
+      if (overflow.length > 0) {
+        const more = document.createElement('span');
+        more.className = 'label label-overflow';
+        more.title = overflow.map((label) => label.name).join(', ');
+        more.textContent = `+${overflow.length} more`;
+        labels.append(more);
+      }
+
+      card.append(labels);
+    }
+
+    return card;
+  }
+</script>
+
+<style is:global>
+  .issue-card {
+    display: block;
+    padding: 0.75rem;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 0.5rem;
+    background: var(--sl-color-bg);
+    color: inherit;
+    text-decoration: none;
+    font-family: var(--__sl-font);
+    transition: border-color 0.15s ease;
+  }
+
+  .issue-card:hover,
+  .issue-card:focus-visible {
+    border-color: var(--sl-color-accent);
+  }
+
+  .issue-card:focus-visible {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: 2px;
+  }
+
+  .issue-number {
+    display: block;
+    font-family: var(--__sl-font-mono);
+    font-size: 0.75rem;
+    color: var(--sl-color-gray-3);
+  }
+
+  .issue-title {
+    margin: 0.25rem 0 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--sl-color-white);
+  }
+
+  .issue-excerpt {
+    margin: 0.25rem 0 0;
+    font-size: 0.8rem;
+    color: var(--sl-color-gray-2);
+  }
+
+  .issue-labels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+  }
+
+  .label {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    line-height: 1.4;
+  }
+
+  .label-overflow {
+    background: var(--sl-color-gray-5);
+    color: var(--sl-color-gray-2);
+  }
+</style>
