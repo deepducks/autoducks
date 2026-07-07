@@ -126,10 +126,19 @@ if [[ $NEXT_WAVE -eq -1 ]]; then
     done
     create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "$ISSUE_TITLE" "${ALL_TASK_NUMS[@]}"
     progress_labels::finish "$FEATURE" "Work:progress" "Work:done"
-    its::comment_issue "$FEATURE" "**All waves complete!** The feature PR is ready for review."
+    its::comment_issue "$FEATURE" "🎉 **All waves complete!**
+
+Every task across all $TOTAL_WAVES waves has merged into the feature branch and
+the feature PR is ready.
+
+**Next:** review and merge the feature PR to ship, or comment \`/agents close\`
+to tear the feature down."
   else
     # Blocked — not all previous waves done
-    its::comment_issue "$FEATURE" "**Orchestrator update:** Waves are in progress. Waiting for dependencies to complete."
+    its::comment_issue "$FEATURE" "⏳ **Orchestrator waiting.**
+
+Some tasks in an earlier wave are still open, so no new wave can start yet. The
+orchestrator re-runs automatically as task PRs merge — no action needed."
   fi
 else
   # Dispatch next wave
@@ -157,9 +166,10 @@ else
   done
 
   # Post summary
-  SUMMARY="**Wave $((NEXT_WAVE+1)): ${WAVE_NAMES[$NEXT_WAVE]}**\n\n"
+  SUMMARY="🌊 **Wave $((NEXT_WAVE+1)) of $TOTAL_WAVES dispatched: ${WAVE_NAMES[$NEXT_WAVE]}**\n\n"
   [[ ${#ASSIGNED[@]} -gt 0 ]] && SUMMARY+="**Dispatched:** ${ASSIGNED[*]}\n"
-  [[ ${#SKIPPED[@]} -gt 0 ]] && SUMMARY+="**Skipped:** ${SKIPPED[*]}\n"
+  [[ ${#SKIPPED[@]} -gt 0 ]] && SUMMARY+="**Skipped (already done or in flight):** ${SKIPPED[*]}\n"
+  SUMMARY+="\nThe orchestrator advances automatically as each task PR merges.\n"
 
   its::comment_issue "$FEATURE" "$(echo -e "$SUMMARY")"
 fi
