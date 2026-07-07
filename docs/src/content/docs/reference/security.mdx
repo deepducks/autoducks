@@ -130,3 +130,35 @@ Because the gate keys off *who* commented, the only faithful way to test it is w
 <Aside type="tip">
 Do this before publishing your repo, and again any time you change the `security` block or the CODEOWNERS file. Config-change reviews are cheap; a leaked budget is not.
 </Aside>
+
+## Automated security smoke-test
+
+`scripts/smoke-test.sh --security` automates the manual process above. It runs two scenarios back-to-back:
+
+- **Scenario A (allowed):** the authenticated runner posts `/agents execute` on a minimal feature issue and asserts the workflow proceeds normally (branch created, PR opened).
+- **Scenario B (denied):** a sock-puppet account posts `/agents execute` via a separate PAT and asserts the Authorization Gate fires correctly: 👎 reaction on the trigger comment, denial comment posted, no branch, no PR, and the LLM step skipped.
+
+### Setting up `SOCK_PUPPET_TOKEN`
+
+The `SOCK_PUPPET_TOKEN` environment variable must point to a classic PAT for a GitHub account that has **`NONE` association** on the target repo (no prior PRs merged, not a collaborator, not an org member).
+
+#### Creating the PAT
+
+1. Log in as the sock-puppet GitHub account.
+2. Navigate to **Settings → Developer settings → Personal access tokens → Tokens (classic)**.
+3. Click **Generate new token (classic)**.
+4. Set a short expiration (7 days is enough for a test run) and add a descriptive note such as `autoducks-smoke-sock-puppet`.
+5. Grant only the minimum scope:
+   - `public_repo` — allows posting issue comments on public repositories.
+   - Use `repo` instead if the target repository is private.
+6. Click **Generate token** and copy the value immediately.
+7. Export it before running the test:
+
+```bash
+export SOCK_PUPPET_TOKEN=ghp_...
+./scripts/smoke-test.sh --security
+```
+
+<Aside type="caution">
+Do not add the sock-puppet account as a collaborator or merge any of its PRs into the target repo — doing so changes its `author_association` away from `NONE` and Scenario B will no longer test the denial path faithfully.
+</Aside>

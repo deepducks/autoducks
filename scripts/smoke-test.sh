@@ -14,10 +14,12 @@
 #   ./smoke-test.sh [OPTIONS]
 #
 # OPTIONS
-#   --cleanup       Close issues/PR and delete branches after test completes
-#   --no-wait       Create issues and kickstart, don't wait for completion
-#   --repo OWNER/REPO  Target repo (default: current repo from `gh`)
-#   -h, --help      Show this help
+#   --cleanup         Close issues/PR and delete branches after test completes
+#   --no-wait         Create issues and kickstart, don't wait for completion
+#   --repo OWNER/REPO Target repo (default: current repo from `gh`)
+#   --security        Run allowed-path + denied-path security scenarios instead of
+#                     the golden path; requires SOCK_PUPPET_TOKEN (see REQUIREMENTS)
+#   -h, --help        Show this help
 #
 # REQUIREMENTS
 # ------------
@@ -27,6 +29,10 @@
 # - ANTHROPIC_API_KEY secret configured
 # - Claude Code GitHub App installed on the repo
 # - Actions permission "Read and write" enabled
+# - SOCK_PUPPET_TOKEN  (--security only) Classic PAT for a GitHub account that has
+#                      NONE association on the target repo. Needs `public_repo` scope
+#                      (or `repo` for private repos). See:
+#                      docs/src/content/docs/reference/security.mdx
 #
 # VALIDATION SCENARIOS
 # --------------------
@@ -63,6 +69,7 @@ CLEANUP=false
 WAIT=true
 REPO=""
 FORMAT="yaml"  # yaml | md
+SECURITY=false
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 PREFIX="smoke-${TIMESTAMP}"
 
@@ -72,8 +79,9 @@ while [[ $# -gt 0 ]]; do
     --no-wait) WAIT=false; shift ;;
     --repo) REPO="$2"; shift 2 ;;
     --format) FORMAT="$2"; shift 2 ;;
+    --security) SECURITY=true; shift ;;
     -h|--help)
-      sed -n '2,40p' "$0"
+      sed -n '2,46p' "$0"
       exit 0
       ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -88,6 +96,282 @@ fi
 REPO_ARG=""
 if [[ -n "$REPO" ]]; then
   REPO_ARG="--repo $REPO"
+fi
+
+# =============================================================================
+# Security scenarios (--security flag)
+# =============================================================================
+if [[ "$SECURITY" == true ]]; then
+  if [[ -z "${SOCK_PUPPET_TOKEN:-}" ]]; then
+    echo "Error: --security requires SOCK_PUPPET_TOKEN to be set." >&2
+    echo "  Generate a classic PAT (public_repo scope) for a GitHub account with" >&2
+    echo "  NONE association on the target repo and export it as SOCK_PUPPET_TOKEN." >&2
+    echo "  See: docs/src/content/docs/reference/security.mdx" >&2
+    exit 1
+  fi
+
+  REPO_NAME="${REPO:-$(gh repo view --json nameWithOwner --jq '.nameWithOwner')}"
+  SECURITY_PASS=true
+
+  echo "=== Smoke Test — Security Scenarios ==="
+  echo "Repo: $REPO_NAME"
+  echo "Prefix: $PREFIX"
+  echo ""
+
+  # Ensure labels exist
+  gh label create "Ready"      --color "0E8A16" --description "Plan complete, ready for execution" $REPO_ARG 2>/dev/null || true
+  gh label create "smoke-test" --color "FFA500" --description "Smoke test" $REPO_ARG 2>/dev/null || true
+  gh label create "priority:P0" --color "B60205" --description "Critical" $REPO_ARG 2>/dev/null || true
+
+  # ---------------------------------------------------------------------------
+  # Scenario A — Authorized trigger: runner posts /agents execute → proceeds
+  # ---------------------------------------------------------------------------
+  echo "--- Scenario A: Authorized trigger ---"
+
+  TASK_SEC_URL=$(gh issue create $REPO_ARG \
+    --title "Smoke-sec ${TIMESTAMP}: Create test/${PREFIX}-sec.md" \
+    --label "smoke-test,priority:P0" \
+    --body "## Task
+
+Create a new file at \`test/${PREFIX}-sec.md\` with the following content:
+
+\`\`\`
+security smoke test ${TIMESTAMP}
+\`\`\`
+
+## Acceptance Criteria
+
+- [ ] File \`test/${PREFIX}-sec.md\` exists
+
+## Dependencies
+
+None")
+  TASK_SEC=$(echo "$TASK_SEC_URL" | grep -oE '[0-9]+$')
+  echo "  Task: #$TASK_SEC"
+
+  FEATURE_A_URL=$(gh issue create $REPO_ARG \
+    --title "Security Scenario A: Authorized ${TIMESTAMP}" \
+    --label "Feature,Ready,smoke-test" \
+    --body "## Purpose
+
+Security smoke test — authorized trigger path.
+
+## Plan
+
+\`\`\`yaml
+waves:
+  - name: Security
+    tasks: [${TASK_SEC}]
+\`\`\`
+
+## Progress
+
+- [ ] #${TASK_SEC} Create test/${PREFIX}-sec.md \`P0\`")
+  FEATURE_A=$(echo "$FEATURE_A_URL" | grep -oE '[0-9]+$')
+  echo "  Feature: #$FEATURE_A"
+
+  gh api "repos/$REPO_NAME/issues/$FEATURE_A" --method PATCH -f "type=Feature" --silent 2>/dev/null \
+    || echo "  ⚠️  Could not set issue type=Feature"
+
+  COMMENT_A_URL=$(gh issue comment $FEATURE_A $REPO_ARG --body "/agents execute")
+  COMMENT_A_ID=$(echo "$COMMENT_A_URL" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+$' || echo "")
+  echo "  Kickstart comment posted (id: ${COMMENT_A_ID:-unknown})"
+
+  # Wait for 👀 reaction
+  if [[ -n "$COMMENT_A_ID" ]]; then
+    echo "  Waiting for 👀 reaction..."
+    A_EYES_WAITED=0; A_EYES=0
+    while [[ $A_EYES_WAITED -lt 60 ]]; do
+      A_EYES=$(gh api "repos/$REPO_NAME/issues/comments/$COMMENT_A_ID/reactions" \
+        --jq '[.[] | select(.content == "eyes")] | length' 2>/dev/null || echo "0")
+      [[ "$A_EYES" -gt 0 ]] && break
+      sleep 5
+      A_EYES_WAITED=$((A_EYES_WAITED + 5))
+    done
+    if [[ "$A_EYES" -gt 0 ]]; then
+      echo "  ✅ 👀 reaction detected (${A_EYES_WAITED}s) — workflow triggered"
+    else
+      echo "  ⚠️  No 👀 reaction after 60s — orchestrator may not have triggered"
+    fi
+  fi
+
+  # Wait for PR (up to 30 minutes, reusing same cadence as golden path)
+  echo "  Waiting for PR to open (max 30 minutes)..."
+  A_MAX=1800; A_WAITED=0; A_INTERVAL=30; A_PASS=false
+  while [[ $A_WAITED -lt $A_MAX ]]; do
+    sleep $A_INTERVAL
+    A_WAITED=$((A_WAITED + A_INTERVAL))
+
+    A_PR=$(gh pr list $REPO_ARG \
+      --base main --state all \
+      --json number,state,headRefName \
+      --jq "[.[] | select(.headRefName | startswith(\"feature/${FEATURE_A}\"))] | .[0] // empty")
+
+    if [[ -n "$A_PR" ]]; then
+      A_PR_STATE=$(echo "$A_PR" | jq -r '.state')
+      if [[ "$A_PR_STATE" == "OPEN" || "$A_PR_STATE" == "MERGED" ]]; then
+        A_PR_NUM=$(echo "$A_PR" | jq -r '.number')
+        echo "  ✅ Scenario A PASSED: PR #$A_PR_NUM (${A_WAITED}s)"
+        A_PASS=true
+        break
+      fi
+    fi
+
+    echo "  Still waiting... (${A_WAITED}s / ${A_MAX}s)"
+  done
+
+  if [[ "$A_PASS" == false ]]; then
+    echo "  ❌ Scenario A FAILED: No PR opened after ${A_MAX}s"
+    SECURITY_PASS=false
+  fi
+
+  echo ""
+
+  # ---------------------------------------------------------------------------
+  # Scenario B — Denied trigger: sock-puppet (NONE) posts /agents execute
+  # ---------------------------------------------------------------------------
+  echo "--- Scenario B: Unauthorized trigger (sock-puppet, NONE association) ---"
+
+  FEATURE_B_URL=$(gh issue create $REPO_ARG \
+    --title "Security Scenario B: Denied ${TIMESTAMP}" \
+    --label "Feature,Ready,smoke-test" \
+    --body "Sandbox issue — tests that /agents execute from an unauthorized account is denied by the Authorization Gate.")
+  FEATURE_B=$(echo "$FEATURE_B_URL" | grep -oE '[0-9]+$')
+  echo "  Sandbox feature: #$FEATURE_B"
+
+  gh api "repos/$REPO_NAME/issues/$FEATURE_B" --method PATCH -f "type=Feature" --silent 2>/dev/null \
+    || echo "  ⚠️  Could not set issue type=Feature"
+
+  # Capture timestamp before posting for workflow run lookup
+  B_RUN_BEFORE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  echo "  Posting /agents execute as sock-puppet (NONE association)..."
+  B_COMMENT_ID=$(GH_TOKEN="$SOCK_PUPPET_TOKEN" gh api \
+    "repos/$REPO_NAME/issues/$FEATURE_B/comments" \
+    --method POST \
+    -f "body=/agents execute" \
+    --jq '.id' 2>/dev/null || echo "")
+
+  if [[ -z "$B_COMMENT_ID" ]]; then
+    echo "  ❌ Failed to post comment with SOCK_PUPPET_TOKEN — verify the token and repo URL"
+    SECURITY_PASS=false
+  else
+    echo "  Sock-puppet comment posted (id: $B_COMMENT_ID)"
+
+    # (a) Poll for 👎 reaction on trigger comment
+    echo "  (a) Waiting for 👎 reaction on trigger comment (max 120s)..."
+    B_THUMBS_WAITED=0; B_THUMBS=0
+    while [[ $B_THUMBS_WAITED -lt 120 ]]; do
+      B_THUMBS=$(gh api "repos/$REPO_NAME/issues/comments/$B_COMMENT_ID/reactions" \
+        --jq '[.[] | select(.content == "-1")] | length' 2>/dev/null || echo "0")
+      [[ "$B_THUMBS" -gt 0 ]] && break
+      sleep 5
+      B_THUMBS_WAITED=$((B_THUMBS_WAITED + 5))
+    done
+    if [[ "$B_THUMBS" -gt 0 ]]; then
+      echo "  ✅ (a) 👎 reaction found (${B_THUMBS_WAITED}s)"
+    else
+      echo "  ❌ (a) No 👎 reaction after 120s"
+      SECURITY_PASS=false
+    fi
+
+    # (b) Poll for denial comment matching denial-message.md template
+    echo "  (b) Waiting for denial comment (max 120s)..."
+    B_DENIAL_WAITED=0; B_DENIAL=0
+    while [[ $B_DENIAL_WAITED -lt 120 ]]; do
+      B_DENIAL=$(gh api "repos/$REPO_NAME/issues/$FEATURE_B/comments" \
+        --jq '[.[] | select(.body | contains("Agent not run"))] | length' 2>/dev/null || echo "0")
+      [[ "$B_DENIAL" -gt 0 ]] && break
+      sleep 5
+      B_DENIAL_WAITED=$((B_DENIAL_WAITED + 5))
+    done
+    if [[ "$B_DENIAL" -gt 0 ]]; then
+      echo "  ✅ (b) Denial comment found (${B_DENIAL_WAITED}s)"
+    else
+      echo "  ❌ (b) No denial comment after 120s"
+      SECURITY_PASS=false
+    fi
+
+    # (c) Assert no branch created for this feature
+    B_BRANCHES=$(gh api "repos/$REPO_NAME/git/matching-refs/heads/feature/${FEATURE_B}" \
+      --jq 'length' 2>/dev/null || echo "0")
+    if [[ "${B_BRANCHES:-0}" -eq 0 ]]; then
+      echo "  ✅ (c) No branch created for feature #$FEATURE_B"
+    else
+      echo "  ❌ (c) Unexpected branch(es) found for feature #$FEATURE_B"
+      SECURITY_PASS=false
+    fi
+
+    # (d) Assert no PR opened for this feature
+    B_PRS=$(gh pr list $REPO_ARG \
+      --state all \
+      --json number,headRefName \
+      --jq "[.[] | select(.headRefName | startswith(\"feature/${FEATURE_B}\"))] | length")
+    if [[ "${B_PRS:-0}" -eq 0 ]]; then
+      echo "  ✅ (d) No PR opened for feature #$FEATURE_B"
+    else
+      echo "  ❌ (d) Unexpected PR(s) found for feature #$FEATURE_B"
+      SECURITY_PASS=false
+    fi
+
+    # (e) Assert LLM step (Run orchestrator) was skipped via workflow run inspection
+    echo "  (e) Checking workflow run for skipped LLM step..."
+    B_RUN_ID=""; B_RUN_WAIT=0
+    while [[ $B_RUN_WAIT -lt 120 && -z "$B_RUN_ID" ]]; do
+      B_RUN_ID=$(gh api "repos/$REPO_NAME/actions/runs?event=issue_comment&per_page=20" 2>/dev/null \
+        | jq -r --arg before "$B_RUN_BEFORE" \
+          '[.workflow_runs[] | select(.created_at >= $before and (.name | contains("Wave Orchestrator")))] | .[0].id // empty')
+      [[ -n "$B_RUN_ID" ]] && break
+      sleep 10
+      B_RUN_WAIT=$((B_RUN_WAIT + 10))
+    done
+
+    if [[ -n "$B_RUN_ID" ]]; then
+      # Wait for the run to reach completed state
+      B_DONE_WAIT=0
+      while [[ $B_DONE_WAIT -lt 120 ]]; do
+        B_RUN_STATUS=$(gh api "repos/$REPO_NAME/actions/runs/$B_RUN_ID" \
+          --jq '.status' 2>/dev/null || echo "")
+        [[ "$B_RUN_STATUS" == "completed" ]] && break
+        sleep 10
+        B_DONE_WAIT=$((B_DONE_WAIT + 10))
+      done
+
+      B_ORCH_STEP=$(gh api "repos/$REPO_NAME/actions/runs/$B_RUN_ID/jobs" 2>/dev/null \
+        | jq -r '.jobs[].steps[] | select(.name == "Run orchestrator") | .conclusion // empty' \
+        | head -1)
+
+      if [[ "$B_ORCH_STEP" == "skipped" ]]; then
+        echo "  ✅ (e) LLM step (Run orchestrator) was skipped (authz.outcome != success)"
+      else
+        echo "  ❌ (e) LLM step conclusion: ${B_ORCH_STEP:-not_found}"
+        SECURITY_PASS=false
+      fi
+    else
+      echo "  ⚠️  (e) Wave Orchestrator run not found after ${B_RUN_WAIT}s — skipping LLM step check"
+    fi
+  fi
+
+  echo ""
+
+  # Cleanup (respects --cleanup flag)
+  if [[ "$CLEANUP" == true ]]; then
+    echo "Cleaning up security test issues..."
+    for i in "${TASK_SEC:-}" "${FEATURE_A:-}" "${FEATURE_B:-}"; do
+      [[ -n "$i" ]] && gh issue close "$i" $REPO_ARG --comment "Security smoke test cleanup." 2>/dev/null || true
+    done
+    echo "Cleanup complete."
+    echo ""
+  fi
+
+  # Final result
+  if [[ "$SECURITY_PASS" == true ]]; then
+    echo "=== ✅ Security Scenarios PASSED ==="
+    exit 0
+  else
+    echo "=== ❌ Security Scenarios FAILED ==="
+    exit 1
+  fi
 fi
 
 echo "=== Smoke Test — Agentic Workflow ==="
