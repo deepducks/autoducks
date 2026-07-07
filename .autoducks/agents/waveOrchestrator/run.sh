@@ -26,6 +26,50 @@ ISSUE_BODY=$(echo "$ISSUE_DATA" | jq -r '.body')
 ISSUE_TITLE=$(echo "$ISSUE_DATA" | jq -r '.title')
 ISSUE_LABELS=$(echo "$ISSUE_DATA" | jq -r '.labels[]')
 
+IS_SINGLE=false
+if echo "$ISSUE_LABELS" | grep -qx 'Tactics:single'; then
+  IS_SINGLE=true
+fi
+
+if [[ "$IS_SINGLE" == "true" ]]; then
+  progress_labels::ensure
+  SLUG=$(git::generate_slug "$FEATURE" "$ISSUE_TITLE")
+  FEATURE_BRANCH="feature/$SLUG"
+  if ! git::branch_exists "$FEATURE_BRANCH" 2>/dev/null; then
+    git::create_branch "$AUTODUCKS_BASE_BRANCH" "$FEATURE_BRANCH"
+    for i in 1 2 3 4 5; do
+      git::branch_exists "$FEATURE_BRANCH" 2>/dev/null && break
+      sleep 1
+    done
+    its::remove_label "$FEATURE" "draft" 2>/dev/null || true
+  fi
+
+  MERGED_PRS=$(git::list_merged_prs "$FEATURE_BRANCH")
+  FEATURE_DONE=$(echo "$MERGED_PRS" \
+    | jq -r '.[].body + " " + .[].title' \
+    | grep -oiP '(?:fixes|closes|resolves)\s+#\K\d+' \
+    | grep -qx "$FEATURE" && echo true || echo false)
+
+  if [[ "$FEATURE_DONE" == "false" ]]; then
+    progress_labels::start "$FEATURE" "Work:progress" "Work:done"
+    if prevent_duplicate_dispatch "$FEATURE" "$FEATURE_BRANCH"; then
+      git::dispatch_workflow "autoducks-execute.yml" \
+        -f "issue_number=$FEATURE" \
+        -f "base_branch=$FEATURE_BRANCH" \
+        ${WORKER_MODEL:+-f "model=$WORKER_MODEL"} \
+        ${WORKER_REASONING:+-f "reasoning=$WORKER_REASONING"}
+      its::comment_issue "$FEATURE" "**Single-task feature** — dispatched execution on the feature issue itself."
+    fi
+  else
+    create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "$ISSUE_TITLE" "$FEATURE"
+    progress_labels::finish "$FEATURE" "Work:progress" "Work:done"
+    its::comment_issue "$FEATURE" "**Single-task feature complete!** The feature PR is ready for review."
+  fi
+
+  react_to_comment "${COMMENT_ID:-}" "+1" 2>/dev/null || true
+  exit 0
+fi
+
 PARSED=$(parse_waves "$ISSUE_BODY") || die "Could not parse waves from issue #$FEATURE"
 
 # Build arrays from parsed output
