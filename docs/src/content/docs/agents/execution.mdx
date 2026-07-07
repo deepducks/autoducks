@@ -43,10 +43,11 @@ An orphan task has no parent feature issue. The PR targets `main` and requires h
 <summary>Pre-execution</summary>
 
 1. Reacts to the trigger comment with 👀.
-2. `BASE_BRANCH` defaults to the configured base branch (e.g., `main`). No feature number is extracted.
-3. Generates a slug from the issue number and title.
-4. Creates a task branch from `main`: `feature/0-issue-{issue_num}-{timestamp}`.
-5. Writes the issue spec (title + body) to `/tmp/task-spec.md`.
+2. Adds the `Work:progress` label to the task issue to signal execution is in progress.
+3. `BASE_BRANCH` defaults to the configured base branch (e.g., `main`). No feature number is extracted.
+4. Generates a slug from the issue number and title.
+5. Creates a task branch from `main`: `feature/0-issue-{issue_num}-{timestamp}`.
+6. Writes the issue spec (title + body) to `/tmp/task-spec.md`.
 
 </details>
 
@@ -60,11 +61,12 @@ The agent reads `/tmp/task-spec.md` and implements the task using `Write`, `Edit
 <details>
 <summary>Post-execution</summary>
 
-7. `assert_changes` validates the agent produced changes. On failure: notifies and exits with 😕 reaction.
+7. `assert_changes` validates the agent produced changes. On failure: notifies and exits with 😕 reaction (the `Work:progress` label is left in place to signal the task is unfinished).
 8. Commits and pushes changes.
 9. Creates a PR targeting `main` titled `Task #N: {title}` with body `fixes #N`.
 10. **No auto-merge** — PR requires human review.
-11. Reacts with 👍 and posts a comment confirming PR creation.
+11. Removes the `Work:progress` label from the task issue and adds `Work:done` on successful PR creation.
+12. Reacts with 👍 and posts a comment confirming PR creation.
 
 </details>
 
@@ -77,10 +79,11 @@ A feature task has a `BASE_BRANCH` pointing to a `feature/*` branch. The PR auto
 <summary>Pre-execution</summary>
 
 1. Reacts to the trigger comment with 👀.
-2. Extracts the feature number from `BASE_BRANCH` via regex `feature/([0-9]+)`.
-3. Waits for the feature branch to be visible (handles replication lag after branch creation).
-4. Generates a slug and creates a task branch from the feature branch: `feature/{feature_num}-issue-{issue_num}-{timestamp}`.
-5. Writes the issue spec to `/tmp/task-spec.md`.
+2. Adds the `Work:progress` label to the task issue to signal execution is in progress.
+3. Extracts the feature number from `BASE_BRANCH` via regex `feature/([0-9]+)`.
+4. Waits for the feature branch to be visible (handles replication lag after branch creation).
+5. Generates a slug and creates a task branch from the feature branch: `feature/{feature_num}-issue-{issue_num}-{timestamp}`.
+6. Writes the issue spec to `/tmp/task-spec.md`.
 
 </details>
 
@@ -94,12 +97,13 @@ Same as Scenario A — reads the spec and implements the code.
 <details>
 <summary>Post-execution</summary>
 
-7. `assert_changes` validates changes. On failure: notifies on both the task and parent feature issue.
+7. `assert_changes` validates changes. On failure: notifies on both the task and parent feature issue (the `Work:progress` label is left in place to signal the task is unfinished).
 8. Commits and pushes changes.
 9. Creates a PR targeting the **feature branch** titled `Task #N: {title}` with body `fixes #N`.
 10. **Auto-merges with rebase retry** (up to 3 attempts). On merge conflict: rebases onto the feature branch and force-pushes with lease. On persistent failure: notifies and exits.
-11. Triggers the wave orchestrator to continue (non-fatal — the PR merge event is the primary trigger).
-12. Reacts with 👍 and posts a comment confirming PR creation.
+11. On successful merge, removes the `Work:progress` label from the task issue and adds `Work:done`.
+12. Triggers the wave orchestrator to continue (non-fatal — the PR merge event is the primary trigger).
+13. Reacts with 👍 and posts a comment confirming PR creation.
 
 </details>
 
