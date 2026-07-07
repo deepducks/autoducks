@@ -8,6 +8,10 @@ source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 
 react_to_comment "$COMMENT_ID" "eyes"
 
+source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
+progress_labels::ensure
+progress_labels::start "$ISSUE_NUM" "Tactics:crafting" "Tactics:ready"
+
 # Fetch issue content — full body with title prefix for the LLM's main input
 its::get_issue "$ISSUE_NUM" | jq -r '"# " + .title + "\n\n" + .body' > /tmp/issue-request.md
 
