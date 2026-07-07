@@ -125,6 +125,7 @@ Permissions:
 - read/write access to issues and PRs
 - permission to create branches and pull requests
 - permission to create issues (child tasks)
+- permission to set issue type
 - author information
 -->
 
@@ -136,7 +137,7 @@ Permissions:
    - **Tactical zone** — content between the sentinels. Owned by the Tactical Agent; contains the YAML wave plan, `## Progress` checkboxes, and `## Notes`.
 
 <!-- POST EXECUTION -->
-2. Each dependent task is created with the `Task` type and associated with the parent issue. <!-- its::createChildIssue(featureIssueId, taskTitle, taskDescription, taskType="Task") -->
+2. Each dependent task is created, associated with the parent issue, labeled `Task`, and — best-effort on organizations with issue types configured — assigned the native `Task` type. <!-- its::createChildIssue(featureIssueId, taskTitle, taskDescription, labels=["priority:PN","Task"]) + its::setIssueType(taskId, "Task") -->
 3. The `Ready` label is added to the issue. <!-- its::addLabel(featureIssueId, "Ready") -->
 4. A slug is generated: `feature/<issue_id>-<slugified_title>`. <!-- generateSlug(featureIssueId, featureIssueTitle) -->
 5. A branch is created from `main` named `feature/<issue_id>-<slugified_title>`. <!-- git::createBranch("main", featureSlug) -->
@@ -403,6 +404,7 @@ All branches follow a predictable convention rooted in issue IDs.
 | `Draft` | Issue needs design work before tactical planning |
 | `Ready` | Tactical plan is complete; issue is ready for execution |
 | `Feature` | Routing signal — set as both a label (route-critical) and the native issue type (best-effort, org-only) |
+| `Task` | Marks a task issue split from a Feature — set as both a label (works everywhere) and the native issue type (best-effort, org-only) |
 
 ---
 

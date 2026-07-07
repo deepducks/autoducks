@@ -19,6 +19,9 @@ reconcile_tasks() {
   for p in P0 P1 P2 P3; do
     gh label create "priority:$p" --repo "$REPO" 2>/dev/null || true
   done
+  # Ensure Task label exists — color/desc must match scripts/setup.sh
+  gh label create "Task" --color "1D76DB" --description "Autoducks task issue" \
+    --repo "$REPO" 2>/dev/null || true
 
   while IFS= read -r line; do
     local ref title body labels
@@ -44,15 +47,25 @@ reconcile_tasks() {
       new_numbers+=("$ref")
     else
       # New task (Tn placeholder): create issue
+      local labels_with_task
+      if [[ -n "$labels" ]]; then
+        labels_with_task="${labels},Task"
+      else
+        labels_with_task="Task"
+      fi
+
       local create_payload
       create_payload=$(jq -n \
         --arg title "$title" \
         --arg body "$body" \
-        --argjson labels "$(echo "$labels" | jq -R 'split(",")')" \
+        --argjson labels "$(echo "$labels_with_task" | jq -R 'split(",")')" \
         '{title: $title, body: $body, labels: $labels}')
 
       local task_id
       task_id=$(gh api "repos/$REPO/issues" --method POST --input - <<< "$create_payload" | jq -r '.number')
+
+      # Best-effort native issue type (silently no-ops when the org doesn't have a `Task` type)
+      its::set_issue_type "$task_id" "Task" 2>/dev/null || true
 
       its::link_sub_issue "$feature_issue_id" "$task_id" 2>/dev/null || true
 
