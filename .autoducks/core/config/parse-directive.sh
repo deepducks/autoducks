@@ -11,14 +11,18 @@ set -euo pipefail
 #   model           — claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5, or empty
 #   reasoning       — off, low, medium, high, max, or empty
 #   think_phrase    — mapped from reasoning level (empty when reasoning is empty)
+#   max_turns       — positive integer within a sane upper bound, or empty.
+#                      Set via a `turns=<n>`, `max-turns=<n>`, `max_turns=<n>`,
+#                      or `turns:<n>` token (digits only; malformed/out-of-range
+#                      values are ignored, not fatal).
 #
 # Command normalization: built-in synonyms (plan→design, drilldown/specify→devise,
 # work/run/start→execute) and per-agent custom aliases from
 # .autoducks/autoducks.json `triggers.<agent>[]` are resolved to their canonical
 # verb here, so every downstream `command=` consumer sees a consistent value.
 #
-# Empty model/reasoning means "no override" — the caller's `||` chain falls
-# through to agent defaults / global config / provider action default.
+# Empty model/reasoning/max_turns means "no override" — the caller's `||` chain
+# falls through to agent defaults / global config / provider action default.
 
 BODY="${COMMENT_BODY:-$(cat)}"
 
@@ -30,6 +34,7 @@ COMMAND=""
 ORIGINAL_COMMAND=""
 MODEL=""
 REASONING=""
+MAX_TURNS=""
 
 if [[ -n "$DIRECTIVE" ]]; then
   read -ra TOKENS <<< "$DIRECTIVE"
@@ -69,7 +74,15 @@ if [[ -n "$DIRECTIVE" ]]; then
   fi
 
   for tok in "${TOKENS[@]:2}"; do
-    t=$(echo "$tok" | tr '[:upper:]' '[:lower:]' | tr -d ',.!?:;')
+    # Lowercase without stripping ':' first, so the `turns:<n>` colon syntax
+    # can still be matched below — the general strip (next line) removes ':'
+    # along with other trailing punctuation for every other token form.
+    _lc=$(echo "$tok" | tr '[:upper:]' '[:lower:]')
+    if [[ "$_lc" =~ ^turns:([0-9]+)$ ]]; then
+      _v="${BASH_REMATCH[1]}"
+      (( _v > 0 && _v <= 1000 )) && MAX_TURNS="$_v"
+    fi
+    t=$(echo "$_lc" | tr -d ',.!?:;')
     case "$t" in
       # Model aliases
       opus)                    MODEL="claude-opus-4-8" ;;
@@ -81,6 +94,12 @@ if [[ -n "$DIRECTIVE" ]]; then
       med|medium)              REASONING="medium" ;;
       high)                    REASONING="high" ;;
       max|ultra|ultrathink)    REASONING="max" ;;
+      # max_turns override — digits only; a sane upper bound rejects absurd
+      # values (defense-in-depth against runaway cost). `turns:<n>` is handled
+      # above, before ':' is stripped.
+      turns=*|max-turns=*|max_turns=*)
+        _v="${t#*=}"
+        [[ "$_v" =~ ^[0-9]+$ ]] && (( _v > 0 && _v <= 1000 )) && MAX_TURNS="$_v" ;;
     esac
   done
 fi
@@ -101,3 +120,4 @@ echo "original_command=$ORIGINAL_COMMAND"
 echo "model=$MODEL"
 echo "reasoning=$REASONING"
 echo "think_phrase=$THINK_PHRASE"
+echo "max_turns=$MAX_TURNS"
