@@ -81,7 +81,7 @@ reconcile_tasks() {
       [[ "$old" == "$new" ]] && { found=true; break; }
     done
     if [[ "$found" == "false" ]]; then
-      its::close_issue "$old" "Superseded by revised plan on #$feature_issue_id" 2>/dev/null || true
+      its::close_issue "$old" "Superseded by revised plan on #$feature_issue_id" "not_planned" 2>/dev/null || true
     fi
   done
 
