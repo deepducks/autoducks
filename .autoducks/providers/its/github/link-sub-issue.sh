@@ -3,6 +3,12 @@ set -euo pipefail
 
 # its::link_sub_issue PARENT_ID CHILD_ID
 #
+# PARENT_ID and CHILD_ID are asymmetric:
+#   PARENT_ID — the parent issue's number (URL path; probe and POST both
+#               address the parent by number).
+#   CHILD_ID  — the child issue's REST database id (the sub_issue_id POST
+#               body).
+#
 # Links CHILD_ID as a native GitHub sub-issue of PARENT_ID. Emits a single
 # token on stdout and returns 0 in every non-catastrophic case (so callers
 # using `local r=$(its::link_sub_issue ...)` never abort under `set -e`):
@@ -11,7 +17,9 @@ set -euo pipefail
 #   already-linked  — POST returned 422 with an "already exists" body
 #   unavailable     — probe reports unavailable; no request was issued
 #   forbidden       — probe reports forbidden; no request was issued
-#   error           — 5xx or unexpected 4xx after 3 attempts
+#   error           — 5xx after 3 attempts, unexpected 4xx, or a POST
+#                     404/410 (bad argument, e.g. wrong sub_issue_id; the
+#                     probe already established availability)
 #
 # Retries: transient errors (5xx, network) retry up to 3 times with a
 # 1s/2s/4s backoff. 4xx (other than 422 already-exists) do not retry.
@@ -64,10 +72,11 @@ its::link_sub_issue() {
         ;;
       404|410)
         rm -f "$resp_file"
-        # First call may have missed the probe (e.g. probe returned
-        # `error` and we tried anyway). Cache the observation.
-        export AUTODUCKS_SUB_ISSUES_STATUS="unavailable"
-        echo "unavailable"
+        # The probe already established endpoint availability for this repo.
+        # A 404/410 on write with a valid parent is a bad-argument error
+        # (e.g. wrong sub_issue_id), NOT a disabled feature. Classify as a
+        # retry-able error and do NOT poison the shared availability cache.
+        echo "error"
         return 0
         ;;
       5*|"")
