@@ -226,7 +226,7 @@ def main() -> None:
             "ref": coerce_ref(ref_str),
             "title": title,
             "body": build_issue_body(sections),
-            "labels": [f"priority:{priority}"],
+            "labels": [f"priority:{priority}", "Task"],
         })
 
     with open(out_path, "w") as f:
