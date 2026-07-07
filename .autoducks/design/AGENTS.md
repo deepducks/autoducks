@@ -62,7 +62,7 @@ flowchart LR
 #### Triggers
 
 - **Issue assignment**: agent `@design` + label `Draft` on an issue
-- **Issue comment**: slash command `/agents design`
+- **Issue comment**: slash command `/agents design` (built-in alias: `/agents plan`)
 
 #### Behavior
 
@@ -120,8 +120,8 @@ flowchart LR
 #### Triggers
 
 - **Issue assignment**: agent `@tactical` + issue type `Feature` **or** issue label `Feature` + issue labels don't include `Draft` or `Ready`
-- **Issue comment**: slash command `/agents devise`
-- **Issue comment**: slash command `/agents execute` + issue type `Feature` **or** issue label `Feature` + issue labels don't include `Draft` or `Ready` (opt-out available via config file)
+- **Issue comment**: slash command `/agents devise` (built-in aliases: `/agents drilldown`, `/agents specify`)
+- **Issue comment**: slash command `/agents execute` (built-in aliases: `/agents work`, `/agents run`, `/agents start`) + issue type `Feature` **or** issue label `Feature` + issue labels don't include `Draft` or `Ready` (opt-out available via config file)
 
 > Routing is label-first: the `Feature` label is the primary routing signal and works on all repositories. The native issue type is an optional UI layer available only on organization-owned repositories.
 
@@ -194,7 +194,7 @@ flowchart LR
 
 #### Triggers
 
-- **Issue comment**: slash command `/agents execute` + issue type `Feature` **or** issue label `Feature` + label `Ready`
+- **Issue comment**: slash command `/agents execute` (built-in aliases: `/agents work`, `/agents run`, `/agents start`) + issue type `Feature` **or** issue label `Feature` + label `Ready`
 - **PR assignment**: agent `@execution` + association to an issue of type `Feature` **or** label `Feature` + label `Ready`
 
 > Routing is label-first: the `Feature` label is the primary routing signal and works on all repositories. The native issue type is an optional UI layer available only on organization-owned repositories.
@@ -243,7 +243,7 @@ flowchart LR
 #### Triggers
 
 - **Issue assignment**: agent `@execution`
-- **Issue comment**: slash command `/agents execute` + issue is not a Feature (native type **or** label)
+- **Issue comment**: slash command `/agents execute` (built-in aliases: `/agents work`, `/agents run`, `/agents start`) + issue is not a Feature (native type **or** label)
 
 #### Behavior
 

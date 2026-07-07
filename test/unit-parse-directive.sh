@@ -66,10 +66,15 @@ run_case() {
 echo "[1] no /agents line — all empty"
 out=$(COMMENT_BODY="" bash "$SCRIPT" </dev/null)
 line_count=$(printf '%s\n' "$out" | wc -l | tr -d ' ')
-if [[ "$line_count" == "4" ]]; then
-  pass "emits exactly 4 lines"
+if [[ "$line_count" == "5" ]]; then
+  pass "emits exactly 5 lines"
 else
-  fail "expected 4 lines, got $line_count: '$out'"
+  fail "expected 5 lines, got $line_count: '$out'"
+fi
+if [[ "$(printf '%s\n' "$out" | grep '^original_command=')" == "original_command=" ]]; then
+  pass "original_command= is empty"
+else
+  fail "original_command not empty: '$(printf '%s\n' "$out" | grep '^original_command=')'"
 fi
 if [[ "$(printf '%s\n' "$out" | grep '^command=')" == "command=" ]]; then
   pass "command= is empty"
@@ -104,28 +109,28 @@ run_case "2] /agents devise" \
 # ---------------------------------------------------------------------------
 run_case "3] /agents devise opus" \
   "/agents devise opus" \
-  "devise" "claude-opus-4-7" "" ""
+  "devise" "claude-opus-4-8" "" ""
 
 # ---------------------------------------------------------------------------
 # Test 4: /agents devise sonnet
 # ---------------------------------------------------------------------------
 run_case "4] /agents devise sonnet" \
   "/agents devise sonnet" \
-  "devise" "claude-sonnet-4-6" "" ""
+  "devise" "claude-sonnet-5" "" ""
 
 # ---------------------------------------------------------------------------
 # Test 5: /agents devise haiku
 # ---------------------------------------------------------------------------
 run_case "5] /agents devise haiku" \
   "/agents devise haiku" \
-  "devise" "claude-haiku-4-5-20251001" "" ""
+  "devise" "claude-haiku-4-5" "" ""
 
 # ---------------------------------------------------------------------------
 # Test 6: /agents devise sonnet high
 # ---------------------------------------------------------------------------
 run_case "6] /agents devise sonnet high" \
   "/agents devise sonnet high" \
-  "devise" "claude-sonnet-4-6" "high" "Think very hard before writing."
+  "devise" "claude-sonnet-5" "high" "Think very hard before writing."
 
 # ---------------------------------------------------------------------------
 # Test 7: /agents devise off
@@ -146,7 +151,86 @@ run_case "8] /agents devise max" \
 # ---------------------------------------------------------------------------
 run_case "9] /agents execute opus ultrathink" \
   "/agents execute opus ultrathink" \
-  "execute" "claude-opus-4-7" "max" "Ultrathink — take extensive time to reason before writing."
+  "execute" "claude-opus-4-8" "max" "Ultrathink — take extensive time to reason before writing."
+
+# ---------------------------------------------------------------------------
+# Test 10-15: built-in alias normalization → canonical verb
+# ---------------------------------------------------------------------------
+run_case "10] /agents plan → design" \
+  "/agents plan" \
+  "design" "" "" ""
+
+run_case "11] /agents drilldown → devise" \
+  "/agents drilldown" \
+  "devise" "" "" ""
+
+run_case "12] /agents specify → devise" \
+  "/agents specify" \
+  "devise" "" "" ""
+
+run_case "13] /agents work → execute" \
+  "/agents work" \
+  "execute" "" "" ""
+
+run_case "14] /agents run → execute" \
+  "/agents run" \
+  "execute" "" "" ""
+
+run_case "15] /agents start → execute" \
+  "/agents start" \
+  "execute" "" "" ""
+
+# Alias + model/reasoning tokens still parse (alias only occupies token [1]).
+run_case "16] /agents work sonnet high → execute" \
+  "/agents work sonnet high" \
+  "execute" "claude-sonnet-5" "high" "Think very hard before writing."
+
+# Canonical verbs pass through unchanged.
+run_case "17] /agents design passthrough" \
+  "/agents design" \
+  "design" "" "" ""
+
+# Unknown verb is left as-is (no built-in/custom match).
+run_case "18] /agents bogus passthrough" \
+  "/agents bogus" \
+  "bogus" "" "" ""
+
+# original_command records the raw verb before normalization.
+echo "[19] /agents plan — original_command preserved"
+out=$(COMMENT_BODY="/agents plan" bash "$SCRIPT" </dev/null)
+if [[ "$(printf '%s\n' "$out" | grep '^original_command=')" == "original_command=plan" ]]; then
+  pass "original_command=plan"
+else
+  fail "original_command mismatch: '$(printf '%s\n' "$out" | grep '^original_command=')'"
+fi
+if [[ "$(printf '%s\n' "$out" | grep '^command=')" == "command=design" ]]; then
+  pass "command=design"
+else
+  fail "command mismatch: '$(printf '%s\n' "$out" | grep '^command=')'"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 20: custom alias resolution from a fixture autoducks.json
+# ---------------------------------------------------------------------------
+echo "[20] custom alias 'ship' → execute (config-driven)"
+_tmp_cwd=$(mktemp -d)
+mkdir -p "$_tmp_cwd/.autoducks"
+cat > "$_tmp_cwd/.autoducks/autoducks.json" <<'JSON'
+{ "triggers": { "design": ["spec"], "execute": ["go", "ship"] } }
+JSON
+out=$(cd "$_tmp_cwd" && COMMENT_BODY="/agents ship" bash "$SCRIPT" </dev/null)
+if [[ "$(printf '%s\n' "$out" | grep '^command=')" == "command=execute" ]]; then
+  pass "custom alias 'ship' resolves to execute"
+else
+  fail "custom alias mismatch: '$(printf '%s\n' "$out" | grep '^command=')'"
+fi
+out=$(cd "$_tmp_cwd" && COMMENT_BODY="/agents spec" bash "$SCRIPT" </dev/null)
+if [[ "$(printf '%s\n' "$out" | grep '^command=')" == "command=design" ]]; then
+  pass "custom alias 'spec' resolves to design"
+else
+  fail "custom alias mismatch: '$(printf '%s\n' "$out" | grep '^command=')'"
+fi
+rm -rf "$_tmp_cwd"
 
 # ---------------------------------------------------------------------------
 # Summary

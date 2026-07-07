@@ -70,7 +70,7 @@ fi
 
 # Copy scripts
 mkdir -p scripts
-for f in setup.sh install.sh smoke-test.sh smoke-test-plan.sh; do
+for f in setup.sh install.sh update-triggers.sh smoke-test.sh smoke-test-plan.sh; do
   if [[ -f "$TMP_DIR/scripts/$f" ]]; then
     cp "$TMP_DIR/scripts/$f" "scripts/$f"
   fi
@@ -82,6 +82,18 @@ echo "  Scripts copied"
 find .autoducks -name '*.sh' -exec chmod +x {} +
 
 rm -rf "$TMP_DIR"
+
+# Bake per-team custom trigger aliases (triggers.<agent>[] in autoducks.json)
+# into the workflow guards. GitHub's file-blind if: engine cannot read config at
+# run time, so aliases must be baked into both the runtime template and the
+# .github/workflows/ mirror. No-op (byte-identical) when no custom aliases are
+# configured. Runs before setup so the runtime-sync check validates the result.
+if [[ -f ".autoducks/autoducks.json" ]] && [[ -f "scripts/update-triggers.sh" ]] \
+   && command -v jq &>/dev/null; then
+  echo ""
+  echo "Applying custom trigger aliases..."
+  bash scripts/update-triggers.sh
+fi
 
 echo ""
 echo "All files installed."

@@ -14,11 +14,20 @@ jobs:
     if: >-
       github.event.issue.pull_request == null &&
       github.event.comment.author_association != 'MANNEQUIN' &&
-      (startsWith(github.event.comment.body, '/agents devise') ||
-       (startsWith(github.event.comment.body, '/agents execute') &&
-        (github.event.issue.type.name == 'Feature' ||
-         contains(github.event.issue.labels.*.name, 'Feature')) &&
-        !contains(github.event.issue.labels.*.name, 'Ready')))
+      (
+        startsWith(github.event.comment.body, '/agents devise') ||
+        startsWith(github.event.comment.body, '/agents drilldown') ||
+        startsWith(github.event.comment.body, '/agents specify') ||
+        (
+          (startsWith(github.event.comment.body, '/agents execute') ||
+           startsWith(github.event.comment.body, '/agents work') ||
+           startsWith(github.event.comment.body, '/agents run') ||
+           startsWith(github.event.comment.body, '/agents start')) &&
+          (github.event.issue.type.name == 'Feature' ||
+           contains(github.event.issue.labels.*.name, 'Feature')) &&
+          !contains(github.event.issue.labels.*.name, 'Ready')
+        )
+      )
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

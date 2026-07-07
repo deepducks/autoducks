@@ -10,6 +10,14 @@
     "base_branch": "main",
     "merge_method": "auto"
   },
+  "triggers": {
+    "design":   [],
+    "tactical": [],
+    "execute":  [],
+    "fix":      [],
+    "revert":   [],
+    "close":    []
+  },
   "security": {
     "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"],
     "allow": ["bot-service-account", "@my-org/agents-users"],
