@@ -31,6 +31,8 @@ curl -fsSL https://raw.githubusercontent.com/deepducks/autoducks/main/scripts/in
 
 See the [installation guide](https://autoducks.openvibes.tech/getting-started/installation/) for prerequisites and setup checks.
 
+If you're running autoducks on a **public repository**, read the [security guide](https://autoducks.openvibes.tech/reference/security/) first — the Authorization Gate is what stops strangers from spending your LLM budget.
+
 ## First command
 
 Open an issue describing a small change, then comment:
@@ -58,6 +60,7 @@ An LLM agent reads the issue, writes the code, and opens a PR. That's the recomm
 | Configuration | <https://autoducks.openvibes.tech/reference/configuration/> |
 | Runtimes | <https://autoducks.openvibes.tech/reference/runtimes/> |
 | Branch naming | <https://autoducks.openvibes.tech/reference/branch-naming/> |
+| Security (Authorization Gate) | <https://autoducks.openvibes.tech/reference/security/> |
 | Design philosophy | <https://autoducks.openvibes.tech/about/> |
 
 ## Contributing
