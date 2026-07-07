@@ -1,2 +1,4 @@
 {
+  "model": "claude-sonnet-5",
+  "reasoning": "high"
 }
