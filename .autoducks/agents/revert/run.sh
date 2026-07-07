@@ -28,6 +28,10 @@ done
 # Remove labels
 its::remove_label "$FEATURE" "Ready" 2>/dev/null || true
 its::remove_label "$FEATURE" "draft" 2>/dev/null || true
+for lbl in "Spec:draft" "Spec:plan" "Tactics:crafting" "Tactics:ready" \
+           "Work:progress" "Work:done"; do
+  its::remove_label "$FEATURE" "$lbl" 2>/dev/null || true
+done
 
 # Restore original issue body via edit history
 EDIT_HISTORY=$(its::get_issue_edit_history "$FEATURE")
