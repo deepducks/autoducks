@@ -58,6 +58,13 @@ if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
     exit 1
   fi
 
+  # Sub-PRs merge into the feature branch, not the default branch, so
+  # GitHub's "fixes #N" auto-close does not fire. Close the task explicitly.
+  its::close_issue "$ISSUE_NUM" \
+    "Auto-closed by execution agent after merging sub-PR #$PR_NUM into \`$BASE_BRANCH\`." \
+    "completed" \
+    2>/dev/null || echo "::warning::Could not close task #$ISSUE_NUM"
+
   # Trigger wave orchestrator to continue (non-fatal — PR merge event is the primary trigger)
   trigger_loop_closure "$FEATURE_NUM" || true
 fi
