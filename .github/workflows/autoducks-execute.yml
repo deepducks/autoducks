@@ -15,11 +15,11 @@ on:
       model:
         required: false
         type: string
-        default: 'claude-sonnet-4-6'
+        default: ''
       reasoning:
         required: false
         type: string
-        default: 'high'
+        default: ''
 
 permissions:
   contents: write
