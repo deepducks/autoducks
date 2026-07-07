@@ -52,16 +52,18 @@ The PR-merge trigger is the **loop closure** mechanism: every time a task PR mer
 7. Finds the next ready wave: the first `pending` wave whose preceding waves are all `done`.
 
 **If a next wave is found:**
-8. Dispatches execution agents in parallel for each undone task, skipping already-done or already-dispatched tasks (duplicate dispatch prevention).
-9. Posts a summary comment listing dispatched and skipped tasks.
+8. On the first wave dispatch only, adds `Work:progress` to the feature issue to signal that execution is underway.
+9. Dispatches execution agents in parallel for each undone task, skipping already-done or already-dispatched tasks (duplicate dispatch prevention).
+10. Posts a summary comment listing dispatched and skipped tasks.
 
 **If all waves are done:**
-10. Creates the final feature PR (if it doesn't exist) with `Closes #task` for every task and `Closes #feature`. Comments that the feature is ready for review.
+11. Removes `Work:progress` and adds `Work:done` to the feature issue to record that all waves have completed.
+12. Creates the final feature PR (if it doesn't exist) with `Closes #task` for every task and `Closes #feature`. Comments that the feature is ready for review.
 
 **If blocked** (not all previous waves done):
-11. Comments that orchestration is waiting for dependencies.
+13. Comments that orchestration is waiting for dependencies.
 
-12. Reacts with 👍.
+14. Reacts with 👍.
 
 ## Loop closure
 

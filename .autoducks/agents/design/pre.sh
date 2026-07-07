@@ -6,5 +6,9 @@ source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 
 react_to_comment "$COMMENT_ID" "eyes"
 
+source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
+progress_labels::ensure
+progress_labels::start "$ISSUE_NUM" "Spec:draft" "Spec:plan"
+
 # Fetch issue content for the LLM
 its::get_issue "$ISSUE_NUM" | jq -r '"# " + .title + "\n\n" + .body' > /tmp/issue-request.md
