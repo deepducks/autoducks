@@ -22,11 +22,16 @@ its::create_issue() {
     payload=$(echo "$payload" | jq --argjson labels "$labels_json" '. + {labels: $labels}')
   fi
 
+  local create_response
+  create_response=$(echo "$payload" | gh api "repos/$REPO/issues" --method POST --input -)
+
   local issue_number
-  issue_number=$(echo "$payload" | gh api "repos/$REPO/issues" --method POST --input - --jq '.number')
+  issue_number=$(echo "$create_response" | jq -r '.number')
+  local issue_db_id
+  issue_db_id=$(echo "$create_response" | jq -r '.id')
 
   if [[ -n "$parent_id" ]]; then
-    its::link_sub_issue "$parent_id" "$issue_number"
+    its::link_sub_issue "$parent_id" "$issue_db_id"
   fi
 
   echo "$issue_number"
