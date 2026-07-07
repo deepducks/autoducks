@@ -22,7 +22,7 @@ fi
 
 # Close task issues
 for t in "${TASK_NUMBERS[@]:-}"; do
-  its::close_issue "$t" "Reverted by \`/agents revert\` on #$FEATURE" 2>/dev/null || echo "::warning::Could not close #$t"
+  its::close_issue "$t" "Reverted by \`/agents revert\` on #$FEATURE" "not_planned" 2>/dev/null || echo "::warning::Could not close #$t"
 done
 
 # Remove labels
