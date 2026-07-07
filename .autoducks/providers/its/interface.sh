@@ -33,7 +33,8 @@ done
 #   its::add_label(issue_id, label)
 #   its::remove_label(issue_id, label)
 #   its::set_issue_type(issue_id, type)
-#   its::link_sub_issue(parent_id, child_id)
+#   its::link_sub_issue(parent_id, child_id)         → token ∈ {linked, already-linked, unavailable, forbidden, error}
+#   its::sub_issues_available(any_issue_id)          → token ∈ {available, unavailable, forbidden, error}
 #   its::list_comments(issue_id, limit?)             → JSON array
 #   its::list_sub_issues(issue_id)                   → JSON array
 #   its::get_issue_edit_history(issue_id)             → JSON array
@@ -50,6 +51,7 @@ REQUIRED_FUNCTIONS=(
   "its::remove_label"
   "its::set_issue_type"
   "its::link_sub_issue"
+  "its::sub_issues_available"
   "its::list_comments"
   "its::list_sub_issues"
   "its::get_issue_edit_history"
