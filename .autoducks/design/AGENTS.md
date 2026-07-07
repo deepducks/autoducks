@@ -141,7 +141,7 @@ Permissions:
 4. A slug is generated: `feature/<issue_id>-<slugified_title>`. <!-- generateSlug(featureIssueId, featureIssueTitle) -->
 5. A branch is created from `main` named `feature/<issue_id>-<slugified_title>`. <!-- git::createBranch("main", featureSlug) -->
 6. A pull request is created from the feature branch into `main`, titled `Feature <issue_id>: <issue_title>`. <!-- its::createPullRequest(featureBranch, "main", prTitle) -->
-7. The PR is linked to the parent issue. <!-- its::linkPRToIssue(prId, featureIssueId) -->
+7. The PR is linked to the parent issue via the `fixes #<featureIssueId>` keyword in the PR body. <!-- linkage achieved implicitly via fixes/closes/resolves keyword in the PR body (see its::createPullRequest) -->
 8. A comment on the issue mentions the feature author, suggesting work can begin with `/agents execute` or by assigning the PR to the agents. <!-- its::commentIssue(featureIssueId, featureAuthor, message) -->
 
 ---
@@ -289,6 +289,11 @@ Permissions:
 7. The agent executes the task. <!-- llm::executeTask(taskId, taskTitle, taskDescription, taskComments, taskMetadata) -->
 <!-- POST EXECUTION -->
 8. The task PR is **auto-merged** (only CI checks run, no code review) and the branch is deleted by policy. <!-- its::mergePR(prId) -->
+9. The task issue is closed as `completed` with a comment linking to the
+   merged sub-PR. This is required because the sub-PR merged into the
+   feature branch, not the default branch, so the `fixes #N` keyword does
+   not auto-close the issue.
+   <!-- its::close_issue(taskIssueId, comment, "completed") -->
 </details>
 
 > **Auto-merge policy:** Auto-merge is imperative for Scenario B only, where task PRs merge into a feature branch that will itself undergo human review before reaching `main`. Scenario A PRs target `main` directly and require human review.
@@ -343,7 +348,7 @@ Functions in the agent scripts use the `provider::function()` calling convention
 
 ## Shared Functions
 
-The 17 core functions used across agents, grouped by category.
+The 18 core functions used across agents, grouped by category.
 
 ### Feedback
 
@@ -365,22 +370,23 @@ The 17 core functions used across agents, grouped by category.
 | 9 | `its::addLabel(issueId, label)` | Add a label to an issue |
 | 10 | `its::removeLabel(issueId, label)` | Remove a label from an issue |
 | 11 | `its::createPullRequest(head, base, title)` | Create a pull request |
-| 12 | `its::linkPRToIssue(prId, issueId)` | Associate a PR with an issue |
+| 12 | `its::linkPRToIssue(prId, issueId)` | Achieved implicitly via the fixes/closes/resolves keyword in the PR body (see `its::createPullRequest`). |
 | 13 | `its::mergePR(prId)` | Merge a pull request (auto-merge) |
+| 14 | `its::closeIssue(issueId, comment?, reason?)` | Close an issue with an optional comment; `reason` is one of `completed` or `not_planned` |
 
 ### Git Operations
 
 | # | Function | Description |
 |---|----------|-------------|
-| 14 | `git::createBranch(base, name)` | Create a branch from a base ref |
+| 15 | `git::createBranch(base, name)` | Create a branch from a base ref |
 
 ### Orchestration
 
 | # | Function | Description |
 |---|----------|-------------|
-| 15 | `generateSlug(id, title)` | Generate a URL-safe slug from id + title |
-| 16 | `filterPendingTasks(issues)` | Filter issues to those without a merged PR |
-| 17 | `groupTasksIntoWaves(tasks)` | Partition tasks into sequential execution waves |
+| 16 | `generateSlug(id, title)` | Generate a URL-safe slug from id + title |
+| 17 | `filterPendingTasks(issues)` | Filter issues to those without a merged PR |
+| 18 | `groupTasksIntoWaves(tasks)` | Partition tasks into sequential execution waves |
 
 ---
 
