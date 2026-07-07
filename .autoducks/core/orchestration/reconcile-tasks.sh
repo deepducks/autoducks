@@ -15,6 +15,8 @@ reconcile_tasks() {
   local -a new_numbers=()
   local -A placeholder_map=()
 
+  : > /tmp/link-outcomes.tsv
+
   # Ensure priority labels exist
   for p in P0 P1 P2 P3; do
     gh label create "priority:$p" --repo "$REPO" 2>/dev/null || true
@@ -45,6 +47,9 @@ reconcile_tasks() {
         rm -f "$tmpfile"
       fi
       new_numbers+=("$ref")
+      local link_result
+      link_result=$(its::link_sub_issue "$feature_issue_id" "$ref")
+      printf '%s\t%s\n' "$ref" "$link_result" >> /tmp/link-outcomes.tsv
     else
       # New task (Tn placeholder): create issue
       local labels_with_task
@@ -67,7 +72,9 @@ reconcile_tasks() {
       # Best-effort native issue type (silently no-ops when the org doesn't have a `Task` type)
       its::set_issue_type "$task_id" "Task" 2>/dev/null || true
 
-      its::link_sub_issue "$feature_issue_id" "$task_id" 2>/dev/null || true
+      local link_result
+      link_result=$(its::link_sub_issue "$feature_issue_id" "$task_id")
+      printf '%s\t%s\n' "$task_id" "$link_result" >> /tmp/link-outcomes.tsv
 
       placeholder_map["$ref"]="$task_id"
       new_numbers+=("$task_id")
