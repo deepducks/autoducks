@@ -65,6 +65,9 @@ AUTODUCKS_REASONING="$(echo "$_merged" | jq -r '.reasoning // empty')"
 export AUTODUCKS_BASE_BRANCH
 AUTODUCKS_BASE_BRANCH="$(echo "$_merged" | jq -r '.base_branch // empty')"
 
+export AUTODUCKS_MERGE_METHOD
+AUTODUCKS_MERGE_METHOD="$(echo "$_merged" | jq -r '.merge_method // "auto"')"
+
 # ── Source provider interfaces ──────────────────────────────────────
 source "$AUTODUCKS_ROOT/providers/its/interface.sh"
 source "$AUTODUCKS_ROOT/providers/git/interface.sh"

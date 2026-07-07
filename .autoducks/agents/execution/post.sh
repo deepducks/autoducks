@@ -38,8 +38,16 @@ if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
   # Scenario B: task with feature parent — auto-merge with rebase retry
   MERGE_OK=false
   for attempt in 1 2 3; do
-    if git::merge_pr "$PR_NUM"; then
+    merge_rc=0
+    git::merge_pr "$PR_NUM" || merge_rc=$?
+    if [[ "$merge_rc" -eq 0 ]]; then
       MERGE_OK=true
+      break
+    fi
+    if [[ "$merge_rc" -eq 2 ]]; then
+      # Merge method not allowed — a config problem, not a stale branch.
+      # Rebasing won't help, so stop retrying.
+      echo "Merge method not allowed on $REPO — aborting retries (see merge_method config)."
       break
     fi
     echo "Merge attempt $attempt failed — rebasing onto $BASE_BRANCH..."
