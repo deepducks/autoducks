@@ -44,6 +44,25 @@ if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
 fi
 
 react_to_comment "$COMMENT_ID" "+1"
-its::comment_issue "$ISSUE_NUM" "✅ Fix applied. PR #$PR_NUM.
+
+if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
+  # Scenario B: fix PR auto-merged into the feature branch, orchestrator resumed
+  FIX_MSG="✅ **Fix applied and merged.**
+
+PR #$PR_NUM was merged into \`$BASE_BRANCH\` and the wave orchestrator has been
+re-triggered to resume the feature.
+
+**Next:** nothing — the orchestrator continues from here."
+else
+  # Scenario A: fix PR awaits human review
+  FIX_MSG="✅ **Fix applied.**
+
+PR #$PR_NUM is open and waiting for your review.
+
+**Next:** review and merge PR #$PR_NUM, or comment \`/agents fix\` again if the
+problem persists."
+fi
+
+its::comment_issue "$ISSUE_NUM" "$FIX_MSG
 
 _Ran with \`${MODEL:-unknown}\` at reasoning \`${REASONING:-unknown}\`._"

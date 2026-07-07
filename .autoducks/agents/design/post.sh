@@ -45,8 +45,13 @@ progress_labels::finish "$ISSUE_NUM" "Spec:draft" "Spec:plan"
 react_to_comment "$COMMENT_ID" "+1"
 
 # Notify commenter
-its::comment_issue "$ISSUE_NUM" "✅ Design specification complete.
+its::comment_issue "$ISSUE_NUM" "✅ **Design specification complete.**
 
-_Ran with \`${MODEL:-unknown}\` at reasoning \`${REASONING:-unknown}\`._
+The issue body now holds the full design spec — problem statement, proposed
+solution, technical design, dependencies, constraints, and out-of-scope notes.
+Review it and edit anything you'd like to steer before planning.
 
-Use \`/agents devise\` to create the tactical plan, or assign @tactical to this issue."
+**Next:** run \`/agents devise\` to break the spec into a tactical plan and task
+issues, or assign @tactical to this issue.
+
+_Ran with \`${MODEL:-unknown}\` at reasoning \`${REASONING:-unknown}\`._"

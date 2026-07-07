@@ -86,6 +86,25 @@ react_to_comment "${COMMENT_ID:-}" "+1"
 
 progress_labels::finish "$ISSUE_NUM" "Work:progress" "Work:done"
 
-its::comment_issue "$ISSUE_NUM" "✅ Implementation complete. PR #$PR_NUM created.
+if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
+  # Scenario B: sub-PR auto-merged into the feature branch
+  EXEC_MSG="✅ **Task implemented and merged.**
+
+PR #$PR_NUM was merged into \`$BASE_BRANCH\` and this task was closed. The wave
+orchestrator has been notified and will advance to the next wave automatically.
+
+**Next:** nothing — the orchestrator drives the feature to completion from here."
+else
+  # Scenario A: orphan task, PR targets the base branch, awaits human review
+  EXEC_MSG="✅ **Implementation complete.**
+
+PR #$PR_NUM is open against \`$BASE_BRANCH\` and is waiting for your review — it
+is **not** auto-merged.
+
+**Next:** review and merge PR #$PR_NUM, or comment \`/agents fix\` on this issue
+if changes are needed."
+fi
+
+its::comment_issue "$ISSUE_NUM" "$EXEC_MSG
 
 _Ran with \`${MODEL:-unknown}\` at reasoning \`${REASONING:-unknown}\`._"

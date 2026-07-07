@@ -127,6 +127,12 @@ if [[ -s /tmp/link-outcomes.tsv ]]; then
 fi
 
 # Notify
-its::comment_issue "$ISSUE_NUM" "✅ Tactical plan complete. Tasks created: $TASK_NUMBERS
+its::comment_issue "$ISSUE_NUM" "✅ **Tactical plan complete.**
+
+Tasks created: $TASK_NUMBERS. The plan, wave order, and \`## Progress\`
+checklist now live in the tactical zone of the issue body.
 ${LINK_SUMMARY}
+**Next:** run \`/agents execute\` to start the wave orchestrator, which will
+dispatch these tasks in dependency order.
+
 _Ran with \`${MODEL:-unknown}\` at reasoning \`${REASONING:-unknown}\`._"
