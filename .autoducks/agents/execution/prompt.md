@@ -11,3 +11,5 @@ Constraints:
 - Do NOT create branches, commits, or pull requests.
 - Do NOT call the GitHub API.
 - Just write the code changes.
+
+After implementing the task, write a concise implementation summary to `/tmp/work-summary.md`: a few bullet points or 2-5 sentences describing what changed and why. If nothing was implemented, do not write the file.
