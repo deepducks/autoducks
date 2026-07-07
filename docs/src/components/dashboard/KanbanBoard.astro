@@ -1,0 +1,264 @@
+---
+// Orchestration island: fetches views (311), spins up one column per view
+// (313) and populates each with issue cards (312). Rendering <KanbanColumn />
+// and <IssueCard /> below (they emit no markup of their own) is what pulls
+// their global styles onto the page — the board only ever talks to them
+// through the createColumn/createIssueCard factories at runtime.
+import KanbanColumn from './KanbanColumn.astro';
+import IssueCard from './IssueCard.astro';
+
+interface Props {
+  repo: string;
+  autoRefresh?: boolean;
+}
+
+const { repo, autoRefresh = true } = Astro.props;
+---
+
+<div class="kanban-board" data-repo={repo} data-auto-refresh={String(autoRefresh)}>
+  <p class="kanban-board__banner" role="status" hidden></p>
+  <div class="kanban-board__error" hidden></div>
+  <div class="kanban-board__columns"></div>
+</div>
+
+<KanbanColumn />
+<IssueCard />
+
+<style is:global>
+  .kanban-board {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .kanban-board__columns {
+    display: flex;
+    gap: 0.75rem;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+  }
+
+  .kanban-board__banner {
+    margin: 0;
+    padding: 0.6rem 0.9rem;
+    border-radius: 0.4rem;
+    background: var(--sl-color-orange-low);
+    color: var(--sl-color-orange-high);
+    font-size: 0.85rem;
+  }
+
+  .kanban-board__error {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 1rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    color: var(--sl-color-gray-2);
+    font-size: 0.9rem;
+  }
+
+  .kanban-board__error-text {
+    margin: 0;
+  }
+
+  .kanban-board__retry {
+    border: 1px solid var(--sl-color-gray-4);
+    border-radius: 0.35rem;
+    padding: 0.3rem 0.9rem;
+    background: var(--sl-color-gray-5);
+    color: var(--sl-color-white);
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+
+  .kanban-board__retry:hover {
+    background: var(--sl-color-gray-4);
+  }
+</style>
+
+<script>
+  import { fetchViews, fetchColumnIssues, invalidateViewsCache } from '../../lib/dashboard/github';
+  import { createColumn } from '../../lib/dashboard/createColumn';
+  import { createIssueCard } from '../../lib/dashboard/createIssueCard';
+  import type { ColumnHandle, RateLimit, RepoView } from '../../lib/dashboard/types';
+
+  const REFRESH_INTERVAL = 60_000;
+  const RATE_LIMIT_THRESHOLD = 5;
+  const RATE_LIMIT_BANNER =
+    'Auto-refresh paused — GitHub API rate limit reached. Add a token or wait for the limit to reset.';
+
+  interface Column {
+    view: RepoView;
+    handle: ColumnHandle;
+  }
+
+  function rateLimitResetMessage(error: unknown): string | null {
+    if (!(error instanceof Error)) return null;
+    const match = error.message.match(/Rate limit resets at ([^.]+)\./);
+    return match ? `Rate limit resets at ${match[1]}` : null;
+  }
+
+  function describeError(error: unknown): string {
+    return rateLimitResetMessage(error) ?? (error instanceof Error ? error.message : String(error));
+  }
+
+  async function refreshAllColumns(columns: Column[], repo: string): Promise<void> {
+    await Promise.all(
+      columns.map(async (column) => {
+        column.handle.setPulsing(true);
+        try {
+          const { data, rateLimit } = await fetchColumnIssues(column.view, repo);
+          column.handle.setIssues(data.issues.map(createIssueCard), data.totalCount);
+          checkRateLimit(rateLimit);
+        } catch (error) {
+          column.handle.setError(describeError(error), () => retryColumn(column, repo));
+        } finally {
+          column.handle.setPulsing(false);
+        }
+      }),
+    );
+  }
+
+  function startRefresh(
+    columns: Column[],
+    repo: string,
+    interval = REFRESH_INTERVAL,
+  ): ReturnType<typeof setInterval> {
+    return setInterval(() => void refreshAllColumns(columns, repo), interval);
+  }
+
+  let activeAutoRefresh = false;
+  function checkRateLimit(rateLimit: RateLimit): void {
+    if (rateLimit.remaining !== null && rateLimit.remaining <= RATE_LIMIT_THRESHOLD && activeAutoRefresh) {
+      activeAutoRefresh = false;
+      onRateLimited();
+      showBannerGlobal(RATE_LIMIT_BANNER);
+    }
+  }
+
+  // Populated per-board-instance in initBoard; declared here so
+  // checkRateLimit (shared by initial load + refresh) can reach them.
+  let onRateLimited: () => void = () => {};
+  let showBannerGlobal: (message: string) => void = () => {};
+
+  function retryColumn(column: Column, repo: string): void {
+    column.handle.setLoading();
+    void loadColumnIssues(column, repo);
+  }
+
+  async function loadColumnIssues(column: Column, repo: string): Promise<void> {
+    try {
+      const { data, rateLimit } = await fetchColumnIssues(column.view, repo);
+      column.handle.setIssues(data.issues.map(createIssueCard), data.totalCount);
+      checkRateLimit(rateLimit);
+    } catch (error) {
+      column.handle.setError(describeError(error), () => retryColumn(column, repo));
+    }
+  }
+
+  function initBoard(root: HTMLElement): void {
+    const columnsEl = root.querySelector<HTMLElement>('.kanban-board__columns');
+    const bannerEl = root.querySelector<HTMLElement>('.kanban-board__banner');
+    const errorEl = root.querySelector<HTMLElement>('.kanban-board__error');
+    if (!columnsEl || !bannerEl || !errorEl) return;
+
+    let columns: Column[] = [];
+    let refreshTimer: ReturnType<typeof setInterval> | null = null;
+    let autoRefreshEnabled = false;
+
+    function stopRefresh(): void {
+      if (refreshTimer !== null) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+      }
+    }
+
+    function showBanner(message: string): void {
+      bannerEl.textContent = message;
+      bannerEl.hidden = false;
+    }
+
+    function hideBanner(): void {
+      bannerEl.hidden = true;
+      bannerEl.textContent = '';
+    }
+
+    function showGlobalError(message: string, onRetry: () => void): void {
+      errorEl.replaceChildren();
+
+      const text = document.createElement('p');
+      text.className = 'kanban-board__error-text';
+      text.textContent = message;
+      errorEl.appendChild(text);
+
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'kanban-board__retry';
+      retry.textContent = 'Retry';
+      retry.addEventListener('click', () => onRetry());
+      errorEl.appendChild(retry);
+
+      errorEl.hidden = false;
+      columnsEl.replaceChildren();
+    }
+
+    function hideGlobalError(): void {
+      errorEl.hidden = true;
+      errorEl.replaceChildren();
+    }
+
+    async function loadBoard(): Promise<void> {
+      const repo = root.dataset.repo ?? '';
+      autoRefreshEnabled = root.dataset.autoRefresh === 'true';
+      activeAutoRefresh = autoRefreshEnabled;
+      onRateLimited = () => {
+        autoRefreshEnabled = false;
+        stopRefresh();
+      };
+      showBannerGlobal = showBanner;
+
+      stopRefresh();
+      hideBanner();
+      hideGlobalError();
+      invalidateViewsCache(repo);
+      columnsEl.replaceChildren();
+      columns = [];
+
+      let viewsResult;
+      try {
+        viewsResult = await fetchViews(repo);
+      } catch (error) {
+        showGlobalError(describeError(error), () => void loadBoard());
+        return;
+      }
+
+      checkRateLimit(viewsResult.rateLimit);
+
+      columns = viewsResult.data.map((view) => {
+        const handle = createColumn(view);
+        handle.setLoading();
+        columnsEl.appendChild(handle.root);
+        return { view, handle };
+      });
+
+      await Promise.all(columns.map((column) => loadColumnIssues(column, repo)));
+
+      if (autoRefreshEnabled) {
+        refreshTimer = startRefresh(columns, repo);
+      }
+    }
+
+    void loadBoard();
+
+    const repoObserver = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => mutation.attributeName === 'data-repo')) {
+        void loadBoard();
+      }
+    });
+    repoObserver.observe(root, { attributes: true, attributeFilter: ['data-repo'] });
+  }
+
+  document.querySelectorAll<HTMLElement>('.kanban-board').forEach((root) => initBoard(root));
+</script>
