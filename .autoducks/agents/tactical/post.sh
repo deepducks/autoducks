@@ -37,26 +37,6 @@ if ! python3 "$AUTODUCKS_ROOT/core/robustness/parse-plan.py" /tmp/tactical-body.
   exit 1
 fi
 
-# Reconcile tasks (create/update/close)
-RECONCILE_OUTPUT=$(reconcile_tasks "$ISSUE_NUM" /tmp/tasks.jsonl "${OLD_NUMBERS:-}")
-
-# Extract task numbers and placeholder mappings
-TASK_NUMBERS=$(echo "$RECONCILE_OUTPUT" | grep '^TASK_NUMBERS=' | sed 's/^TASK_NUMBERS=//')
-
-# Replace placeholders in tactical body
-TACTICAL_BODY=$(cat /tmp/tactical-body.md)
-while IFS='|' read -r _ placeholder real_num; do
-  TACTICAL_BODY=$(echo "$TACTICAL_BODY" | perl -pe "s/\\b\\Q${placeholder}\\E\\b/${real_num}/g")
-done < <(echo "$RECONCILE_OUTPUT" | grep '^PLACEHOLDER|')
-
-# Strip ## Tasks block (tasks are now separate issues)
-TACTICAL_STRIPPED=$(echo "$TACTICAL_BODY" | awk '
-  /^## Tasks/ { skip=1; next }
-  /^## /      { if (skip) skip=0 }
-  !skip { print }
-')
-echo "$TACTICAL_STRIPPED" > /tmp/tactical-zone-new.md
-
 # Safety guard against silent design-zone loss: never overwrite the issue body
 # when the design zone came out empty while the source body was non-empty. That
 # can only happen if zone classification zeroed the design zone (the historical
@@ -68,10 +48,61 @@ if [[ ! -s /tmp/design-zone.md && -s /tmp/issue-body-raw.md ]]; then
   exit 1
 fi
 
-# Assemble design zone + new tactical zone → feature body
-assemble_body /tmp/design-zone.md /tmp/tactical-zone-new.md /tmp/feature-body.md
+TASK_COUNT=$(wc -l < /tmp/tasks.jsonl | tr -d ' ')
 
-its::update_issue_body "$ISSUE_NUM" /tmp/feature-body.md
+if [[ "$TASK_COUNT" -eq 1 ]]; then
+  # --- SINGLE-TASK FAST PATH ---
+  TASK_LINE=$(head -1 /tmp/tasks.jsonl)
+  # .body is a complete markdown block from parse-plan.py's build_issue_body:
+  #   ## Summary … / ## Tasks … / ## Acceptance Criteria … [/ ## References …]
+  # Build the tactical zone from it — NO waves: YAML, NO ## Progress checklist.
+  echo "$TASK_LINE" | jq -r '.body' > /tmp/tactical-zone-new.md
+
+  # Assemble via the shared assembler so the tactical sentinels survive
+  # (required for a later single→multi re-split).
+  assemble_body /tmp/design-zone.md /tmp/tactical-zone-new.md /tmp/feature-body.md
+  its::update_issue_body "$ISSUE_NUM" /tmp/feature-body.md
+
+  # Multi→single revision: close the now-dropped child tasks ourselves,
+  # since reconcile_tasks (which normally closes dropped tasks) is skipped.
+  # OLD_NUMBERS is "" for a single-task source body (no YAML) → no-op.
+  for old in ${OLD_NUMBERS:-}; do
+    its::close_issue "$old" "Superseded by revised single-task plan on #$ISSUE_NUM" "not_planned" 2>/dev/null || true
+  done
+
+  # Lazily create + add Tactics:single (mirror the priority:P* creation style).
+  gh label create "Tactics:single" --repo "$REPO" 2>/dev/null || true
+  its::add_label "$ISSUE_NUM" "Tactics:single"
+else
+  # --- MULTI-TASK PATH (unchanged) ---
+  # Reconcile tasks (create/update/close)
+  RECONCILE_OUTPUT=$(reconcile_tasks "$ISSUE_NUM" /tmp/tasks.jsonl "${OLD_NUMBERS:-}")
+
+  # Extract task numbers and placeholder mappings
+  TASK_NUMBERS=$(echo "$RECONCILE_OUTPUT" | grep '^TASK_NUMBERS=' | sed 's/^TASK_NUMBERS=//')
+
+  # Replace placeholders in tactical body
+  TACTICAL_BODY=$(cat /tmp/tactical-body.md)
+  while IFS='|' read -r _ placeholder real_num; do
+    TACTICAL_BODY=$(echo "$TACTICAL_BODY" | perl -pe "s/\\b\\Q${placeholder}\\E\\b/${real_num}/g")
+  done < <(echo "$RECONCILE_OUTPUT" | grep '^PLACEHOLDER|')
+
+  # Strip ## Tasks block (tasks are now separate issues)
+  TACTICAL_STRIPPED=$(echo "$TACTICAL_BODY" | awk '
+    /^## Tasks/ { skip=1; next }
+    /^## /      { if (skip) skip=0 }
+    !skip { print }
+  ')
+  echo "$TACTICAL_STRIPPED" > /tmp/tactical-zone-new.md
+
+  # Assemble design zone + new tactical zone → feature body
+  assemble_body /tmp/design-zone.md /tmp/tactical-zone-new.md /tmp/feature-body.md
+
+  its::update_issue_body "$ISSUE_NUM" /tmp/feature-body.md
+
+  # Clear a stale Tactics:single so a single→multi revision cleans up:
+  its::remove_label "$ISSUE_NUM" "Tactics:single" 2>/dev/null || true
+fi
 
 # Labels and type (idempotent — safe on both first pass and revision)
 its::add_label "$ISSUE_NUM" "Ready"
@@ -106,28 +137,33 @@ fi
 
 react_to_comment "$COMMENT_ID" "+1"
 
-# Summarize sub-issue linking outcome
-LINK_SUMMARY=""
-if [[ -s /tmp/link-outcomes.tsv ]]; then
-  TOTAL=$(wc -l < /tmp/link-outcomes.tsv)
-  LINKED=$(grep -cE $'\tlinked$|\talready-linked$' /tmp/link-outcomes.tsv || true)
-  UNAVAIL=$(grep -cE $'\tunavailable$' /tmp/link-outcomes.tsv || true)
-  FORBID=$(grep -cE $'\tforbidden$' /tmp/link-outcomes.tsv || true)
-  ERR=$(grep -cE $'\terror$' /tmp/link-outcomes.tsv || true)
+if [[ "$TASK_COUNT" -eq 1 ]]; then
+  # Notify — single-task fast path: no child issues, no sub-issue linking.
+  its::comment_issue "$ISSUE_NUM" "✅ Tactical plan complete (single-task fast path — no child issues created).
+_Ran with \`${MODEL:-unknown}\` at reasoning \`${REASONING:-unknown}\`._"
+else
+  # Summarize sub-issue linking outcome
+  LINK_SUMMARY=""
+  if [[ -s /tmp/link-outcomes.tsv ]]; then
+    TOTAL=$(wc -l < /tmp/link-outcomes.tsv)
+    LINKED=$(grep -cE $'\tlinked$|\talready-linked$' /tmp/link-outcomes.tsv || true)
+    UNAVAIL=$(grep -cE $'\tunavailable$' /tmp/link-outcomes.tsv || true)
+    FORBID=$(grep -cE $'\tforbidden$' /tmp/link-outcomes.tsv || true)
+    ERR=$(grep -cE $'\terror$' /tmp/link-outcomes.tsv || true)
 
-  if (( UNAVAIL == TOTAL )); then
-    LINK_SUMMARY=$'\n> Native sub-issue linking is not available for this repository — the `## Progress` checklist above is the primary progress view.'
-  elif (( FORBID == TOTAL )); then
-    LINK_SUMMARY=$'\n> Native sub-issue linking was refused (token missing `issues:write` scope on this repository).'
-  elif (( LINKED == TOTAL )); then
-    LINK_SUMMARY=$'\n> All tasks linked as native sub-issues — the parent issue now shows a progress bar in the GitHub UI.'
-  else
-    LINK_SUMMARY=$"\n> Sub-issue linking: $LINKED/$TOTAL tasks linked ($ERR errors, $FORBID forbidden, $UNAVAIL unavailable). Retry with \`/agents devise\` to reconcile."
+    if (( UNAVAIL == TOTAL )); then
+      LINK_SUMMARY=$'\n> Native sub-issue linking is not available for this repository — the `## Progress` checklist above is the primary progress view.'
+    elif (( FORBID == TOTAL )); then
+      LINK_SUMMARY=$'\n> Native sub-issue linking was refused (token missing `issues:write` scope on this repository).'
+    elif (( LINKED == TOTAL )); then
+      LINK_SUMMARY=$'\n> All tasks linked as native sub-issues — the parent issue now shows a progress bar in the GitHub UI.'
+    else
+      LINK_SUMMARY=$"\n> Sub-issue linking: $LINKED/$TOTAL tasks linked ($ERR errors, $FORBID forbidden, $UNAVAIL unavailable). Retry with \`/agents devise\` to reconcile."
+    fi
   fi
-fi
 
-# Notify
-its::comment_issue "$ISSUE_NUM" "✅ **Tactical plan complete.**
+  # Notify
+  its::comment_issue "$ISSUE_NUM" "✅ **Tactical plan complete.**
 
 Tasks created: $TASK_NUMBERS. The plan, wave order, and \`## Progress\`
 checklist now live in the tactical zone of the issue body.
@@ -136,3 +172,4 @@ ${LINK_SUMMARY}
 dispatch these tasks in dependency order.
 
 _Ran with \`${MODEL:-unknown}\` at reasoning \`${REASONING:-unknown}\`._"
+fi
