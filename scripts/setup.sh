@@ -72,6 +72,7 @@ echo ""
 # --- Check 2: Labels ---
 echo "[2/6] Required labels"
 LABELS=("Feature|6F42C1|Orchestration feature issue"
+        "Task|1D76DB|Autoducks task issue"
         "Ready|0E8A16|Plan complete, ready for execution"
         "Draft|CCCCCC|Draft issue, not yet designed"
         "smoke-test|FFA500|Smoke test marker"
