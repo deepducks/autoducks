@@ -57,7 +57,8 @@ if [[ "$IS_SINGLE" == "true" ]]; then
         -f "issue_number=$FEATURE" \
         -f "base_branch=$FEATURE_BRANCH" \
         ${WORKER_MODEL:+-f "model=$WORKER_MODEL"} \
-        ${WORKER_REASONING:+-f "reasoning=$WORKER_REASONING"}
+        ${WORKER_REASONING:+-f "reasoning=$WORKER_REASONING"} \
+        ${WORKER_MAX_TURNS:+-f "max_turns=$WORKER_MAX_TURNS"}
       its::comment_issue "$FEATURE" "**Single-task feature** — dispatched execution on the feature issue itself."
     fi
   else
@@ -259,7 +260,8 @@ else
       -f "issue_number=$t" \
       -f "base_branch=$FEATURE_BRANCH" \
       ${WORKER_MODEL:+-f "model=$WORKER_MODEL"} \
-      ${WORKER_REASONING:+-f "reasoning=$WORKER_REASONING"}
+      ${WORKER_REASONING:+-f "reasoning=$WORKER_REASONING"} \
+      ${WORKER_MAX_TURNS:+-f "max_turns=$WORKER_MAX_TURNS"}
 
     ASSIGNED+=("$t")
   done
