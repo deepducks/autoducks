@@ -13,11 +13,25 @@ jobs:
   close:
     if: >-
       github.event.issue.pull_request == null &&
+      github.event.comment.author_association != 'MANNEQUIN' &&
       startsWith(github.event.comment.body, '/agents close')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Authorize
+        id: authz
+        run: bash .autoducks/core/security/authorize.sh
+        env:
+          AUTODUCKS_AGENT: close
+          ACTOR: ${{ github.event.comment.user.login || github.event.sender.login }}
+          AUTHOR_ASSOC: ${{ github.event.comment.author_association || github.event.issue.author_association }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run close
+        if: steps.authz.outcome == 'success'
         run: bash .autoducks/agents/close/run.sh
         env:
           FEATURE_ISSUE: ${{ github.event.issue.number }}
