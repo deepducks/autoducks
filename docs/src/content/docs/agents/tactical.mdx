@@ -147,6 +147,35 @@ waves:
 
 Tasks in the same wave run in parallel. Each wave starts only after the previous wave is fully done (all task PRs merged).
 
+## Native sub-issue linking
+
+Every task issue is linked to its parent Feature via GitHub's native
+sub-issues relationship (visible as a "Sub-issues" panel and progress bar
+on the Feature, and a "Parent issue" link on each Task).
+
+The linkage is created by `its::link_sub_issue` inside the Tactical agent's
+reconcile step, immediately after each task issue is created (or, on
+revision, after each existing task is re-verified). The behavior is:
+
+| Repository state | Outcome | Reported in completion comment |
+|-------------------|---------|--------------------------------|
+| Sub-issues API available, token has `issues:write` | Every task linked | "All tasks linked as native sub-issues" |
+| Sub-issues API unavailable (feature disabled) | Nothing linked; markdown checklist is the source of truth | "Native sub-issue linking is not available for this repository" |
+| Token missing `issues:write` | Nothing linked | "Native sub-issue linking was refused" |
+| Partial failure (e.g. GitHub outage) | Whatever tasks were linked stay linked; the rest are retried on next `/agents devise` | Explicit count and per-category breakdown |
+
+The `## Progress` checklist inside the tactical zone remains the source of
+truth for wave parsing and the Wave Orchestrator. Native sub-issue linking
+is a visual layer, not a control-plane substitute — the same relationship
+autoducks currently maintains via label + parent-issue reference.
+
+<Aside>
+The Tactical agent probes the API once per run and caches the result. If
+you enable the sub-issues API mid-project (or your token gains
+`issues:write`), the first `/agents devise` after the change reconciles
+every task, including previously created ones that had no native link.
+</Aside>
+
 ## Required permissions
 
 ```yaml

@@ -79,7 +79,14 @@ The script checks and auto-creates what it can, and reports what requires manual
 
 6. **Issue types (Feature, Task)** — checks org-level issue types. Workflows run without them, but typed issue relationships won't appear in the issue tracker UI. Routing is driven by the `Feature` label (which the tactical and design agents apply automatically); the native type is a visual enhancement for org repos.
 
-7. **Runtime workflow sync** — verifies that `.github/workflows/autoducks-*.yml` match `.autoducks/runtimes/github-actions/`. Fails if out of sync.
+7. **Sub-issues API** — GitHub's native sub-issue relationship. Available
+   on every GitHub-hosted repository as of October 2024. The Tactical agent
+   uses this to link each task to its parent Feature so a progress bar and
+   "Parent issue" backlink render in the GitHub UI. Autoducks probes at
+   runtime and falls back to the markdown `## Progress` checklist if the
+   API is unavailable, so no manual setup is required.
+
+8. **Runtime workflow sync** — verifies that `.github/workflows/autoducks-*.yml` match `.autoducks/runtimes/github-actions/`. Fails if out of sync.
 
 </Steps>
 
