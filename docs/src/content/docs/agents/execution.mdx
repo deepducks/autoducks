@@ -37,7 +37,7 @@ The Execution agent reads a task spec and implements the code. It handles two sc
 <Tabs>
   <TabItem label="Scenario A — Orphan task">
 
-An orphan task has no parent feature issue. The PR targets `main` and requires human review.
+An orphan task has no parent feature issue. The PR targets `integration_branch` (which defaults to `base_branch`, e.g. `main`) and requires human review.
 
 <details>
 <summary>Pre-execution</summary>
@@ -63,7 +63,7 @@ The agent reads `/tmp/task-spec.md` and implements the task using `Write`, `Edit
 
 7. `assert_changes` validates the agent produced changes. On failure: notifies and exits with 😕 reaction.
 8. Commits and pushes changes.
-9. Creates a PR targeting `main` titled `Task #N: {title}` with body `fixes #N`.
+9. Creates a PR targeting `integration_branch` (defaults to `base_branch`) titled `Task #N: {title}` with body `fixes #N`.
 10. **No auto-merge** — PR requires human review.
 11. Removes `Work:progress` and adds `Work:done` to the task issue to record that execution work is complete.
 12. Reacts with 👍 and posts a comment confirming PR creation.

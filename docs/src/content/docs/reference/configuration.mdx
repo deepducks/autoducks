@@ -20,10 +20,15 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
     "model": "claude-sonnet-4-6",
     "reasoning": "high",
     "base_branch": "main",
+    "integration_branch": "main",
     "merge_method": "auto"
   }
 }
 ```
+
+<Aside type="note">
+`integration_branch` is optional — omit it unless you need the fork workflow described below.
+</Aside>
 
 ## `providers`
 
@@ -83,13 +88,31 @@ Reasoning effort level for LLM agents.
 
 ### `defaults.base_branch`
 
-The branch that feature branches and orphan task branches are created from, and the branch that the final feature PR targets.
+The **cut-point**: the branch that feature branches and orphan task branches are created from.
 
 **Default:** `main`
+
+When `defaults.integration_branch` is unset, `base_branch` also serves as the PR target — the branch that feature PRs and orphan task PRs are opened into. Once `integration_branch` is set, it takes over the PR-target role and `base_branch` remains only the cut-point.
 
 <Aside type="note">
 The `base_branch` default can be overridden at runtime via the `BASE_BRANCH` environment variable passed to workflow dispatch. The wave orchestrator always reads this from the feature branch name.
 </Aside>
+
+### `defaults.integration_branch`
+
+The **PR target**: the branch that feature PRs and orphan task PRs are opened into.
+
+**Default:** `base_branch` (unset by default — no separate integration branch)
+
+This exists to support a **fork workflow**, where `base_branch` is the upstream cut-point but PRs should land on a fork-local integration branch instead of going straight upstream. Setting `integration_branch` requires no migration: leave it unset and behavior is unchanged (PRs continue to target `base_branch`).
+
+The following invariant always holds:
+
+```
+merge-base(feature/<slug>, integration_branch) == base_branch
+```
+
+That is, no matter where a feature or task branch is cut from (`base_branch`), its PR always resolves cleanly against `integration_branch` because the two share a common ancestor at `base_branch`.
 
 ### `defaults.merge_method`
 
