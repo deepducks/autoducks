@@ -36,6 +36,17 @@ PR_TITLE="Task #$ISSUE_NUM: $ISSUE_TITLE"
 # Create PR
 PR_NUM=$(git::create_pr "$TASK_BRANCH" "$BASE_BRANCH" "$PR_TITLE" "fixes #${ISSUE_NUM}")
 
+# Append implementation summary to PR body, if the agent produced one
+if [[ -f /tmp/work-summary.md && -s /tmp/work-summary.md ]]; then
+  SUMMARY=$(cat /tmp/work-summary.md)
+  PR_BODY="fixes #${ISSUE_NUM}
+
+## Implementation Summary
+
+$SUMMARY"
+  git::update_pr_body "$PR_NUM" "$PR_BODY"
+fi
+
 if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
   # Scenario B: task with feature parent — auto-merge with rebase retry
   MERGE_OK=false
