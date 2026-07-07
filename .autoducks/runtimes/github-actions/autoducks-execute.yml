@@ -28,6 +28,14 @@ permissions:
   actions: write
   id-token: write
 
+# Serialize duplicate dispatches of the SAME task. When two orchestrator runs
+# both dispatch task N before either execute creates a PR, the second run queues
+# behind the first; by the time it runs, the first's PR exists (open or merged),
+# so pre.sh's idempotency guard skips it instead of producing a duplicate branch.
+concurrency:
+  group: autoducks-execute-${{ github.event_name == 'workflow_dispatch' && inputs.issue_number || github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   execute:
     if: >-

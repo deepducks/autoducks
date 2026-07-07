@@ -17,15 +17,21 @@ if [[ "$BASE_BRANCH" =~ ^feature/([0-9]+) ]]; then
   FEATURE_NUM="${BASH_REMATCH[1]}"
 fi
 
-# Idempotency guard: bail if this task already has an open PR on the feature branch.
-# Closes the window between orchestrator dispatch and PR creation, where two
-# orchestrator runs may both pass prevent_duplicate_dispatch's open-PR check.
+# Idempotency guard: bail if this task already has a PR (open OR merged) on the
+# feature branch. Closes the window between orchestrator dispatch and PR creation
+# where two runs may both pass prevent_duplicate_dispatch's open-PR check. The
+# execute workflow's per-task `concurrency` group serializes duplicate dispatches,
+# so a duplicate runs only after the first has finished — by which point the
+# first's PR is already merged (and therefore no longer open); checking merged
+# PRs too catches that case.
 if [[ -n "$FEATURE_NUM" ]]; then
-  EXISTING_PR=$(git::list_open_prs "$BASE_BRANCH" \
+  EXISTING_PR=$(jq -s 'add' \
+      <(git::list_open_prs "$BASE_BRANCH") \
+      <(git::list_merged_prs "$BASE_BRANCH") \
     | jq -r --arg t "$ISSUE_NUM" \
         '[.[] | select(.body | test("(?i)(fixes|closes|resolves)\\s+#" + $t + "\\b"))] | .[0].number // empty')
   if [[ -n "$EXISTING_PR" ]]; then
-    echo "::notice::Task #$ISSUE_NUM already has open PR #$EXISTING_PR — skipping duplicate execution."
+    echo "::notice::Task #$ISSUE_NUM already has PR #$EXISTING_PR (open or merged) — skipping duplicate execution."
     react_to_comment "${COMMENT_ID:-}" "+1" 2>/dev/null || true
     if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
       echo "duplicate_skip=true" >> "$GITHUB_OUTPUT"
