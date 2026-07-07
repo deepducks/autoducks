@@ -47,6 +47,7 @@ An orphan task has no parent feature issue. The PR targets `main` and requires h
 3. Generates a slug from the issue number and title.
 4. Creates a task branch from `main`: `feature/0-issue-{issue_num}-{timestamp}`.
 5. Writes the issue spec (title + body) to `/tmp/task-spec.md`.
+6. Adds `Work:progress` to the task issue to signal that execution is underway.
 
 </details>
 
@@ -64,7 +65,8 @@ The agent reads `/tmp/task-spec.md` and implements the task using `Write`, `Edit
 8. Commits and pushes changes.
 9. Creates a PR targeting `main` titled `Task #N: {title}` with body `fixes #N`.
 10. **No auto-merge** — PR requires human review.
-11. Reacts with 👍 and posts a comment confirming PR creation.
+11. Removes `Work:progress` and adds `Work:done` to the task issue to record that execution work is complete.
+12. Reacts with 👍 and posts a comment confirming PR creation.
 
 </details>
 
@@ -81,6 +83,7 @@ A feature task has a `BASE_BRANCH` pointing to a `feature/*` branch. The PR auto
 3. Waits for the feature branch to be visible (handles replication lag after branch creation).
 4. Generates a slug and creates a task branch from the feature branch: `feature/{feature_num}-issue-{issue_num}-{timestamp}`.
 5. Writes the issue spec to `/tmp/task-spec.md`.
+6. Adds `Work:progress` to the task issue to signal that execution is underway.
 
 </details>
 
@@ -98,8 +101,9 @@ Same as Scenario A — reads the spec and implements the code.
 8. Commits and pushes changes.
 9. Creates a PR targeting the **feature branch** titled `Task #N: {title}` with body `fixes #N`.
 10. **Auto-merges with rebase retry** (up to 3 attempts). On merge conflict: rebases onto the feature branch and force-pushes with lease. On persistent failure: notifies and exits.
-11. Triggers the wave orchestrator to continue (non-fatal — the PR merge event is the primary trigger).
-12. Reacts with 👍 and posts a comment confirming PR creation.
+11. Removes `Work:progress` and adds `Work:done` to the task issue to record successful execution.
+12. Triggers the wave orchestrator to continue (non-fatal — the PR merge event is the primary trigger).
+13. Reacts with 👍 and posts a comment confirming PR creation.
 
 </details>
 
