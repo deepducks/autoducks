@@ -124,7 +124,62 @@ if [[ $NEXT_WAVE -eq -1 ]]; then
         ALL_TASK_NUMS+=("$t")
       done
     done
-    create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "$ISSUE_TITLE" "${ALL_TASK_NUMS[@]}"
+    FINAL_PR_NUM=$(create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "$ISSUE_TITLE" "${ALL_TASK_NUMS[@]}")
+
+    # Collect implementation summaries from merged task PRs
+    WORKLOG=""
+
+    for t in "${ALL_TASK_NUMS[@]}"; do
+      [[ -z "$t" ]] && continue
+      TASK_PR_DATA=$(echo "$MERGED_PRS" | jq -r \
+        --arg t "$t" \
+        '[.[] | select(.body | test("(?i)(fixes|closes|resolves)\\s+#" + $t + "\\b"))] | .[0] // empty')
+      [[ -z "$TASK_PR_DATA" || "$TASK_PR_DATA" == "null" ]] && continue
+
+      TASK_TITLE=$(echo "$TASK_PR_DATA" | jq -r '.title')
+      TASK_BODY=$(echo "$TASK_PR_DATA" | jq -r '.body // ""')
+
+      # Extract the Implementation Summary section (from the subtask PR body)
+      IMPL_SUMMARY=$(echo "$TASK_BODY" | awk '
+        /^## Implementation Summary/ { found=1; next }
+        found && /^## /              { found=0 }
+        found                        { print }
+      ' | sed '/^[[:space:]]*$/d')
+
+      if [[ -n "$IMPL_SUMMARY" ]]; then
+        WORKLOG+="### $TASK_TITLE\n\n$IMPL_SUMMARY\n\n"
+      fi
+    done
+
+    # Rebuild feature PR body: closes references + worklog
+    CLOSES_BODY=""
+    for t in "${ALL_TASK_NUMS[@]}"; do
+      [[ -z "$t" ]] && continue
+      CLOSES_BODY+="Closes #$t\n"
+    done
+    CLOSES_BODY+="Closes #$FEATURE"
+
+    FULL_PR_BODY="$(echo -e "$CLOSES_BODY")"
+    if [[ -n "$WORKLOG" ]]; then
+      FULL_PR_BODY+="
+
+## Work Log
+
+$(echo -e "$WORKLOG")"
+    fi
+
+    git::update_pr_body "$FINAL_PR_NUM" "$FULL_PR_BODY"
+
+    git::mark_pr_ready "$FINAL_PR_NUM" 2>/dev/null || true
+
+    # Request review from feature issue assignees
+    ASSIGNEES=$(gh issue view "$FEATURE" --repo "$REPO" \
+      --json assignees --jq '[.assignees[].login] | join(",")' 2>/dev/null || true)
+    if [[ -n "$ASSIGNEES" ]]; then
+      gh pr edit "$FINAL_PR_NUM" --repo "$REPO" \
+        --add-reviewer "$ASSIGNEES" 2>/dev/null || true
+    fi
+
     progress_labels::finish "$FEATURE" "Work:progress" "Work:done"
     its::comment_issue "$FEATURE" "🎉 **All waves complete!**
 
