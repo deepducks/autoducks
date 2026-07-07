@@ -61,7 +61,7 @@ if [[ "$IS_SINGLE" == "true" ]]; then
       its::comment_issue "$FEATURE" "**Single-task feature** — dispatched execution on the feature issue itself."
     fi
   else
-    create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "$ISSUE_TITLE" "$FEATURE"
+    create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "$FEATURE"
     progress_labels::finish "$FEATURE" "Work:progress" "Work:done"
     its::comment_issue "$FEATURE" "**Single-task feature complete!** The feature PR is ready for review."
   fi
@@ -168,7 +168,7 @@ if [[ $NEXT_WAVE -eq -1 ]]; then
         ALL_TASK_NUMS+=("$t")
       done
     done
-    FINAL_PR_NUM=$(create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "$ISSUE_TITLE" "${ALL_TASK_NUMS[@]}")
+    FINAL_PR_NUM=$(create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "${ALL_TASK_NUMS[@]}")
 
     # Collect implementation summaries from merged task PRs
     WORKLOG=""
