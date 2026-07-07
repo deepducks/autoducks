@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Load agent defaults
         id: agent
         run: AUTODUCKS_AGENT=fix bash .autoducks/core/config/load-agent-defaults.sh >> "$GITHUB_OUTPUT"
@@ -32,7 +34,7 @@ jobs:
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id }}
           RUN_ID: ${{ github.run_id }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
         uses: ./.autoducks/providers/llm/claude
         with:
@@ -49,4 +51,4 @@ jobs:
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id }}
           RUN_ID: ${{ github.run_id }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
