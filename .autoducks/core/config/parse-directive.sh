@@ -7,7 +7,7 @@ set -euo pipefail
 # Input:  COMMENT_BODY env var (or stdin)
 # Output: key=value lines to stdout
 #   command      — plan, start, work, execute, fix, revert, close, design, devise
-#   model        — claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5-20251001, or empty
+#   model        — claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5, or empty
 #   reasoning    — off, low, medium, high, max, or empty
 #   think_phrase — mapped from reasoning level (empty when reasoning is empty)
 #
@@ -33,9 +33,9 @@ if [[ -n "$DIRECTIVE" ]]; then
     t=$(echo "$tok" | tr '[:upper:]' '[:lower:]' | tr -d ',.!?:;')
     case "$t" in
       # Model aliases
-      opus)                    MODEL="claude-opus-4-7" ;;
-      sonnet)                  MODEL="claude-sonnet-4-6" ;;
-      haiku)                   MODEL="claude-haiku-4-5-20251001" ;;
+      opus)                    MODEL="claude-opus-4-8" ;;
+      sonnet)                  MODEL="claude-sonnet-5" ;;
+      haiku)                   MODEL="claude-haiku-4-5" ;;
       # Reasoning aliases
       off|none|no-think)       REASONING="off" ;;
       low)                     REASONING="low" ;;

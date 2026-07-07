@@ -5,7 +5,7 @@
     "llm": "claude"
   },
   "defaults": {
-    "model": "claude-sonnet-4-6",
+    "model": "claude-sonnet-5",
     "reasoning": "high",
     "base_branch": "main",
     "merge_method": "auto"
