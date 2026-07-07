@@ -72,6 +72,7 @@ export default defineConfig({
             { label: 'Configuration', slug: 'reference/configuration' },
             { label: 'Runtimes', slug: 'reference/runtimes' },
             { label: 'Branch naming', slug: 'reference/branch-naming' },
+            { label: 'Security', slug: 'reference/security' },
           ],
         },
         {
