@@ -20,6 +20,13 @@ The instructions below cover the **GitHub Actions runtime**. If you are setting 
 - An Anthropic API key (from [console.anthropic.com](https://console.anthropic.com/))
 - The [Claude Code GitHub App](https://github.com/apps/claude) installed on your repo
 
+The pipeline runs fully on the default `repo` + `workflow` token permissions — no extra scopes required. A token with `read:org` scope, exposed to the workflow as `AUTODUCKS_ORG_TOKEN`, is **optional** and only needed for two `@org/team`-based features:
+
+- **CODEOWNERS authz** — expanding `@org/team` entries in `.github/CODEOWNERS` when `security.codeowners` is enabled. See [Team-expansion token limitation](/reference/security#team-expansion-token-limitation).
+- **Team-based reviewer routing** — auto-assigning reviewers to task/feature PRs from a GitHub team.
+
+Without `AUTODUCKS_ORG_TOKEN`, both of these degrade gracefully: team entries are skipped (or PRs are created without auto-assigned reviewers) and a warning is recorded — the pipeline itself does not fail.
+
 ## One-line install
 
 Run this from the root of your repository:
