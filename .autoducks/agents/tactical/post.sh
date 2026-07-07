@@ -57,6 +57,17 @@ TACTICAL_STRIPPED=$(echo "$TACTICAL_BODY" | awk '
 ')
 echo "$TACTICAL_STRIPPED" > /tmp/tactical-zone-new.md
 
+# Safety guard against silent design-zone loss: never overwrite the issue body
+# when the design zone came out empty while the source body was non-empty. That
+# can only happen if zone classification zeroed the design zone (the historical
+# Case C bug); abort loudly instead of wiping the human-authored spec.
+if [[ ! -s /tmp/design-zone.md && -s /tmp/issue-body-raw.md ]]; then
+  its::comment_issue "$ISSUE_NUM" "❌ Aborting \`/agents devise\`: the design zone resolved to empty while the issue body is non-empty. Publishing would wipe the human-authored design spec, so no changes were made. Check the \`<!-- autoducks:tactical:begin -->\` / \`<!-- autoducks:tactical:end -->\` markers and re-run."
+  react_to_comment "$COMMENT_ID" "confused"
+  progress_labels::abort "$ISSUE_NUM" "Tactics:crafting"
+  exit 1
+fi
+
 # Assemble design zone + new tactical zone → feature body
 assemble_body /tmp/design-zone.md /tmp/tactical-zone-new.md /tmp/feature-body.md
 
@@ -116,6 +127,12 @@ if [[ -s /tmp/link-outcomes.tsv ]]; then
 fi
 
 # Notify
-its::comment_issue "$ISSUE_NUM" "✅ Tactical plan complete. Tasks created: $TASK_NUMBERS
+its::comment_issue "$ISSUE_NUM" "✅ **Tactical plan complete.**
+
+Tasks created: $TASK_NUMBERS. The plan, wave order, and \`## Progress\`
+checklist now live in the tactical zone of the issue body.
 ${LINK_SUMMARY}
+**Next:** run \`/agents execute\` to start the wave orchestrator, which will
+dispatch these tasks in dependency order.
+
 _Ran with \`${MODEL:-unknown}\` at reasoning \`${REASONING:-unknown}\`._"

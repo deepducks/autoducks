@@ -42,7 +42,11 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request == null &&
-       startsWith(github.event.comment.body, '/agents execute') &&
+       github.event.comment.author_association != 'MANNEQUIN' &&
+       (startsWith(github.event.comment.body, '/agents execute') ||
+        startsWith(github.event.comment.body, '/agents work') ||
+        startsWith(github.event.comment.body, '/agents run') ||
+        startsWith(github.event.comment.body, '/agents start')) &&
        !(github.event.issue.type.name == 'Feature' ||
          contains(github.event.issue.labels.*.name, 'Feature')))
     runs-on: ubuntu-latest
@@ -52,11 +56,25 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.base_branch || 'main' }}
           fetch-depth: 0
           token: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: Authorize
+        id: authz
+        run: bash .autoducks/core/security/authorize.sh
+        env:
+          AUTODUCKS_AGENT: execution
+          ACTOR: ${{ github.event.comment.user.login || github.event.sender.login }}
+          AUTHOR_ASSOC: ${{ github.event.comment.author_association || github.event.issue.author_association }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Load agent defaults
         id: agent
+        if: steps.authz.outcome == 'success'
         run: AUTODUCKS_AGENT=execution bash .autoducks/core/config/load-agent-defaults.sh >> "$GITHUB_OUTPUT"
       - name: Set context
         id: ctx
+        if: steps.authz.outcome == 'success'
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "issue_num=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
@@ -72,6 +90,7 @@ jobs:
           COMMENT_BODY: ${{ github.event.comment.body || '' }}
       - name: Pre-execution
         id: pre
+        if: steps.authz.outcome == 'success'
         run: bash .autoducks/agents/execution/pre.sh
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
@@ -81,7 +100,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
-        if: steps.pre.outputs.duplicate_skip != 'true'
+        if: steps.authz.outcome == 'success' && steps.pre.outputs.duplicate_skip != 'true'
         uses: ./.autoducks/providers/llm/claude
         with:
           prompt_file: .autoducks/agents/execution/prompt.md
@@ -91,7 +110,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       - name: Post-execution
-        if: always() && steps.pre.outputs.duplicate_skip != 'true'
+        if: always() && steps.authz.outcome == 'success' && steps.pre.outputs.duplicate_skip != 'true'
         run: bash .autoducks/agents/execution/post.sh
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}

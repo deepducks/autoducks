@@ -4,6 +4,20 @@ This document is the canonical reference for the autoducks agent architecture: l
 
 ---
 
+## Authorization Gate (mandatory precondition)
+
+**Every trigger-based workflow — every agent listed below, and every future agent added to the pipeline — MUST call the Authorization Gate as its first step, before any LLM invocation, comment, reaction, branch, or PR.**
+
+The gate is the single choke point between an untrusted GitHub event (a `/agents …` comment on a public repo, an `@`-assignment, a workflow dispatch) and a trusted action that spends the maintainer's LLM budget and mutates the repository.
+
+- **Interface:** [`.autoducks/core/security/authorize.sh`](../core/security/authorize.sh) — sourced or exec'd at the top of every agent's `pre.sh` / `run.sh`. Non-zero exit stops the workflow immediately.
+- **Inputs:** the actor's login and `authorAssociation`, the agent verb (`design`, `devise`, `execute`, `fix`, `revert`, `close`, …), and the `security` block from `.autoducks/autoducks.json`.
+- **Policy:** trusted `authorAssociation` allowlist (default `OWNER`, `MEMBER`, `COLLABORATOR` — `CONTRIBUTOR` is deliberately excluded), with per-agent overrides and optional CODEOWNERS extension. Full schema is documented in the [Security reference](../../docs/src/content/docs/reference/security.mdx).
+
+**Rule for future agents:** any new agent added to this document — including but not limited to `/agents plan` and `/agents review` as sketched in [`CLI_DRAFT.md`](../../CLI_DRAFT.md) — MUST include the Authorization Gate call as step 0 of its behavior, prior to reacting with 👀 or any other observable side effect. New utility agents, new command verbs, and new trigger surfaces (labels, assignments, dispatch events) are not exempt: if it can be triggered by a GitHub event, it goes through the gate.
+
+---
+
 ## Agent Layers
 
 autoducks uses four agent layers, ordered from high-level planning to low-level execution. Each layer can trigger the next.
@@ -48,7 +62,7 @@ flowchart LR
 #### Triggers
 
 - **Issue assignment**: agent `@design` + label `Draft` on an issue
-- **Issue comment**: slash command `/agents design`
+- **Issue comment**: slash command `/agents design` (built-in alias: `/agents plan`)
 
 #### Behavior
 
@@ -106,8 +120,8 @@ flowchart LR
 #### Triggers
 
 - **Issue assignment**: agent `@tactical` + issue type `Feature` **or** issue label `Feature` + issue labels don't include `Draft` or `Ready`
-- **Issue comment**: slash command `/agents devise`
-- **Issue comment**: slash command `/agents execute` + issue type `Feature` **or** issue label `Feature` + issue labels don't include `Draft` or `Ready` (opt-out available via config file)
+- **Issue comment**: slash command `/agents devise` (built-in aliases: `/agents drilldown`, `/agents specify`)
+- **Issue comment**: slash command `/agents execute` (built-in aliases: `/agents work`, `/agents run`, `/agents start`) + issue type `Feature` **or** issue label `Feature` + issue labels don't include `Draft` or `Ready` (opt-out available via config file)
 
 > Routing is label-first: the `Feature` label is the primary routing signal and works on all repositories. The native issue type is an optional UI layer available only on organization-owned repositories.
 
@@ -180,7 +194,7 @@ flowchart LR
 
 #### Triggers
 
-- **Issue comment**: slash command `/agents execute` + issue type `Feature` **or** issue label `Feature` + label `Ready`
+- **Issue comment**: slash command `/agents execute` (built-in aliases: `/agents work`, `/agents run`, `/agents start`) + issue type `Feature` **or** issue label `Feature` + label `Ready`
 - **PR assignment**: agent `@execution` + association to an issue of type `Feature` **or** label `Feature` + label `Ready`
 
 > Routing is label-first: the `Feature` label is the primary routing signal and works on all repositories. The native issue type is an optional UI layer available only on organization-owned repositories.
@@ -229,7 +243,7 @@ flowchart LR
 #### Triggers
 
 - **Issue assignment**: agent `@execution`
-- **Issue comment**: slash command `/agents execute` + issue is not a Feature (native type **or** label)
+- **Issue comment**: slash command `/agents execute` (built-in aliases: `/agents work`, `/agents run`, `/agents start`) + issue is not a Feature (native type **or** label)
 
 #### Behavior
 

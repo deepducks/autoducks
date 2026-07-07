@@ -20,7 +20,8 @@
 #   5. Claude Code GitHub App installation — reports if missing
 #   6. Sub-issues API availability — probes the sub_issues endpoint; reports if unavailable
 #   7. Issue types (Feature, Task) at the org level — reports if missing
-#   8. Runtime workflow sync — verifies .autoducks/runtimes match .github/workflows
+#   8. Public-repo security posture — advisory for public repos without a security block
+#   9. Runtime workflow sync — verifies .autoducks/runtimes match .github/workflows
 # =============================================================================
 
 set -euo pipefail
@@ -30,7 +31,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) REPO="$2"; shift 2 ;;
     -h|--help)
-      sed -n '2,25p' "$0"
+      sed -n '2,26p' "$0"
       exit 0
       ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -61,7 +62,7 @@ echo "=== Setup check for $REPO ==="
 echo ""
 
 # --- Check 1: gh CLI auth ---
-echo "[1/8] GitHub CLI authentication"
+echo "[1/9] GitHub CLI authentication"
 if gh auth status &>/dev/null; then
   pass "gh CLI is authenticated"
 else
@@ -71,7 +72,7 @@ fi
 echo ""
 
 # --- Check 2: Labels ---
-echo "[2/8] Required labels"
+echo "[2/9] Required labels"
 LABELS=("Feature|6F42C1|Orchestration feature issue"
         "Task|1D76DB|Autoducks task issue"
         "Ready|0E8A16|Plan complete, ready for execution"
@@ -97,7 +98,7 @@ done
 echo ""
 
 # --- Check 3: Secret ---
-echo "[3/8] Required secrets"
+echo "[3/9] Required secrets"
 if gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null | grep -qx "ANTHROPIC_API_KEY"; then
   pass "Secret ANTHROPIC_API_KEY is configured"
 else
@@ -109,7 +110,7 @@ fi
 echo ""
 
 # --- Check 4: Actions permissions ---
-echo "[4/8] Actions workflow permissions"
+echo "[4/9] Actions workflow permissions"
 PERMS=$(gh api "repos/$REPO/actions/permissions/workflow" --jq '.default_workflow_permissions + "|" + (.can_approve_pull_request_reviews | tostring)' 2>/dev/null || echo "")
 
 if [[ -z "$PERMS" ]]; then
@@ -125,7 +126,7 @@ fi
 echo ""
 
 # --- Check 5: Claude Code GitHub App ---
-echo "[5/8] Claude Code GitHub App"
+echo "[5/9] Claude Code GitHub App"
 # There is no public API to list installations on a repo without proper auth.
 # Best we can do is check if the workflows can authenticate — which only happens at runtime.
 manual "Verify the Claude Code GitHub App is installed on this repository
@@ -135,7 +136,7 @@ manual "Verify the Claude Code GitHub App is installed on this repository
 echo ""
 
 # --- Check 6: Sub-issues API availability ---
-echo "[6/8] Sub-issues API availability"
+echo "[6/9] Sub-issues API availability"
 # Probe against an arbitrary issue in the repo. If the repo has zero issues,
 # the check is inconclusive — report a soft manual item.
 FIRST_ISSUE=$(gh issue list $REPO_ARG --state all --limit 1 --json number \
@@ -165,7 +166,7 @@ echo ""
 # Issue types are an org-level feature. Workflows degrade gracefully if
 # types aren't configured — the type parameter is silently ignored by the
 # API. But without them, typed feature/task relationships don't render.
-echo "[7/8] Issue types (Feature, Task)"
+echo "[7/9] Issue types (Feature, Task)"
 ORG=$(echo "$REPO" | cut -d/ -f1)
 TYPES_JSON=$(gh api "orgs/$ORG/issue-types" 2>/dev/null || echo "")
 if [[ -z "$TYPES_JSON" ]]; then
@@ -191,8 +192,23 @@ else
 fi
 echo ""
 
-# --- Check 8: Runtime sync ---
-echo "[8/8] Runtime workflow sync"
+# --- Check 8: Public-repo security ---
+VISIBILITY=$(gh repo view "$REPO" --json visibility --jq '.visibility' 2>/dev/null || echo "")
+if [[ "$VISIBILITY" == "PUBLIC" ]]; then
+  echo "[8/9] Public-repo security posture"
+  HAS_SEC=$(jq -r '.security != null' .autoducks/autoducks.json 2>/dev/null || echo "false")
+  if [[ "$HAS_SEC" == "true" ]]; then
+    pass "security block present in .autoducks/autoducks.json"
+  else
+    manual "Repository is PUBLIC but .autoducks/autoducks.json has no 'security' block.
+         Defaults will allow only OWNER/MEMBER/COLLABORATOR to trigger agents.
+         Review docs at https://autoducks.openvibes.tech/reference/security/ to tighten or loosen."
+  fi
+  echo ""
+fi
+
+# --- Check 9: Runtime sync ---
+echo "[9/9] Runtime workflow sync"
 SYNC_OK=true
 for runtime in .autoducks/runtimes/github-actions/autoducks-*.yml; do
   bn=$(basename "$runtime")

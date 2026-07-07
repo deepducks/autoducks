@@ -9,5 +9,27 @@
     "reasoning": "high",
     "base_branch": "main",
     "merge_method": "auto"
+  },
+  "triggers": {
+    "design":   [],
+    "tactical": [],
+    "execute":  [],
+    "fix":      [],
+    "revert":   [],
+    "close":    []
+  },
+  "security": {
+    "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"],
+    "allow": ["bot-service-account", "@my-org/agents-users"],
+    "deny": [],
+    "codeowners": false,
+    "per_agent": {
+      "execute": { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
+      "design":  { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR"] },
+      "devise":  { },
+      "fix":     { },
+      "revert":  { "trusted_associations": ["OWNER", "MEMBER"] },
+      "close":   { "trusted_associations": ["OWNER", "MEMBER"] }
+    }
   }
 }
