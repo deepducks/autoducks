@@ -47,8 +47,10 @@ reconcile_tasks() {
         rm -f "$tmpfile"
       fi
       new_numbers+=("$ref")
+      local ref_db_id
+      ref_db_id=$(gh api "repos/$REPO/issues/$ref" --jq '.id')
       local link_result
-      link_result=$(its::link_sub_issue "$feature_issue_id" "$ref")
+      link_result=$(its::link_sub_issue "$feature_issue_id" "$ref_db_id")
       printf '%s\t%s\n' "$ref" "$link_result" >> /tmp/link-outcomes.tsv
     else
       # New task (Tn placeholder): create issue
@@ -66,14 +68,17 @@ reconcile_tasks() {
         --argjson labels "$(echo "$labels_with_task" | jq -R 'split(",")')" \
         '{title: $title, body: $body, labels: $labels}')
 
-      local task_id
-      task_id=$(gh api "repos/$REPO/issues" --method POST --input - <<< "$create_payload" | jq -r '.number')
+      local create_response
+      create_response=$(gh api "repos/$REPO/issues" --method POST --input - <<< "$create_payload")
+      local task_id task_db_id
+      task_id=$(echo "$create_response" | jq -r '.number')
+      task_db_id=$(echo "$create_response" | jq -r '.id')
 
       # Best-effort native issue type (silently no-ops when the org doesn't have a `Task` type)
       its::set_issue_type "$task_id" "Task" 2>/dev/null || true
 
       local link_result
-      link_result=$(its::link_sub_issue "$feature_issue_id" "$task_id")
+      link_result=$(its::link_sub_issue "$feature_issue_id" "$task_db_id")
       printf '%s\t%s\n' "$task_id" "$link_result" >> /tmp/link-outcomes.tsv
 
       placeholder_map["$ref"]="$task_id"
