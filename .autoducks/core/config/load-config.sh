@@ -90,6 +90,15 @@ AUTODUCKS_MERGE_METHOD="$(echo "$_merged" | jq -r '.merge_method // "auto"')"
 export AUTODUCKS_REVIEW_CHECK_NAME
 AUTODUCKS_REVIEW_CHECK_NAME="$(jq -r '.reviewer.check_name // "Autoducks: Reviewer"' "$_config")"
 
+# ── Coordination-marker paths ────────────────────────────────────────
+# Coordination markers live in the runner's private temp dir (never the agent's
+# /tmp working area) and are scoped per run, so agent Bash activity and the
+# repo's own unit tests cannot collide with the pre/post protocol.
+AUTODUCKS_MARKER_DIR="${RUNNER_TEMP:-/tmp}/autoducks-${GITHUB_RUN_ID:-local}"
+export AUTODUCKS_MARKER_DIR
+export AUTODUCKS_PRE_FAILED_MARKER="$AUTODUCKS_MARKER_DIR/pre-failed"
+export AUTODUCKS_DOR_DELEGATED_MARKER="$AUTODUCKS_MARKER_DIR/dor-delegated"
+
 # ── Source provider interfaces ──────────────────────────────────────
 source "$AUTODUCKS_ROOT/providers/its/interface.sh"
 source "$AUTODUCKS_ROOT/providers/git/interface.sh"

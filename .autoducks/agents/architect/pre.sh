@@ -8,13 +8,14 @@ source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 
-rm -f /tmp/autoducks-pre-failed
+rm -f "$AUTODUCKS_PRE_FAILED_MARKER"
+mkdir -p "$AUTODUCKS_MARKER_DIR"
 
 trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
       status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
       react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
       progress_labels::abort "$ISSUE_NUM" "Design:draft" 2>/dev/null || true; \
-      touch /tmp/autoducks-pre-failed; \
+      touch "$AUTODUCKS_PRE_FAILED_MARKER"; \
       exit $_rc' ERR
 
 source "$AUTODUCKS_ROOT/core/orchestration/delivery-phase.sh"
@@ -30,7 +31,7 @@ To change the design, first unwind the delivery with \`${AUTODUCKS_COMMAND} reve
 (undo the plan, keep the issue) or \`${AUTODUCKS_COMMAND} close\` (full teardown),
 then re-run \`${AUTODUCKS_COMMAND} architect\`."
   react_to_comment "${COMMENT_ID:-}" "confused"
-  touch /tmp/autoducks-pre-failed   # tells post.sh to no-op
+  touch "$AUTODUCKS_PRE_FAILED_MARKER"   # tells post.sh to no-op
   exit 0
 fi
 
@@ -66,7 +67,7 @@ if body_has_markers /tmp/issue-body-raw.md; then
     _AUTODUCKS_NOTIFIED=1
     status_comment::fail "$ISSUE_NUM" 2>/dev/null || true
     react_to_comment "$COMMENT_ID" "confused"
-    touch /tmp/autoducks-pre-failed
+    touch "$AUTODUCKS_PRE_FAILED_MARKER"
     exit 1
   fi
 

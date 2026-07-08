@@ -21,8 +21,8 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/nu
 # pre.sh has already posted its own comment (failure, or a benign "nothing
 # to rework" skip), reacted, and short-circuited via the shared marker —
 # skip all checks below so we don't double-notify.
-if [[ -f /tmp/autoducks-pre-failed ]]; then
-  rm -f /tmp/autoducks-pre-failed
+if [[ -f "$AUTODUCKS_PRE_FAILED_MARKER" ]]; then
+  rm -f "$AUTODUCKS_PRE_FAILED_MARKER"
   exit 0
 fi
 

@@ -55,6 +55,7 @@ jobs:
           COMMENTER: ${{ github.event.comment.user.login }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
+        id: llm
         if: steps.authz.outcome == 'success'
         uses: ./.autoducks/providers/llm/claude
         with:
@@ -78,3 +79,4 @@ jobs:
           EFFORT: ${{ steps.directive.outputs.effort || steps.agent.outputs.effort }}
           JOB_STATUS: ${{ job.status }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          LLM_ERROR_SUBTYPE: ${{ steps.llm.outputs.error_subtype }}

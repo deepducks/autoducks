@@ -2,15 +2,16 @@
 set -euo pipefail
 export AUTODUCKS_AGENT="developer"
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
+
 # pre.sh's ERR trap already notified on this run's failure, or the DoR guard
 # delegated to another agent — bail out quietly so post.sh doesn't post a
 # duplicate comment. (_AUTODUCKS_NOTIFIED doesn't carry across GHA steps, so
 # these file markers are required instead.)
-if [[ -f /tmp/autoducks-pre-failed || -f /tmp/autoducks-dor-delegated ]]; then
+if [[ -f "$AUTODUCKS_PRE_FAILED_MARKER" || -f "$AUTODUCKS_DOR_DELEGATED_MARKER" ]]; then
   exit 0
 fi
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"

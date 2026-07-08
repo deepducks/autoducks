@@ -7,12 +7,13 @@ source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/branch-prefix.sh"
 
-rm -f /tmp/autoducks-pre-failed
+rm -f "$AUTODUCKS_PRE_FAILED_MARKER"
+mkdir -p "$AUTODUCKS_MARKER_DIR"
 
 trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
       status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
       react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
-      touch /tmp/autoducks-pre-failed; \
+      touch "$AUTODUCKS_PRE_FAILED_MARKER"; \
       exit $_rc' ERR
 
 # skip_defer REASON — used by every non-fatal "nothing to defer" exit below.
@@ -22,7 +23,7 @@ skip_defer() {
   local reason="$1"
   status_comment::finish "$ISSUE_NUM" "**Nothing to defer.** $reason"
   react_to_comment "${COMMENT_ID:-}" "+1"
-  touch /tmp/autoducks-pre-failed
+  touch "$AUTODUCKS_PRE_FAILED_MARKER"
   [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "skip=true" >> "$GITHUB_OUTPUT"
   exit 0
 }

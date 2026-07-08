@@ -9,7 +9,8 @@ source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/branch-prefix.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/parse-waves.sh"
 
-rm -f /tmp/autoducks-pre-failed
+rm -f "$AUTODUCKS_PRE_FAILED_MARKER"
+mkdir -p "$AUTODUCKS_MARKER_DIR"
 
 trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
       status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
@@ -19,7 +20,7 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
         [[ -n "$_t" && "$_t" != "$ISSUE_NUM" ]] && progress_labels::abort "$_t" "Review:reviewing" 2>/dev/null || true; \
       done; \
       { [[ -n "${CHECK_RUN_ID:-}" ]] && git::conclude_check_run "$CHECK_RUN_ID" failure "Review failed" "The reviewer agent errored during preparation." 2>/dev/null; } || true; \
-      touch /tmp/autoducks-pre-failed; \
+      touch "$AUTODUCKS_PRE_FAILED_MARKER"; \
       exit $_rc' ERR
 
 react_to_comment "${COMMENT_ID:-}" "eyes"
@@ -37,7 +38,7 @@ skip_review() {
   react_to_comment "${COMMENT_ID:-}" "+1"
   progress_labels::abort "$ISSUE_NUM" "Review:reviewing"
   { [[ -n "${CHECK_RUN_ID:-}" ]] && git::conclude_check_run "$CHECK_RUN_ID" success "Nothing to review" "$reason" 2>/dev/null; } || true
-  touch /tmp/autoducks-pre-failed
+  touch "$AUTODUCKS_PRE_FAILED_MARKER"
   [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "skip=true" >> "$GITHUB_OUTPUT"
   exit 0
 }

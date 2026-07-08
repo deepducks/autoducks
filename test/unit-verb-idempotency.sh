@@ -33,6 +33,13 @@ source "$REPO_ROOT/.autoducks/core/orchestration/parse-waves.sh"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
+# Coordination markers live under an isolated, per-run directory (see
+# .autoducks/core/config/load-config.sh) so this test's marker files never
+# collide with another test file's run — RUNNER_TEMP/GITHUB_RUN_ID below pin
+# every agent invocation in this file to the same scratch marker dir.
+MARKER_RUN_ID="verb-idempotency"
+MARKER_DIR="$SCRATCH/autoducks-$MARKER_RUN_ID"
+
 REPO_NAME="acme/widgets"
 GH_LOG="$SCRATCH/gh.log"
 : > "$GH_LOG"
@@ -175,6 +182,8 @@ run_step() {
   local rc=0
   env "$@" \
     PATH="$SCRATCH/bin:$PATH" \
+    RUNNER_TEMP="$SCRATCH" \
+    GITHUB_RUN_ID="$MARKER_RUN_ID" \
     SCRATCH="$SCRATCH" \
     GH_LOG="$GH_LOG" \
     MOCK_ISSUE_DIR="$MOCK_ISSUE_DIR" \
@@ -190,7 +199,8 @@ run_step() {
 }
 
 reset_tmp() {
-  rm -f /tmp/autoducks-pre-failed /tmp/autoducks-status-comment-id /tmp/design-plan.md \
+  rm -f "$MARKER_DIR/pre-failed" "$MARKER_DIR/dor-delegated"
+  rm -f /tmp/autoducks-status-comment-id /tmp/design-plan.md \
     /tmp/rework-context.md /tmp/steering-prompt.md /tmp/rework-none.md /tmp/rework-task.md \
     /tmp/rework-task.jsonl /tmp/parse-error.md /tmp/rework-task-final.jsonl /tmp/link-outcomes.tsv \
     /tmp/rework-feature-body-raw.md /tmp/rework-design-zone.md /tmp/rework-tactical-current.md \
