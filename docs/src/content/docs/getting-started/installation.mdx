@@ -73,7 +73,7 @@ The script checks and auto-creates what it can, and reports what requires manual
 
 1. **ITS authentication** — verifies `gh auth status` (GitHub CLI). Fatal if missing.
 
-2. **Required labels** — creates `Feature`, `Ready`, `Draft`, `smoke-test`, and priority labels if they don't exist.
+2. **Required labels** — creates `Feature`, `Bug`, `Task`, `Draft`, `smoke-test`, and the stage labels if they don't exist.
 
 3. **LLM provider secret** — checks that `ANTHROPIC_API_KEY` is set as a repository secret. If missing, prints the command to add it:
    ```bash
@@ -84,10 +84,10 @@ The script checks and auto-creates what it can, and reports what requires manual
 
 5. **Claude Code GitHub App** — reminds you to install the app at [github.com/apps/claude](https://github.com/apps/claude). Cannot be verified programmatically.
 
-6. **Issue types (Feature, Task)** — checks org-level issue types. Workflows run without them, but typed issue relationships won't appear in the issue tracker UI. Routing is driven by the `Feature` label (which the tactical and design agents apply automatically); the native type is a visual enhancement for org repos.
+6. **Issue types (Feature, Task)** — checks org-level issue types. Workflows run without them, but typed issue relationships won't appear in the issue tracker UI. Routing is driven by labels (which the Architect and Engineer apply automatically); the native type is a visual enhancement for org repos.
 
 7. **Sub-issues API** — GitHub's native sub-issue relationship. Available
-   on every GitHub-hosted repository as of October 2024. The Tactical agent
+   on every GitHub-hosted repository as of October 2024. The Engineer
    uses this to link each task to its parent Feature so a progress bar and
    "Parent issue" backlink render in the GitHub UI. Autoducks probes at
    runtime and falls back to the markdown `## Progress` checklist if the
@@ -104,7 +104,7 @@ After a successful setup, validate the full pipeline with the smoke test:
 ./scripts/smoke-test.sh --cleanup
 ```
 
-This creates a test feature issue, runs it through the full design → tactical → execution loop, and cleans up afterward.
+This creates a test feature issue, runs it through the full design → plan → execution loop, and cleans up afterward.
 </Aside>
 
 ## Updating
@@ -123,14 +123,15 @@ After installing, you can customize defaults in `.autoducks/autoducks.json`:
 
 ```json
 {
+  "command": "/quack",
   "providers": {
     "its": "github",
     "git": "github",
     "llm": "claude"
   },
   "defaults": {
-    "model": "claude-sonnet-4-6",
-    "reasoning": "high",
+    "model": "claude-sonnet-5",
+    "effort": "high",
     "base_branch": "main"
   }
 }

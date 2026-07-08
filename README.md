@@ -55,13 +55,18 @@ The pipeline designs, plans, and implements it — opening a PR per task and a f
 |-------|------|
 | What autoducks is and how it works | <https://autoducks.openvibes.tech/getting-started/introduction/> |
 | Installation and setup | <https://autoducks.openvibes.tech/getting-started/installation/> |
-| Your first feature | <https://autoducks.openvibes.tech/getting-started/first-feature/> |
+| Your first run | <https://autoducks.openvibes.tech/getting-started/first-run/> |
 | Agents overview | <https://autoducks.openvibes.tech/agents/> |
+| Lifecycle of an issue | <https://autoducks.openvibes.tech/guides/pipeline-lifecycle/> |
+| Chaining & overrides | <https://autoducks.openvibes.tech/guides/chaining-and-overrides/> |
+| When things fail | <https://autoducks.openvibes.tech/guides/when-things-fail/> |
+| Migrating from `/agents` | <https://autoducks.openvibes.tech/guides/migrating-from-agents/> |
 | Slash command reference | <https://autoducks.openvibes.tech/reference/slash-commands/> |
 | Configuration | <https://autoducks.openvibes.tech/reference/configuration/> |
+| Labels | <https://autoducks.openvibes.tech/reference/labels/> |
+| Branch naming | <https://autoducks.openvibes.tech/reference/branch-naming/> |
+| Security | <https://autoducks.openvibes.tech/reference/security/> |
 | Design philosophy | <https://autoducks.openvibes.tech/about/> |
-
-> The documentation site still describes the previous topology (design/tactical/wave/execution, `/agents` commands) — it is being updated to this taxonomy. This README and `.autoducks/design/AGENTS.md` are current.
 
 ## Contributing
 

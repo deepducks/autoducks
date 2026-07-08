@@ -3,52 +3,51 @@ title: Branch naming
 description: Conventions for all branches created by autoducks.
 ---
 
-autoducks uses a predictable, issue-number-rooted branch naming convention. Every branch can be traced back to its source issue(s).
+autoducks uses a predictable, issue-number-rooted branch naming convention. Every branch traces back to its source issue, and the **prefix encodes the issue kind**: Features get `feature/…`, Bugs get `fix/…`.
 
 ## Patterns
 
 | Context | Pattern | Example |
 |---------|---------|---------|
-| Feature branch | `feature/{feature_id}-{slug}` | `feature/42-user-auth` |
-| Task under feature | `feature/{feature_id}-issue-{task_id}-{timestamp}` | `feature/42-issue-43-1735000000` |
-| Orphan task | `feature/0-issue-{task_id}-{timestamp}` | `feature/0-issue-99-1735000000` |
-| Fix branch (new) | `feature/{feature_id}-issue-{task_id}-fix-{timestamp}` | `feature/42-issue-43-fix-1735000000` |
+| Feature pipeline branch | `feature/{id}-{slug}` | `feature/42-user-auth` |
+| Bug pipeline branch | `fix/{id}-{slug}` | `fix/57-login-crash` |
+| Task under a pipeline branch | `{feature\|fix}/{parent_id}-issue-{task_id}-{timestamp}` | `feature/42-issue-43-1751941200` |
+| Fix-agent retry branch | `{feature\|fix}/{parent_id}-issue-{task_id}-fix-{timestamp}` | `feature/42-issue-43-fix-1751943000` |
+
+Task branches **inherit the prefix** of the pipeline branch they're cut from. The fix-agent `-fix-{timestamp}` *suffix* is unrelated to the `fix/` *prefix* — the former marks a retry attempt, the latter marks a Bug pipeline.
+
+The Maestro's PR-merged advancement trigger listens on both `feature/*` and `fix/*`.
 
 ## Slug generation
 
-Slugs are generated from the issue title:
-1. Lowercase the title
-2. Replace non-alphanumeric characters with hyphens
-3. Collapse consecutive hyphens
-4. Truncate to a reasonable length
+Slugs are generated from the issue title: lowercase, non-alphanumerics to hyphens, collapsed, truncated to 50 characters.
 
-Example: `"Add dark mode toggle to settings"` → `add-dark-mode-toggle-to-settings`
-
-Feature branch example: `feature/42-add-dark-mode-toggle-to-settings`
+`"Add dark mode toggle to settings"` → `feature/42-add-dark-mode-toggle-to-settings`
 
 ## Why timestamps in task branches?
 
-Task branches include a Unix timestamp in the name. This allows:
-- Multiple execution attempts without branch collision
-- The Fix agent to locate partial work from prior attempts via prefix matching
-- Clean identification of which attempt a branch belongs to
+- Multiple execution attempts never collide.
+- The Fix agent locates partial work from prior attempts via prefix matching (newest wins).
+- Each branch identifies which attempt it belongs to.
 
 ## Branch relationships
 
 ```
-main
-└── feature/42-my-feature            ← feature branch (PR → main, human review)
-    ├── feature/42-issue-43-...      ← task 1 branch (PR → feature, auto-merge)
-    ├── feature/42-issue-44-...      ← task 2 branch (PR → feature, auto-merge)
-    └── feature/42-issue-45-...      ← task 3 branch (PR → feature, auto-merge)
+main (base_branch)
+└── feature/42-my-feature            ← pipeline branch (draft PR → integration_branch, human review)
+    ├── feature/42-issue-43-...      ← task 1 branch (PR → pipeline branch, auto-merge)
+    ├── feature/42-issue-44-...      ← task 2 branch (PR → pipeline branch, auto-merge)
+    └── feature/42-issue-45-...      ← task 3 branch (PR → pipeline branch, auto-merge)
 ```
+
+For Bugs, replace `feature/42-…` with `fix/57-…` — the shape is identical.
 
 ## Lifecycle
 
 | Branch type | Created by | Deleted by |
 |-------------|-----------|------------|
-| Feature branch | Tactical agent | Close agent (on `/agents close`) |
-| Task branch | Execution agent | Merge policy (GitHub auto-deletes on PR merge) |
-| Fix branch | Fix agent | Merge policy |
+| Pipeline branch | Maestro | Close agent (`/quack close`) |
+| Task branch | Developer | Merge policy (GitHub auto-deletes on PR merge) |
+| Fix retry branch | Fix agent | Merge policy |
 
-Feature branches are **not** auto-deleted when the feature PR merges — GitHub's delete-on-merge policy handles task and fix branches.
+Pipeline branches are **not** auto-deleted when the final PR merges — GitHub's delete-on-merge policy handles task and fix branches.

@@ -1,5 +1,7 @@
 # Documentation Revision Plan — New Topology/Taxonomy
 
+> **Status: EXECUTED** (same PR). All phases below were implemented: terminology sweep, IA restructure with redirects, page rewrites, the four new guides, the labels reference, and build/link validation (27 pages, zero broken internal links). The dashboard needed no changes — its columns come from GitHub's issues/views API, not hardcoded labels. Kept for reference and as the spec the pages were written against.
+
 Full revision plan for the autoducks documentation site (`docs/`, Astro + Starlight) after the topology migration (PR #433: Architect / Engineer / Maestro / Developer, `/quack` command layer, decisions D1–D15). Written for autonomous execution by a coding agent, phase by phase, with explicit file lists, checklists, and exit criteria.
 
 **Sources of truth** (read before writing any page):

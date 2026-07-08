@@ -11,159 +11,158 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
 
 ```json
 {
+  "command": "/quack",
   "providers": {
     "its": "github",
     "git": "github",
     "llm": "claude"
   },
   "defaults": {
-    "model": "claude-sonnet-4-6",
-    "reasoning": "high",
+    "model": "claude-sonnet-5",
+    "effort": "high",
     "max_turns": 50,
     "base_branch": "main",
     "integration_branch": "main",
     "merge_method": "auto"
+  },
+  "triggers": {
+    "architect": [],
+    "engineer":  [],
+    "execute":   [],
+    "fix":       [],
+    "revert":    [],
+    "close":     []
+  },
+  "security": {
+    "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"],
+    "allow": [],
+    "deny": [],
+    "codeowners": false,
+    "per_agent": {
+      "revert": { "trusted_associations": ["OWNER", "MEMBER"] },
+      "close":  { "trusted_associations": ["OWNER", "MEMBER"] }
+    }
   }
 }
 ```
 
 <Aside type="note">
-`integration_branch` is optional — omit it unless you need the fork workflow described below.
+`integration_branch` and `max_turns` are optional — omit them unless you need the fork workflow or a turn cap at the global tier.
 </Aside>
+
+## `command`
+
+The slash-command prefix. Must match `^/[a-z0-9-]+$`; anything else falls back to the default.
+
+**Default:** `/quack`
+
+GitHub Actions evaluates workflow `if:` guards without reading repository files, so the prefix is **baked into the workflow YAML**. After changing it, regenerate and commit the guards:
+
+```bash
+bash scripts/update-triggers.sh
+```
 
 ## `providers`
 
-Selects the implementation for each of the three provider interfaces.
+Selects the implementation for each provider interface.
 
-### `providers.its`
-
-Issue Tracking System provider. Controls all issue tracker interactions: issue creation/update, labels, comments, PR management, reactions.
-
-| Value | Status | Description |
-|-------|--------|-------------|
-| `github` | ✅ Supported | GitHub Issues via the `gh` CLI |
-
-### `providers.git`
-
-Git operations provider. Controls: branch creation/deletion, commits, pushes, PR merge.
-
-| Value | Status | Description |
-|-------|--------|-------------|
-| `github` | ✅ Supported | Git CLI with GitHub repository operations |
-
-### `providers.llm`
-
-LLM provider. Controls: design spec generation, tactical planning, code execution, fix attempts.
-
-| Value | Status | Description |
-|-------|--------|-------------|
-| `claude` | ✅ Supported | Anthropic Claude via the Claude Code action |
+| Key | Value | Status | Description |
+|-----|-------|--------|-------------|
+| `its` | `github` | ✅ Supported | GitHub Issues via the `gh` CLI |
+| `git` | `github` | ✅ Supported | Git CLI with GitHub repository operations |
+| `llm` | `claude` | ✅ Supported | Anthropic Claude via the Claude Code action |
 
 ## `defaults`
 
-Default runtime parameters used by all agents unless overridden by a [directive argument](/reference/slash-commands#directive-arguments).
+Default runtime parameters for all agents, unless overridden by a [directive argument](/reference/slash-commands#overrides) or a per-agent `defaults.json`.
 
 ### `defaults.model`
 
-The Claude model ID to use for LLM agents.
-
-**Default:** `claude-sonnet-4-6`
-
-Recommended values:
+The Claude model ID for LLM agents. **Default:** `claude-sonnet-5`
 
 | Model | Use case |
 |-------|----------|
-| `claude-sonnet-4-6` | Default — good balance of speed and quality |
-| `claude-opus-4-7` | Best quality for complex design/tactical work |
-| `claude-haiku-4-5-20251001` | Fastest, lowest cost — good for simple execution tasks |
+| `claude-sonnet-5` | Default — good balance of speed and quality |
+| `claude-opus-4-8` | Best quality for design/planning work |
+| `claude-haiku-4-5` | Fastest, lowest cost — simple execution tasks |
 
-### `defaults.reasoning`
+### `defaults.effort`
 
-Reasoning effort level for LLM agents.
+LLM effort level: `off`, `low`, `medium`, `high`, `max`. **Default:** `high`
 
-| Value | Description |
-|-------|-------------|
-| `low` | Faster, less thorough |
-| `medium` | Balanced |
-| `high` | Slower, more thorough (default) |
+("effort" follows the cross-provider convention — OpenAI `reasoning_effort`, Anthropic `output_config.effort`.)
 
 ### `defaults.max_turns`
 
-Maximum number of agentic turns an LLM agent may take before its run is stopped.
-
-**Default:** `50`
-
-Unlike `model` and `reasoning`, this key has no baked-in value in `defaults` — it's optional at every config layer. If it's omitted from the global config, the per-agent `defaults.json`, *and* the inline directive, the Claude provider action itself falls back to `50`.
+Maximum agentic turns per run. Optional at every tier; when unset everywhere, the Claude provider action falls back to `50`.
 
 ### `defaults.base_branch`
 
-The **cut-point**: the branch that feature branches and orphan task branches are created from.
+The **cut-point**: the branch that pipeline branches are created from. **Default:** `main`
 
-**Default:** `main`
-
-When `defaults.integration_branch` is unset, `base_branch` also serves as the PR target — the branch that feature PRs and orphan task PRs are opened into. Once `integration_branch` is set, it takes over the PR-target role and `base_branch` remains only the cut-point.
-
-<Aside type="note">
-The `base_branch` default can be overridden at runtime via the `BASE_BRANCH` environment variable passed to workflow dispatch. The wave orchestrator always reads this from the feature branch name.
-</Aside>
+When `integration_branch` is unset, `base_branch` also serves as the PR target.
 
 ### `defaults.integration_branch`
 
-The **PR target**: the branch that feature PRs and orphan task PRs are opened into.
+The **PR target**: where the final pipeline PR is opened. **Default:** unset (falls back to `base_branch`).
 
-**Default:** `base_branch` (unset by default — no separate integration branch)
-
-This exists to support a **fork workflow**, where `base_branch` is the upstream cut-point but PRs should land on a fork-local integration branch instead of going straight upstream. Setting `integration_branch` requires no migration: leave it unset and behavior is unchanged (PRs continue to target `base_branch`).
-
-The following invariant always holds:
-
-```
-merge-base(feature/<slug>, integration_branch) == base_branch
-```
-
-That is, no matter where a feature or task branch is cut from (`base_branch`), its PR always resolves cleanly against `integration_branch` because the two share a common ancestor at `base_branch`.
+Exists for **fork workflows**: cut from the upstream `base_branch`, land PRs on a fork-local branch. The invariant `merge-base(pipeline-branch, integration_branch) == base_branch` always holds.
 
 ### `defaults.merge_method`
 
-The method used when agents auto-merge a task or fix PR into its feature branch.
-
-**Default:** `auto`
+Method for auto-merging task/fix PRs into the pipeline branch. **Default:** `auto`
 
 | Value | Description |
 |-------|-------------|
-| `auto` | Detect an allowed method from the repository settings, preferring `merge` → `squash` → `rebase` (default) |
-| `merge` | Always create a merge commit |
-| `squash` | Always squash-merge |
-| `rebase` | Always rebase-merge |
+| `auto` | Probe the repository's allowed methods, preferring `merge` → `squash` → `rebase` |
+| `merge` / `squash` / `rebase` | Force one method |
 
-<Aside type="note">
-GitHub rejects a merge whose method the repository disallows (`HTTP 405 — Merge commits are not allowed on this repository`). Leaving this at `auto` keeps autoducks working on any repo regardless of which merge methods are enabled — including squash-only or rebase-only repos — without forking configuration. Pin a specific value only when you want to force one method.
-</Aside>
+`auto` keeps autoducks working on squash-only or rebase-only repos without configuration.
 
-## Per-agent defaults
+## `triggers` — custom trigger aliases
 
-Each agent can also have its own `defaults.json` in `.autoducks/agents/{agent}/defaults.json`:
+Per-team alias verbs, keyed by agent (`architect`, `engineer`, `execute`, `fix`, `revert`, `close`):
 
 ```json
 {
-  "model": "claude-sonnet-4-6",
-  "reasoning": "high",
-  "max_turns": 50
+  "triggers": {
+    "engineer": ["blueprint"],
+    "execute":  ["ship"]
+  }
 }
 ```
 
-Agent-level defaults override the global defaults. Directive arguments in slash commands override agent-level defaults.
+Rules: lowercase `[a-z0-9-]+`, no collision with built-in verbs/aliases, unique across agents. Aliases resolve to the canonical verb everywhere — routing, `#auto:` chains, and cascade included.
+
+Like the prefix, aliases must be **baked into the workflow guards**:
+
+```bash
+bash scripts/update-triggers.sh
+```
+
+The script validates the whole block first (a bad alias is a hard error, never baked), regenerates each guard wholesale (idempotent — byte-identical when nothing changed), and mirrors `.github/workflows/` ↔ `.autoducks/runtimes/github-actions/`.
+
+## Per-agent defaults
+
+Each agent can have its own `.autoducks/agents/<agent>/defaults.json`:
+
+```json
+{
+  "model": "claude-opus-4-8",
+  "effort": "high"
+}
+```
+
+Agent directories: `architect`, `engineer`, `maestro`, `developer`, `fix`, `revert`, `close`.
 
 **Priority (highest to lowest):**
-1. Directive argument in comment (`--model`, `--reasoning`, `turns=<n>`)
+1. Directive argument in the comment (`model:`, `effort:`, `turns:`)
 2. Agent-level `defaults.json`
 3. Global `.autoducks/autoducks.json`
-4. Provider action default — applies only to `max_turns` (`50`), since `model` and `reasoning` always have a value by the time they reach step 3
+4. Provider action default — applies only to `max_turns` (`50`)
 
-Omitting `max_turns` from every layer above still yields a working run: it just resolves to the provider action's default of `50`.
+## `security`
 
-## Security
+Every trigger passes the [Authorization Gate](/reference/security) before any agent runs — before any reaction or status comment. The `security` block controls trusted author associations, allow/deny lists, per-agent overrides (keys: `architect`, `engineer`, `execute`, `fix`, `revert`, `close` — the Maestro and Developer share the `execute` policy), and optional CODEOWNERS integration.
 
-autoducks gates every trigger through the [Authorization Gate](/reference/security) before any agent runs. The `security` block in `.autoducks/autoducks.json` controls who is allowed to trigger which agents — trusted GitHub author associations, per-agent overrides, and optional CODEOWNERS integration.
-
-See the [Security reference](/reference/security) for the full threat model, config schema, and testing instructions.
+See the [Security reference](/reference/security) for the full threat model and schema.

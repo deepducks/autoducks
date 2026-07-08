@@ -1,0 +1,68 @@
+---
+title: When things fail
+description: Status states, failure categories, and how to resume a run.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+autoducks never fails as a silent red X in the Actions tab. Every run reports on the issue itself — this page is the map from "what you see" to "what to do".
+
+## Reading the status comment
+
+Each agent run posts **one bot-owned status comment** and edits it in place:
+
+| You see | It means | What to do |
+|---------|----------|------------|
+| <img src="https://raw.githubusercontent.com/deepducks/autoducks/main/.autoducks/assets/loading.gif" width="16" alt="spinner" /> **`Agent`**: running on *workflow #id* | In progress | Wait — the link opens the live run |
+| ✅ **`Agent`**: finished working | Success — details and the next step follow | Follow the **Next:** line |
+| 🔁 **`Agent`**: not ready — delegated | A Definition-of-Ready guard dispatched a prerequisite agent | Nothing — the pipeline resumes itself |
+| ⚠️ **`Agent`**: failed | The run failed | Read the failure report posted below it |
+
+Reactions on **your** comment mirror the outcome: 👀 started, 👍 success, 😕 failure.
+
+## The failure report
+
+On failure, a categorized report is posted with the diagnosis, a **View the run logs** link, and the exact retry command:
+
+| Category | What happened | Remedy |
+|----------|---------------|--------|
+| `merge-conflict` | The task PR couldn't merge into the pipeline branch (usually conflicts with work another wave task merged first) | Resolve the conflict on the PR, or `/quack fix` on the task — it rebases and retries |
+| `no-changes` | The agent finished but produced no code changes | Refine the task spec / acceptance criteria, then `/quack fix` |
+| `scope-missing` | The agent didn't produce its expected output (design or plan file) | Re-run `/quack architect` or `/quack engineer` |
+| `parse` | The plan couldn't be parsed into tasks (a template hint is posted) | Re-run `/quack engineer` |
+| `max_turns` | The agent hit its turn limit — **partial work preserved** (the report names the branch) | `/quack fix` resumes from the preserved branch; consider `turns:<n>` for more headroom |
+| `infra` | Unexpected error (API, git, runtime) before finishing | `/quack fix` to retry; check the run logs |
+
+Task failures under a feature also post a mirror report on the parent issue — the Maestro pauses that wave until the task is resolved.
+
+## Resuming with `/quack fix`
+
+```
+/quack fix
+```
+
+on the **task** issue. The Fix agent finds the newest existing task branch (including `WIP:` branches preserved on a `max_turns` cutoff), reads the failure context from the last 10 comments, and repairs on top of what's there — reusing the open PR if one exists.
+
+<Aside type="tip">
+Comment *what went wrong* before running `/quack fix` — the agent reads recent comments as context.
+</Aside>
+
+## Merge conflicts
+
+When auto-merge can't resolve a task PR, you get a 🔀 report naming the PR and branch. Resolve it like any conflict (rebase or merge the target into the task branch, push), then either merge the PR yourself or run `/quack fix` — the next merge into the pipeline branch re-triggers the Maestro automatically.
+
+## Questions Mode
+
+If the Engineer finds the design genuinely insufficient, it doesn't guess — it posts up to 5 blocking questions and stops (the chain stops too). Answer them as comments and re-run `/quack engineer`: the revision context carries your answers to the planner.
+
+## The pipeline seems stuck
+
+The Maestro advances on PR-merge events. If nothing is moving:
+
+1. Check the issue's last 🌊/⏳ comment — ⏳ means an earlier wave still has an open task.
+2. Check the open task issues for ⚠️ reports (a failed task pauses its wave).
+3. Re-issue `/quack execute` on the issue — the Maestro recomputes from visible state; duplicate-dispatch guards make this always safe.
+
+## Denied runs
+
+If nothing at all happened — no reaction, no status comment — the [security gate](/reference/security) denied the actor before any feedback. A denial message identifies the actor and command; the `security` block in `autoducks.json` controls who may trigger what.
