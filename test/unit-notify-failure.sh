@@ -11,6 +11,7 @@ pass() { echo "  ✅ $1"; PASS=$((PASS + 1)); }
 fail() { echo "  ❌ $1"; FAIL=$((FAIL + 1)); }
 
 export REPO="acme/widgets"
+export AUTODUCKS_COMMAND="${AUTODUCKS_COMMAND:-}"
 
 # Scratch directory cleaned up on exit. Also back up/restore /tmp/work-summary.md
 # since one test case writes to it (the real path notify_failure reads from).
@@ -47,6 +48,10 @@ its::comment_issue() {
 
 reset_log() { echo 0 > "$SCRATCH/counter"; rm -f "$SCRATCH"/comment_*; }
 comment_count() { cat "$SCRATCH/counter"; }
+
+# Source the command-string helper (normally sourced via load-config.sh) so
+# the retry hints exercise the real `/verb` vs `/<ns> verb` composition.
+source "$REPO_ROOT/.autoducks/core/config/command-string.sh"
 
 # Source the helper under test
 source "$REPO_ROOT/.autoducks/core/feedback/notify-failure.sh"
@@ -136,27 +141,27 @@ assert_category() {
 
 assert_category "merge-conflict" \
   "The task PR could not be merged into the feature branch" \
-  '`/quack fix` on this task'
+  '`/fix` on this task'
 
 assert_category "no-changes" \
   "The agent finished but produced no code changes." \
-  '`/quack fix` (or refine the issue spec and re-run)'
+  '`/fix` (or refine the issue spec and re-run)'
 
 assert_category "scope-missing" \
   "The agent did not produce the expected output file" \
-  're-run `/quack architect` or `/quack engineer`'
+  're-run `/architect` or `/engineer`'
 
 assert_category "parse" \
   "The tactical plan could not be parsed into tasks." \
-  're-run `/quack engineer`'
+  're-run `/engineer`'
 
 assert_category "max_turns" \
   "partial work has been preserved" \
-  '`/quack fix` to resume from the partial branch'
+  '`/fix` to resume from the partial branch'
 
 assert_category "infra" \
   "The run hit an unexpected error before it could finish" \
-  '`/quack fix` to retry'
+  '`/fix` to retry'
 
 # ---------------------------------------------------------------------------
 # Test 5: unknown/unset category defaults to infra
