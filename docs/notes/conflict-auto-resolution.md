@@ -1,5 +1,41 @@
 # Analysis: LLM-based automatic conflict resolution
 
+> **Status: implemented — supersedes the "defer" recommendation below.**
+> This shipped as a standalone `resolver` agent
+> (`.autoducks/agents/resolver/{defaults.json,pre.sh,prompt.md,post.sh}`),
+> not as a hook inside `execution/post.sh`'s rebase-retry loop (option 2,
+> below) or a same-attempt-3-only heuristic. The design that shipped:
+>
+> - **Standalone agent, not an inline retry-loop hook.** The resolver
+>   reproduces the conflict itself (`git fetch` + `git merge --no-commit
+>   --no-ff`) against the PR's current base/head rather than piggybacking on
+>   `execution/post.sh`'s rebase attempts. This sidesteps the "job can't
+>   block on another workflow run" tension in option 1 below without
+>   entangling the resolver with the unrelated rebase-retry mechanics in
+>   option 2 — it runs as its own `pre.sh`/`prompt.md`/`post.sh` triggered by
+>   `pull_request: synchronize` (auto) or `/resolve` (manual).
+> - **Never merges.** The resolver commits the resolution and does a plain
+>   `git push` (never `--force`) to the PR head branch, then stops. It never
+>   calls `git::merge_pr` and never dispatches a `#auto:` chain — a human (or
+>   the existing review/merge flow) always reviews the pushed merge commit
+>   before the PR lands. This directly addresses the "no PR-review gate
+>   before merge" failure mode the risk table below flagged as the
+>   deal-breaker for auto-merging a wrong resolution.
+> - **Config-gated, not frequency-gated.** Rather than waiting for usage
+>   data, it ships behind `resolver.auto` (default `true`) and a
+>   `resolver.opt_out_label` (default `Resolve:off`), both of which the
+>   automatic trigger honors and `/resolve` deliberately ignores. A
+>   defence-in-depth loop guard (skip when the PR head tip is already an
+>   autoducks resolution commit) bounds the "infinite retry" risk instead of
+>   the attempt-counter approach sketched below.
+> - **Auditable by construction.** Every resolution applies the
+>   `auto-resolved` PR label and posts `/tmp/resolution-summary.md` (a
+>   per-file account of how each conflict was reconciled) as a comment on the
+>   feature/bug issue — the audit trail the risk table called for.
+>
+> The rest of this document is kept as historical context for the mechanics
+> (hook points, inputs, provider surface) that informed the shipped design.
+
 ## The ask
 
 Today, when `execution/post.sh` retries a merge by rebasing onto the base
@@ -126,7 +162,7 @@ retry-in-place) and would need its own idempotency/dedup guard analogous to
 | **Scope creep on `fix/post.sh`**: adding rebase logic to a path that currently has none increases the surface area of a script that's meant to be a thin merge-then-notify step. | Extract the resolver into a shared helper (e.g. `core/robustness/resolve-conflicts.sh`) that both `execution/post.sh` and `fix/post.sh` call, rather than duplicating rebase/resolve logic in `fix/post.sh`. |
 | **Concurrency**: two agents (e.g. `execution` and a concurrent `fix`) resolving conflicts on branches that both target the same feature branch could race, each resolving against a base that the other is about to change. | No new mitigation needed beyond what exists: `autoducks-execute.yml`'s `concurrency: group: autoducks-execute-<issue>` already serializes dispatches per task, and `git push --force-with-lease` (already used at `execution/post.sh:73`) protects against clobbering a concurrent update to the same branch. |
 
-## Recommendation: **defer**
+## Original recommendation: ~~defer~~ (superseded — see the status note at top)
 
 The mechanics are straightforward — the hook point, inputs, and provider
 surface all already exist and compose cleanly (this is close to a "wire two
@@ -142,7 +178,16 @@ quo's "abort and ask a human" — argues for waiting until conflict-driven
 task failures are actually observed and counted, rather than building
 speculatively.
 
-If/when frequency data justifies it, a follow-up feature could decompose as:
+The concern that actually mattered — no PR-review gate before merge — was
+resolved not by waiting for frequency data, but by design: the shipped
+resolver never merges, so a wrong resolution is caught by the same
+human/review gate that would have caught a wrong hand-authored resolution.
+That removed the "worse than the status quo" objection without needing
+usage data first.
+
+The decomposition sketched below (for the deferred, rebase-loop-integrated
+design) was superseded by the standalone-agent shape described in the status
+note at the top of this document; it's kept for historical reference only.
 
 1. `core/robustness/resolve-conflicts.sh` — the shared helper: collect
    conflicted files + both sides' content, build a prompt, call
