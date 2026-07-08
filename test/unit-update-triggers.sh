@@ -47,6 +47,23 @@ else
   diff -r "$REPO_ROOT/.github/workflows" "$SCRATCH/.github/workflows" | head -10
 fi
 
+echo "── reviewer guard fires on both issue and PR comments ──"
+if grep -q "startsWith(github.event.comment.body, '/review')" "$SCRATCH/.github/workflows/autoducks-reviewer.yml"; then
+  pass "reviewer guard matches /review"
+else
+  fail "reviewer guard missing /review match"
+fi
+if grep -q "github.event.issue.pull_request == null" "$SCRATCH/.github/workflows/autoducks-reviewer.yml"; then
+  fail "reviewer guard incorrectly restricted to issues only (pull_request == null)"
+else
+  pass "reviewer guard omits pull_request == null (fires on issues and PRs)"
+fi
+if grep -q "github.event.issue.pull_request == null" "$SCRATCH/.github/workflows/autoducks-architect.yml"; then
+  pass "architect guard retains pull_request == null (issue-only contrast)"
+else
+  fail "architect guard unexpectedly missing pull_request == null"
+fi
+
 echo "── custom aliases are baked into guards ──"
 python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
 import json, sys
