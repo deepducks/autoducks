@@ -3,7 +3,12 @@ set -euo pipefail
 
 git::get_pr() {
   local pr_number="$1"
-  gh pr view "$pr_number" --repo "$REPO" --json number,title,body,state,isDraft,headRefName,baseRefName
+  gh pr view "$pr_number" --repo "$REPO" \
+    --json number,title,body,state,isDraft,headRefName,baseRefName,mergeable,mergeStateStatus
+}
+
+git::pr_mergeable() {
+  git::get_pr "$1" | jq -r '.mergeable'
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
