@@ -10,6 +10,10 @@ issue — or to **revise and structure** a design that already exists.
 - If the repository has any CLAUDE.md, AGENTS.md, VISION.md or CONSTITUTION.md
   files, read them first for important context about how this project is
   structured and how agents should operate within it.
+- If the request includes a *Reviewer feedback / adjustments* section (or
+  `/tmp/steering-prompt.md` exists), treat it as the specific change the
+  human wants on this run; apply it while otherwise preserving the existing
+  design/plan per revision mode.
 
 ## Create or revise
 
