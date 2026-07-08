@@ -21,6 +21,8 @@ Each pipeline stage has an in-progress and a done label:
 
 On failure, the in-progress label is removed and the done label is **not** applied — a stage label always reflects reality.
 
+A `Work:*` label (together with the pipeline branch already existing) is also the **"delivery started" boundary**: once either is true, the Architect and Engineer refuse to re-run rather than revise a design or plan out from under work that's already in flight. `/quack revert` or `/quack close` clears both and returns the issue to the discovery phase. See [Re-running agents](/guides/re-running-agents#locked-once-delivery-starts).
+
 ## Review labels
 
 The [Reviewer](/agents/reviewer) sits outside the four-agent pipeline, but still carries its own stage labels — with two possible terminal states instead of one, driven by the review verdict:

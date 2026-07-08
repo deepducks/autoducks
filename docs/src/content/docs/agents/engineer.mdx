@@ -54,11 +54,16 @@ The issue body is split by HTML-comment sentinels:
 ## Behavior
 
 1. Reacts 👀, posts the status comment, checks the Definition of Ready, applies `Tactics:crafting`.
-2. **[LLM]** Reads the design (and, on revisions, the current plan + task issues + recent comments) and writes the plan: a ```` ```yaml waves: ```` block, `## Tasks` blocks (Summary / Tasks / Acceptance Criteria / References), and a `## Progress` checklist.
-3. **Questions Mode** — if the design is genuinely insufficient, the Engineer posts up to 5 blocking questions and stops instead of guessing. Answer in comments and re-run.
-4. The plan is parsed **deterministically** (`parse-plan.py`, sub-second, no LLM); parse errors post a template hint, never fail silently.
-5. Task issues are created/updated, typed and labeled `Task`, and linked as **native sub-issues** — with graceful degradation (a summary reports linked/forbidden/unavailable counts; the `## Progress` checklist is always the fallback). `Tn` placeholders in the body are replaced with real issue numbers.
-6. `Tactics:crafting` → **`Tactics:done`** — one label serves as both the completion record and the Maestro's routing signal. The command author is assigned; the status comment flips to ✅ with the next step; the chain continues (to the Maestro, when execution was requested).
+2. **Delivery-phase lock**: if delivery has already started — a `Work:*` label is present, or the pipeline branch already exists — the run is refused with a comment pointing at `/quack revert` (or `/quack close`) as the way back to the discovery phase. Nothing else runs.
+3. **[LLM]** Reads the design (and, on revisions, the current plan + task issues + recent comments) and writes the plan: a ```` ```yaml waves: ```` block, `## Tasks` blocks (Summary / Tasks / Acceptance Criteria / References), and a `## Progress` checklist.
+4. **Questions Mode** — if the design is genuinely insufficient, the Engineer posts up to 5 blocking questions and stops instead of guessing. Answer in comments and re-run.
+5. The plan is parsed **deterministically** (`parse-plan.py`, sub-second, no LLM); parse errors post a template hint, never fail silently.
+6. Task issues are created/updated, typed and labeled `Task`, and linked as **native sub-issues** — with graceful degradation (a summary reports linked/forbidden/unavailable counts; the `## Progress` checklist is always the fallback). `Tn` placeholders in the body are replaced with real issue numbers.
+7. `Tactics:crafting` → **`Tactics:done`** — one label serves as both the completion record and the Maestro's routing signal. The command author is assigned; the status comment flips to ✅ with the next step; the chain continues (to the Maestro, when execution was requested).
+
+<Aside type="caution">
+The Engineer only re-runs while the issue is still in the discovery phase. Once the Maestro has started dispatching waves and delivery has started (`Work:*` label, or the pipeline branch exists), re-running the Engineer is refused — run `/quack revert` (keep the issue, undo the plan) or `/quack close` (full teardown) first, then re-run.
+</Aside>
 
 The Engineer is **pure ITS** — it never touches git. Branches and PRs belong to the [Maestro](/agents/maestro).
 
@@ -68,7 +73,7 @@ When the whole design fits one task, no child issue is created: the task body li
 
 ## Revision mode
 
-Re-running the Engineer on an issue that already has `Tactics:done` revises the plan rather than starting over — existing tasks are preserved by number, dropped tasks are closed as "superseded by revised plan", and new tasks get fresh `Tn` placeholders. The revision context given to the LLM includes the read-only design zone, the current plan, every existing task's body, and the last 20 comments — so feedback you leave as comments steers the revision.
+Re-running the Engineer on an issue that already has `Tactics:done` — but where delivery hasn't started yet — revises the plan rather than starting over — existing tasks are preserved by number, dropped tasks are closed as "superseded by revised plan", and new tasks get fresh `Tn` placeholders. The revision context given to the LLM includes the read-only design zone, the current plan, every existing task's body, and the last 20 comments — so feedback you leave as comments steers the revision.
 
 See [Re-running agents](/guides/re-running-agents) for the full preserve/rewrite contract across every stage, and how re-running compares to the other agents.
 
