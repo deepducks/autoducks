@@ -43,7 +43,7 @@ status_comment::start() {
   local label link body out cid
   label=$(status_comment::_label)
   link=$(status_comment::_run_link)
-  body="<img src=\"${AUTODUCKS_STATUS_GIF}\" width=\"24\" alt=\"Running...\" /> **\`${label}\`**: running on ${link}"
+  body="<img src=\"${AUTODUCKS_STATUS_GIF}\" height=\"32\" valign=\"middle\" alt=\"Running...\" /> **\`${label}\`**: running on ${link}"
   out=$(gh issue comment "$issue_id" --repo "$REPO" --body "$body" 2>/dev/null) || return 0
   # gh prints the comment URL: …/issues/N#issuecomment-<id>
   cid=$(echo "$out" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+' | head -1 || true)
