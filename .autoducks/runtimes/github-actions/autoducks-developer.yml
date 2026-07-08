@@ -112,6 +112,7 @@ jobs:
           COMMENTER: ${{ steps.ctx.outputs.commenter }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
+        id: llm
         if: >-
           steps.authz.outcome == 'success' &&
           steps.pre.outputs.duplicate_skip != 'true' &&
@@ -142,3 +143,4 @@ jobs:
           EFFORT: ${{ steps.ctx.outputs.effort || steps.agent.outputs.effort }}
           MAX_TURNS: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          LLM_ERROR_SUBTYPE: ${{ steps.llm.outputs.error_subtype }}
