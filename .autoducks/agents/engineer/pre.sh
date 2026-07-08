@@ -99,6 +99,24 @@ if [[ "$IS_REVISION" == "true" ]]; then
 
   build_revision_context "$ISSUE_NUM" "$OLD_NUMBERS" /tmp/conversation.md
   export OLD_NUMBERS
+
+  # Surface the steering prompt explicitly: if the trigger comment falls
+  # outside `build_revision_context`'s last-20-comments window, it would
+  # otherwise be silently dropped from the revision context.
+  if [[ -n "${STEERING_PROMPT:-}" ]]; then
+    STEERING_PROMPT_TEXT=$(printf '%s' "$STEERING_PROMPT" | base64 -d 2>/dev/null || true)
+    if [[ -n "$STEERING_PROMPT_TEXT" ]]; then
+      printf '%s\n' "$STEERING_PROMPT_TEXT" > /tmp/steering-prompt.md
+      {
+        echo ""
+        echo "---"
+        echo ""
+        echo "# Reviewer feedback / adjustments (steer the revision)"
+        echo ""
+        echo "$STEERING_PROMPT_TEXT"
+      } >> /tmp/conversation.md
+    fi
+  fi
 fi
 
 export IS_REVISION
