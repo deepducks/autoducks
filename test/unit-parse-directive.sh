@@ -123,6 +123,17 @@ assert_out "chain with other tokens" "/architect opus #auto:engineer turns:3" \
 assert_out "architect #auto:engineer+execute matches prior /quack equivalent" \
   "/architect #auto:engineer+execute" "command=architect" "auto_chain=engineer+execute"
 
+echo "── #auto: chain excludes non-dispatchable verbs (fix/revert/close) ──"
+assert_out "chainable review survives (self-loop avoided via execute)" \
+  "/execute #auto:review" "auto_chain=review"
+assert_out "#auto:close dropped" "/architect #auto:close" "auto_chain="
+assert_out "#auto:fix dropped" "/architect #auto:fix" "auto_chain="
+assert_out "#auto:revert dropped" "/architect #auto:revert" "auto_chain="
+assert_out "mixed chain filters non-chainable, keeps chainable" \
+  "/architect #auto:engineer+close" "auto_chain=engineer"
+assert_out "direct /review still routes (canonical, non-chain)" \
+  "/review" "command=review"
+
 echo "── no directive ──"
 assert_out "empty body" "" "command=" "model=" "effort=" "max_turns=" "auto_chain="
 assert_out "unrelated comment" "great work!" "command="
