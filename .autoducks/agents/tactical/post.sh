@@ -9,6 +9,21 @@ source "$AUTODUCKS_ROOT/core/orchestration/reconcile-tasks.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
+# Catch-all safety net for anything that fails before an explicit handler
+# runs (the explicit sites below set richer categories and are preferred;
+# this is only a backstop).
+trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
+      react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
+      progress_labels::abort "$ISSUE_NUM" "Tactics:crafting" 2>/dev/null || true; \
+      exit $_rc' ERR
+
+# Cross-step guard: pre.sh already failed and posted its own categorized
+# comment via the trap above (mirrored in pre.sh). Skip post-processing
+# entirely so we don't double up on a comment for the same run.
+if [[ -f /tmp/autoducks-pre-failed ]]; then
+  exit 0
+fi
+
 # Questions mode: if the agent wrote questions instead of a plan
 if [[ -f /tmp/questions.md ]]; then
   ask_questions "$ISSUE_NUM" /tmp/questions.md

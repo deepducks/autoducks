@@ -1,37 +1,105 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Notify about a failure on a task issue and optionally on the parent feature issue
+# Notify about a failure on a task issue and optionally on the parent feature issue.
 # Usage: notify_failure <issue_id> <run_id> [feature_issue_id]
+#
+# Optional context (env, all default to empty/"infra"):
+#   AUTODUCKS_AGENT          — set already by every entry script (execution|fix|tactical|design|waveOrchestrator)
+#   AUTODUCKS_FAIL_PHASE     — pre | llm | post   (default: "" → omitted from message)
+#   AUTODUCKS_FAIL_CATEGORY  — merge-conflict | no-changes | scope-missing | parse | max_turns | infra
+#                              (default: "infra")
+#   AUTODUCKS_FAIL_BRANCH    — pushed branch with preserved work (max_turns only)
 notify_failure() {
+  [[ -n "${_AUTODUCKS_NOTIFIED:-}" ]] && return 0
+  _AUTODUCKS_NOTIFIED=1
+
   local issue_id="$1"
   local run_id="$2"
   local feature_issue_id="${3:-}"
   local repo="${REPO:?REPO env var required}"
 
+  local agent="${AUTODUCKS_AGENT:-}"
+  local phase="${AUTODUCKS_FAIL_PHASE:-}"
+  local category="${AUTODUCKS_FAIL_CATEGORY:-infra}"
+
+  local diagnosis retry
+  case "$category" in
+    merge-conflict)
+      diagnosis="The task PR could not be merged into the feature branch (likely a conflict with work merged by another wave task)."
+      retry="\`/agents fix\` on this task"
+      ;;
+    no-changes)
+      diagnosis="The agent finished but produced no code changes."
+      retry="\`/agents fix\` (or refine the issue spec and re-run)"
+      ;;
+    scope-missing)
+      diagnosis="The agent did not produce the expected output file (spec / tactical plan)."
+      retry="re-run \`/agents design\` or \`/agents devise\`"
+      ;;
+    parse)
+      diagnosis="The tactical plan could not be parsed into tasks."
+      retry="re-run \`/agents devise\`"
+      ;;
+    max_turns)
+      diagnosis="The agent hit its turn limit before finishing — **partial work has been preserved** (see the branch below)."
+      retry="\`/agents fix\` to resume from the partial branch"
+      ;;
+    *)
+      category="infra"
+      diagnosis="The run hit an unexpected error before it could finish (API, git, or runtime issue)."
+      retry="\`/agents fix\` to retry"
+      ;;
+  esac
+
+  local context_line="**Agent:** \`${agent:-unknown}\`"
+  [[ -n "$phase" ]] && context_line+="  ·  **Phase:** \`$phase\`"
+  context_line+="  ·  **Category:** \`$category\`"
+
+  # max_turns: append the preserved branch name and any work summary the agent
+  # left behind, so the next /agents fix knows exactly where to resume.
+  local partial_section=""
+  if [[ "$category" == "max_turns" ]]; then
+    if [[ -n "${AUTODUCKS_FAIL_BRANCH:-}" ]]; then
+      partial_section+="
+
+**Preserved branch:** \`${AUTODUCKS_FAIL_BRANCH}\`"
+    fi
+    if [[ -s /tmp/work-summary.md ]]; then
+      partial_section+="
+
+**Work so far:**
+
+$(cat /tmp/work-summary.md)"
+    fi
+  fi
+
   local body="⚠️ **Agent run failed.**
 
-The run hit an error before it could finish. The most common causes are a
-merge conflict, a failing check, or the agent producing no changes.
+$context_line
+
+$diagnosis
 
 📄 [View the run logs](https://github.com/$repo/actions/runs/$run_id) to see
-what went wrong.
+what went wrong.${partial_section}
 
-**Next:** address the issue if it's on your side, then comment \`/agents fix\`
-to retry from where the run left off."
+**Next:** $retry."
 
   its::comment_issue "$issue_id" "$body" || true
 
   if [[ -n "$feature_issue_id" ]]; then
     local feature_body="⚠️ **Task #$issue_id failed.**
 
+$context_line
+
+$diagnosis
+
 A task in this feature hit an error, so the wave orchestrator has paused and
 will **not** advance until the task is resolved.
 
-📄 [View the run logs](https://github.com/$repo/actions/runs/$run_id).
+📄 [View the run logs](https://github.com/$repo/actions/runs/$run_id).${partial_section}
 
-**Next:** comment \`/agents fix\` on task #$issue_id to retry; the orchestrator
-resumes automatically once its PR merges."
+**Next:** $retry."
     its::comment_issue "$feature_issue_id" "$feature_body" || true
   fi
 }

@@ -33,6 +33,17 @@ inputs:
     required: false
     default: ''
 
+outputs:
+  error_subtype:
+    description: 'Claude result subtype when the run errored, e.g. "error_max_turns", "error_during_execution"; empty on success'
+    value: ${{ steps.result.outputs.error_subtype }}
+  is_error:
+    description: '"true" if the Claude run ended in error, "false" otherwise'
+    value: ${{ steps.result.outputs.is_error }}
+  conclusion:
+    description: '"success" or "failure"'
+    value: ${{ steps.result.outputs.conclusion }}
+
 runs:
   using: 'composite'
   steps:
@@ -72,6 +83,7 @@ runs:
         SETTINGS=".autoducks/providers/llm/claude/settings.json"
         [[ -f "$SETTINGS" ]] && echo "settings=$SETTINGS" >> "$GITHUB_OUTPUT" || echo "settings=" >> "$GITHUB_OUTPUT"
     - name: Run Claude agent
+      id: claude
       uses: anthropics/claude-code-action@v1
       with:
         prompt: ${{ steps.prompt.outputs.content }}
@@ -80,3 +92,36 @@ runs:
         allowed_bots: '*'
         claude_args: ${{ steps.args.outputs.claude_args }}
         settings: ${{ steps.args.outputs.settings }}
+    - name: Parse Claude result
+      id: result
+      if: always()
+      shell: bash
+      env:
+        EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        STEP_OUTCOME: ${{ steps.claude.outcome }}
+      run: |
+        # Vendor-specific parsing of claude-code-action's execution log lives
+        # here so runtimes/scripts only ever see the normalized outputs below.
+        ERROR_SUBTYPE=""
+        IS_ERROR="false"
+
+        if [[ -n "$EXECUTION_FILE" && -f "$EXECUTION_FILE" ]]; then
+          RESULT_ENTRY=$(jq -c '[.[]? | select(.type == "result")] | last // empty' "$EXECUTION_FILE" 2>/dev/null || true)
+          if [[ -n "$RESULT_ENTRY" ]]; then
+            IS_ERROR=$(echo "$RESULT_ENTRY" | jq -r 'if .is_error == true then "true" else "false" end')
+            if [[ "$IS_ERROR" == "true" ]]; then
+              ERROR_SUBTYPE=$(echo "$RESULT_ENTRY" | jq -r '.subtype // ""')
+            fi
+          fi
+        fi
+
+        CONCLUSION="success"
+        if [[ "$IS_ERROR" == "true" || "$STEP_OUTCOME" == "failure" ]]; then
+          CONCLUSION="failure"
+        fi
+
+        {
+          echo "error_subtype=$ERROR_SUBTYPE"
+          echo "is_error=$IS_ERROR"
+          echo "conclusion=$CONCLUSION"
+        } >> "$GITHUB_OUTPUT"

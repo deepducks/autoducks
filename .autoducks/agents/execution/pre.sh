@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 export AUTODUCKS_AGENT="execution"
+
+# Clear any stale marker from a previous run on this runner before we can
+# leave a fresh one behind (see trap below / post.sh's guard).
+rm -f /tmp/autoducks-pre-failed
+
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
+source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/robustness/wait-for-branch.sh"
-
-react_to_comment "${COMMENT_ID:-}" "eyes"
 
 # Determine base branch and issue number
 # These come from the runtime as env vars: ISSUE_NUM, BASE_BRANCH
@@ -21,6 +26,18 @@ FEATURE_NUM=""
 if [[ "$BASE_BRANCH" =~ ^feature/([0-9]+) ]]; then
   FEATURE_NUM="${BASH_REMATCH[1]}"
 fi
+
+# Catch-all: any uncaught non-zero exit below here posts a categorized
+# failure comment on the task issue (and the parent feature, if any),
+# reacts confused, aborts the progress label, and leaves a marker so
+# post.sh doesn't post a duplicate comment for the same run.
+trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/null || true; \
+      react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
+      progress_labels::abort "$ISSUE_NUM" "Work:progress" 2>/dev/null || true; \
+      touch /tmp/autoducks-pre-failed; \
+      exit $_rc' ERR
+
+react_to_comment "${COMMENT_ID:-}" "eyes"
 
 # Idempotency guard: bail if this task already has a PR (open OR merged) on the
 # feature branch. Closes the window between orchestrator dispatch and PR creation
@@ -45,7 +62,6 @@ if [[ -n "$FEATURE_NUM" ]]; then
   fi
 fi
 
-source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 progress_labels::ensure
 progress_labels::start "$ISSUE_NUM" "Work:progress" "Work:done"
 

@@ -105,6 +105,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
+        id: llm
         if: steps.authz.outcome == 'success' && steps.pre.outputs.duplicate_skip != 'true'
         uses: ./.autoducks/providers/llm/claude
         with:
@@ -126,5 +127,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           MODEL: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
           REASONING: ${{ steps.ctx.outputs.reasoning || steps.agent.outputs.reasoning }}
+          LLM_ERROR_SUBTYPE: ${{ steps.llm.outputs.error_subtype }}
+          LLM_IS_ERROR: ${{ steps.llm.outputs.is_error }}
           MAX_TURNS: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}

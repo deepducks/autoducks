@@ -3,6 +3,8 @@ set -euo pipefail
 export AUTODUCKS_AGENT="fix"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
+source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
 react_to_comment "$COMMENT_ID" "eyes"
 
@@ -14,6 +16,14 @@ FEATURE_NUM=""
 if [[ "$BASE_BRANCH" =~ ^feature/([0-9]+) ]]; then
   FEATURE_NUM="${BASH_REMATCH[1]}"
 fi
+
+# Marks the failure as pre.sh's so post.sh (which runs on `if: always()`)
+# knows not to notify a second time for the same failure.
+trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/null || true; \
+      react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
+      progress_labels::abort "$ISSUE_NUM" "Work:progress" 2>/dev/null || true; \
+      touch /tmp/autoducks-pre-failed; \
+      exit $_rc' ERR
 
 # Find existing partial branch from a previous attempt
 EXISTING_BRANCH=$(git::find_branches_matching "feature/${FEATURE_NUM:-0}-issue-${ISSUE_NUM}-" | sort | tail -1 || true)

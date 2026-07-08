@@ -3,12 +3,23 @@ set -euo pipefail
 export AUTODUCKS_AGENT="tactical"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
+source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/build-revision-context.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 
+# Catch-all safety net for anything that fails before an explicit handler
+# runs. Tactical has no separate feature parent, so pass "" for the feature
+# id. The pre-failed marker tells post.sh (which always runs, even after a
+# pre.sh failure) to skip its own processing and avoid a duplicate comment.
+trap '_rc=$?; touch /tmp/autoducks-pre-failed; \
+      notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
+      react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
+      progress_labels::abort "$ISSUE_NUM" "Tactics:crafting" 2>/dev/null || true; \
+      exit $_rc' ERR
+
 react_to_comment "$COMMENT_ID" "eyes"
 
-source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 progress_labels::ensure
 progress_labels::start "$ISSUE_NUM" "Tactics:crafting" "Tactics:ready"
 
