@@ -55,6 +55,8 @@ assert_out "alias work → execute" "/work" "command=execute" "original_command=
 assert_out "fix passthrough" "/fix" "command=fix"
 assert_out "revert passthrough" "/revert" "command=revert"
 assert_out "close passthrough" "/close" "command=close"
+assert_out "rework passthrough" "/rework" "command=rework" "original_command=rework"
+assert_out "defer passthrough" "/defer" "command=defer" "original_command=defer"
 
 assert_out "uppercase verb is lowercased" "/ARCHITECT" "command=architect"
 
@@ -129,6 +131,8 @@ assert_out "chainable review survives (self-loop avoided via execute)" \
 assert_out "#auto:close dropped" "/architect #auto:close" "auto_chain="
 assert_out "#auto:fix dropped" "/architect #auto:fix" "auto_chain="
 assert_out "#auto:revert dropped" "/architect #auto:revert" "auto_chain="
+assert_out "#auto:rework dropped" "/architect #auto:rework" "auto_chain="
+assert_out "#auto:defer dropped" "/architect #auto:defer" "auto_chain="
 assert_out "mixed chain filters non-chainable, keeps chainable" \
   "/architect #auto:engineer+close" "auto_chain=engineer"
 assert_out "direct /review still routes (canonical, non-chain)" \
