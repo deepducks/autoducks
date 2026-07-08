@@ -19,11 +19,17 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
   "defaults": {
     "model": "claude-sonnet-4-6",
     "reasoning": "high",
+    "max_turns": 50,
     "base_branch": "main",
+    "integration_branch": "main",
     "merge_method": "auto"
   }
 }
 ```
+
+<Aside type="note">
+`integration_branch` is optional — omit it unless you need the fork workflow described below.
+</Aside>
 
 ## `providers`
 
@@ -81,15 +87,41 @@ Reasoning effort level for LLM agents.
 | `medium` | Balanced |
 | `high` | Slower, more thorough (default) |
 
+### `defaults.max_turns`
+
+Maximum number of agentic turns an LLM agent may take before its run is stopped.
+
+**Default:** `50`
+
+Unlike `model` and `reasoning`, this key has no baked-in value in `defaults` — it's optional at every config layer. If it's omitted from the global config, the per-agent `defaults.json`, *and* the inline directive, the Claude provider action itself falls back to `50`.
+
 ### `defaults.base_branch`
 
-The branch that feature branches and orphan task branches are created from, and the branch that the final feature PR targets.
+The **cut-point**: the branch that feature branches and orphan task branches are created from.
 
 **Default:** `main`
+
+When `defaults.integration_branch` is unset, `base_branch` also serves as the PR target — the branch that feature PRs and orphan task PRs are opened into. Once `integration_branch` is set, it takes over the PR-target role and `base_branch` remains only the cut-point.
 
 <Aside type="note">
 The `base_branch` default can be overridden at runtime via the `BASE_BRANCH` environment variable passed to workflow dispatch. The wave orchestrator always reads this from the feature branch name.
 </Aside>
+
+### `defaults.integration_branch`
+
+The **PR target**: the branch that feature PRs and orphan task PRs are opened into.
+
+**Default:** `base_branch` (unset by default — no separate integration branch)
+
+This exists to support a **fork workflow**, where `base_branch` is the upstream cut-point but PRs should land on a fork-local integration branch instead of going straight upstream. Setting `integration_branch` requires no migration: leave it unset and behavior is unchanged (PRs continue to target `base_branch`).
+
+The following invariant always holds:
+
+```
+merge-base(feature/<slug>, integration_branch) == base_branch
+```
+
+That is, no matter where a feature or task branch is cut from (`base_branch`), its PR always resolves cleanly against `integration_branch` because the two share a common ancestor at `base_branch`.
 
 ### `defaults.merge_method`
 
@@ -115,16 +147,20 @@ Each agent can also have its own `defaults.json` in `.autoducks/agents/{agent}/d
 ```json
 {
   "model": "claude-sonnet-4-6",
-  "reasoning": "high"
+  "reasoning": "high",
+  "max_turns": 50
 }
 ```
 
 Agent-level defaults override the global defaults. Directive arguments in slash commands override agent-level defaults.
 
 **Priority (highest to lowest):**
-1. Directive argument in comment (`--model`, `--reasoning`)
+1. Directive argument in comment (`--model`, `--reasoning`, `turns=<n>`)
 2. Agent-level `defaults.json`
 3. Global `.autoducks/autoducks.json`
+4. Provider action default — applies only to `max_turns` (`50`), since `model` and `reasoning` always have a value by the time they reach step 3
+
+Omitting `max_turns` from every layer above still yields a working run: it just resolves to the provider action's default of `50`.
 
 ## Security
 

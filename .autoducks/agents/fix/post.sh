@@ -10,6 +10,7 @@ source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
 # Reconstruct state from git (pre.sh exports don't persist across GHA steps)
 TASK_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+PR_BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_INTEGRATION_BRANCH}"
 BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
 FEATURE_NUM=""
 if [[ "$TASK_BRANCH" =~ ^feature/([0-9]+)-issue- ]]; then
@@ -59,18 +60,24 @@ fi
 git::push_branch "$TASK_BRANCH"
 
 # Check for existing PR
-EXISTING_PR=$(gh pr list --repo "$REPO" --head "$TASK_BRANCH" --base "$BASE_BRANCH" --json number --jq '.[0].number // empty' 2>/dev/null || true)
+EXISTING_PR=$(gh pr list --repo "$REPO" --head "$TASK_BRANCH" --base "$PR_BASE_BRANCH" --json number --jq '.[0].number // empty' 2>/dev/null || true)
 
 if [[ -z "$EXISTING_PR" ]]; then
   ISSUE_TITLE=$(its::get_issue "$ISSUE_NUM" | jq -r '.title')
-  PR_NUM=$(git::create_pr "$TASK_BRANCH" "$BASE_BRANCH" "Fix: $ISSUE_TITLE" "fixes #${ISSUE_NUM}")
+  PR_NUM=$(git::create_pr "$TASK_BRANCH" "$PR_BASE_BRANCH" "Fix: $ISSUE_TITLE" "fixes #${ISSUE_NUM}")
 else
   PR_NUM="$EXISTING_PR"
 fi
 
 if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
-  if ! git::merge_pr "$PR_NUM"; then
-    notify_failure "$ISSUE_NUM" "$RUN_ID" "$FEATURE_NUM"
+  merge_rc=0
+  git::merge_pr "$PR_NUM" || merge_rc=$?
+  if [[ "$merge_rc" -ne 0 ]]; then
+    if [[ "$merge_rc" -eq 2 ]]; then
+      notify_failure "$ISSUE_NUM" "$RUN_ID" "$FEATURE_NUM"
+    else
+      notify_conflict "$ISSUE_NUM" "$RUN_ID" "$TASK_BRANCH" "$PR_NUM" "$FEATURE_NUM"
+    fi
     react_to_comment "$COMMENT_ID" "confused"
     progress_labels::abort "$ISSUE_NUM" "Work:progress"
     exit 1

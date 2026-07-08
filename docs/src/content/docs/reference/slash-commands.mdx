@@ -54,7 +54,7 @@ the schema, validation rules, and the `update-triggers` command.
 All commands accept optional inline arguments:
 
 ```
-/agents <command> [--model <model>] [--reasoning <level>]
+/agents <command> [--model <model>] [--reasoning <level>] [turns=<n>]
 ```
 
 ### `--model`
@@ -81,6 +81,22 @@ Override the reasoning effort level.
 ```
 /agents devise --reasoning medium
 ```
+
+### `turns=<n>`
+
+Override the maximum number of agentic turns for this run. Unlike `--model` and `--reasoning`, this is a **positional** token, not a `--flag` — drop it anywhere after the command verb, alongside model/reasoning aliases:
+
+```
+/agents execute sonnet high turns=80
+```
+
+`max-turns=<n>`, `max_turns=<n>`, and `turns:<n>` are accepted as equivalent forms. `<n>` must be a positive integer no greater than 1000; a malformed or out-of-range value is ignored rather than rejected, leaving the override empty so the next tier applies.
+
+This directive is parsed by the same comment parser everywhere, so `turns=<n>` propagates through the wave path too: on a Feature issue, the Wave Orchestrator picks it up from the triggering comment just like it does for `--model`/`--reasoning`.
+
+**Priority (highest to lowest):** inline `turns=<n>` directive → per-agent `defaults.json` → global `.autoducks/autoducks.json` → provider action default.
+
+Default: `50`, applied by the Claude provider action when `max_turns` is unset at every tier above — see [`defaults.max_turns`](/reference/configuration#defaultsmax_turns).
 
 ## Pipeline shortcut
 

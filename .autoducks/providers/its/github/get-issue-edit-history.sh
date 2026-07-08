@@ -4,6 +4,10 @@ set -euo pipefail
 its::get_issue_edit_history() {
   local issue_id="$1"
 
+  # N/A for org/team-scope guarding: this queries repo-scoped issue edit
+  # history (editor login on a userContentEdit), not any /orgs or /teams
+  # field, so it needs only standard repo:issues read access — no
+  # `read:org` dependency and no warn-and-continue wrapper required.
   gh api graphql -f query='
     query($owner: String!, $name: String!, $num: Int!) {
       repository(owner: $owner, name: $name) {

@@ -18,6 +18,7 @@ source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
 # Reconstruct state from git (pre.sh exports don't persist across GHA steps)
 TASK_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+PR_BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_INTEGRATION_BRANCH}"
 BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
 FEATURE_NUM=""
 if [[ "$BASE_BRANCH" =~ ^feature/([0-9]+) ]]; then
@@ -65,7 +66,7 @@ ISSUE_TITLE=$(its::get_issue "$ISSUE_NUM" | jq -r '.title')
 PR_TITLE="Task #$ISSUE_NUM: $ISSUE_TITLE"
 
 # Create PR
-PR_NUM=$(git::create_pr "$TASK_BRANCH" "$BASE_BRANCH" "$PR_TITLE" "fixes #${ISSUE_NUM}")
+PR_NUM=$(git::create_pr "$TASK_BRANCH" "$PR_BASE_BRANCH" "$PR_TITLE" "fixes #${ISSUE_NUM}")
 
 # Append implementation summary to PR body, if the agent produced one
 if [[ -f /tmp/work-summary.md && -s /tmp/work-summary.md ]]; then
@@ -81,6 +82,7 @@ fi
 if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
   # Scenario B: task with feature parent — auto-merge with rebase retry
   MERGE_OK=false
+  FAILURE_REASON="conflict"
   for attempt in 1 2 3; do
     merge_rc=0
     git::merge_pr "$PR_NUM" || merge_rc=$?
@@ -92,20 +94,26 @@ if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
       # Merge method not allowed — a config problem, not a stale branch.
       # Rebasing won't help, so stop retrying.
       echo "Merge method not allowed on $REPO — aborting retries (see merge_method config)."
+      FAILURE_REASON="config"
       break
     fi
-    echo "Merge attempt $attempt failed — rebasing onto $BASE_BRANCH..."
-    git fetch origin "$BASE_BRANCH"
-    if ! git rebase "origin/$BASE_BRANCH"; then
+    echo "Merge attempt $attempt failed — rebasing onto $PR_BASE_BRANCH..."
+    git fetch origin "$PR_BASE_BRANCH"
+    if ! git rebase "origin/$PR_BASE_BRANCH"; then
       echo "Rebase conflict on attempt $attempt — aborting"
       git rebase --abort 2>/dev/null || true
+      FAILURE_REASON="conflict"
       break
     fi
     git push --force-with-lease origin "$TASK_BRANCH"
   done
 
   if [[ "$MERGE_OK" != "true" ]]; then
-    notify_failure "$ISSUE_NUM" "$RUN_ID" "$FEATURE_NUM"
+    if [[ "$FAILURE_REASON" == "conflict" ]]; then
+      notify_conflict "$ISSUE_NUM" "$RUN_ID" "$TASK_BRANCH" "$PR_NUM" "$FEATURE_NUM"
+    else
+      notify_failure "$ISSUE_NUM" "$RUN_ID" "$FEATURE_NUM"
+    fi
     react_to_comment "${COMMENT_ID:-}" "confused"
     progress_labels::abort "$ISSUE_NUM" "Work:progress"
     exit 1
@@ -140,7 +148,7 @@ else
   # Scenario A: orphan task, PR targets the base branch, awaits human review
   EXEC_MSG="✅ **Implementation complete.**
 
-PR #$PR_NUM is open against \`$BASE_BRANCH\` and is waiting for your review — it
+PR #$PR_NUM is open against \`$PR_BASE_BRANCH\` and is waiting for your review — it
 is **not** auto-merged.
 
 **Next:** review and merge PR #$PR_NUM, or comment \`/agents fix\` on this issue

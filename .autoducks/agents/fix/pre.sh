@@ -8,6 +8,7 @@ source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
 react_to_comment "$COMMENT_ID" "eyes"
 
+PR_BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_INTEGRATION_BRANCH}"
 BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
 
 # Extract feature number from base branch
@@ -42,4 +43,4 @@ its::get_issue "$ISSUE_NUM" | jq -r '"# " + .title + "\n\n" + .body' > /tmp/task
 # Prepare failure context (recent comments)
 its::list_comments "$ISSUE_NUM" 10 | jq -r '.[] | "## " + .author + "\n\n" + .body + "\n\n---\n"' > /tmp/failure-context.md
 
-export TASK_BRANCH BASE_BRANCH FEATURE_NUM EXISTING_BRANCH
+export TASK_BRANCH BASE_BRANCH PR_BASE_BRANCH FEATURE_NUM EXISTING_BRANCH

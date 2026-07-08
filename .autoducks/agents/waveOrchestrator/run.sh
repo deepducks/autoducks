@@ -57,11 +57,12 @@ if [[ "$IS_SINGLE" == "true" ]]; then
         -f "issue_number=$FEATURE" \
         -f "base_branch=$FEATURE_BRANCH" \
         ${WORKER_MODEL:+-f "model=$WORKER_MODEL"} \
-        ${WORKER_REASONING:+-f "reasoning=$WORKER_REASONING"}
+        ${WORKER_REASONING:+-f "reasoning=$WORKER_REASONING"} \
+        ${WORKER_MAX_TURNS:+-f "max_turns=$WORKER_MAX_TURNS"}
       its::comment_issue "$FEATURE" "**Single-task feature** — dispatched execution on the feature issue itself."
     fi
   else
-    create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "$ISSUE_TITLE" "$FEATURE"
+    create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "$FEATURE"
     progress_labels::finish "$FEATURE" "Work:progress" "Work:done"
     its::comment_issue "$FEATURE" "**Single-task feature complete!** The feature PR is ready for review."
   fi
@@ -168,7 +169,7 @@ if [[ $NEXT_WAVE -eq -1 ]]; then
         ALL_TASK_NUMS+=("$t")
       done
     done
-    FINAL_PR_NUM=$(create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_BASE_BRANCH" "$ISSUE_TITLE" "${ALL_TASK_NUMS[@]}")
+    FINAL_PR_NUM=$(create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "${ALL_TASK_NUMS[@]}")
 
     # Collect implementation summaries from merged task PRs
     WORKLOG=""
@@ -216,7 +217,11 @@ $(echo -e "$WORKLOG")"
 
     git::mark_pr_ready "$FINAL_PR_NUM" 2>/dev/null || true
 
-    # Request review from feature issue assignees
+    # Request review from feature issue assignees. Team-based reviewer
+    # routing can hit the same `read:org` scope limitation as CODEOWNERS
+    # expansion (see resolve-team.sh) — warn-and-continue so a missing
+    # AUTODUCKS_ORG_TOKEN degrades to "no auto-assigned reviewer", never a
+    # pipeline failure.
     ASSIGNEES=$(gh issue view "$FEATURE" --repo "$REPO" \
       --json assignees --jq '[.assignees[].login] | join(",")' 2>/dev/null || true)
     if [[ -n "$ASSIGNEES" ]]; then
@@ -259,7 +264,8 @@ else
       -f "issue_number=$t" \
       -f "base_branch=$FEATURE_BRANCH" \
       ${WORKER_MODEL:+-f "model=$WORKER_MODEL"} \
-      ${WORKER_REASONING:+-f "reasoning=$WORKER_REASONING"}
+      ${WORKER_REASONING:+-f "reasoning=$WORKER_REASONING"} \
+      ${WORKER_MAX_TURNS:+-f "max_turns=$WORKER_MAX_TURNS"}
 
     ASSIGNED+=("$t")
   done
