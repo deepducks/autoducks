@@ -14,9 +14,12 @@ AUTODUCKS_PROGRESS_LABELS=(
   "Review:reviewing|FBCA04|Review agent is reviewing the pull request"
   "Review:done|0E8A16|Review complete"
   "Review:changes|D93F0B|Review requested changes"
+  "Resolve:resolving|FBCA04|Resolver agent is resolving conflicts"
+  "Resolve:done|0E8A16|Conflicts resolved"
+  "Resolve:conflict|D93F0B|Conflicts could not be auto-resolved"
 )
 
-# Ensure all six labels exist on $REPO. Idempotent; ignores "already exists".
+# Ensure all labels in AUTODUCKS_PROGRESS_LABELS exist on $REPO. Idempotent; ignores "already exists".
 progress_labels::ensure() {
   local entry name color desc
   for entry in "${AUTODUCKS_PROGRESS_LABELS[@]}"; do
