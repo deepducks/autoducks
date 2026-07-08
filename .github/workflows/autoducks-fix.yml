@@ -60,6 +60,7 @@ jobs:
           hashFiles('.github/actions/autoducks/fix-pre/action.yml') != ''
         uses: ./.github/actions/autoducks/fix-pre
         env:
+          AUTODUCKS_STAGE: pre
           ISSUE_NUM: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id }}
@@ -84,6 +85,7 @@ jobs:
           hashFiles('.github/actions/autoducks/fix-post/action.yml') != ''
         uses: ./.github/actions/autoducks/fix-post
         env:
+          AUTODUCKS_STAGE: post
           ISSUE_NUM: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id }}

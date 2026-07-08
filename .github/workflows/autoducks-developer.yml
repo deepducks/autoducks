@@ -119,6 +119,7 @@ jobs:
           hashFiles('.github/actions/autoducks/developer-pre/action.yml') != ''
         uses: ./.github/actions/autoducks/developer-pre
         env:
+          AUTODUCKS_STAGE: pre
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           BASE_BRANCH: ${{ steps.ctx.outputs.base_branch }}
           REPO: ${{ github.repository }}
@@ -149,6 +150,7 @@ jobs:
           hashFiles('.github/actions/autoducks/developer-post/action.yml') != ''
         uses: ./.github/actions/autoducks/developer-post
         env:
+          AUTODUCKS_STAGE: post
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           BASE_BRANCH: ${{ steps.ctx.outputs.base_branch }}
           REPO: ${{ github.repository }}

@@ -39,6 +39,29 @@ else
   fail "mirror out of sync"
 fi
 
+echo "── hook steps survive guard regeneration ──"
+if grep -q "uses: ./.github/actions/autoducks/developer-pre" "$SCRATCH/.github/workflows/autoducks-developer.yml"; then
+  pass "developer-pre hook uses: line survives regeneration"
+else
+  fail "developer-pre hook uses: line lost during regeneration"
+fi
+if grep -q "uses: ./.github/actions/autoducks/developer-post" "$SCRATCH/.github/workflows/autoducks-developer.yml"; then
+  pass "developer-post hook uses: line survives regeneration"
+else
+  fail "developer-post hook uses: line lost during regeneration"
+fi
+if grep -q "uses: ./.github/actions/autoducks/maestro-post" "$SCRATCH/.github/workflows/autoducks-maestro.yml"; then
+  pass "maestro-post hook uses: line survives regeneration"
+else
+  fail "maestro-post hook uses: line lost during regeneration"
+fi
+CLOSE_GUARD_COUNT="$(grep -c "hashFiles('.github/actions/autoducks/close-" "$SCRATCH/.github/workflows/autoducks-close.yml")"
+if [[ "$CLOSE_GUARD_COUNT" -eq 2 ]]; then
+  pass "close has exactly 2 hook guards (pre + post)"
+else
+  fail "close has $CLOSE_GUARD_COUNT hook guards, expected 2"
+fi
+
 echo "── shipped config reproduces committed guards ──"
 if diff -r "$REPO_ROOT/.github/workflows" "$SCRATCH/.github/workflows" >/dev/null; then
   pass "regenerated guards match the committed workflows"

@@ -103,6 +103,7 @@ jobs:
           hashFiles('.github/actions/autoducks/maestro-pre/action.yml') != ''
         uses: ./.github/actions/autoducks/maestro-pre
         env:
+          AUTODUCKS_STAGE: pre
           ISSUE_NUM: ${{ needs.resolve.outputs.feature_number }}
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
@@ -133,6 +134,7 @@ jobs:
           hashFiles('.github/actions/autoducks/maestro-post/action.yml') != ''
         uses: ./.github/actions/autoducks/maestro-post
         env:
+          AUTODUCKS_STAGE: post
           ISSUE_NUM: ${{ needs.resolve.outputs.feature_number }}
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id || '0' }}

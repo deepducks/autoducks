@@ -36,6 +36,7 @@ jobs:
           hashFiles('.github/actions/autoducks/close-pre/action.yml') != ''
         uses: ./.github/actions/autoducks/close-pre
         env:
+          AUTODUCKS_STAGE: pre
           ISSUE_NUM: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id }}
@@ -59,6 +60,7 @@ jobs:
           hashFiles('.github/actions/autoducks/close-post/action.yml') != ''
         uses: ./.github/actions/autoducks/close-post
         env:
+          AUTODUCKS_STAGE: post
           ISSUE_NUM: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id }}
