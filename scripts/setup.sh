@@ -79,7 +79,8 @@ LABELS=("Feature|6F42C1|Orchestration feature issue"
         "Bug|D73A4A|Autoducks bug pipeline"
         "Task|1D76DB|Autoducks task issue"
         "Draft|CCCCCC|Draft issue, not yet designed"
-        "smoke-test|FFA500|Smoke test marker")
+        "smoke-test|FFA500|Smoke test marker"
+        "auto-resolved|0052CC|Conflicts auto-resolved by the resolver agent")
 
 # Progress labels: sourced from progress-labels.sh so the two lists can't drift apart.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
