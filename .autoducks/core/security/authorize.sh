@@ -57,6 +57,7 @@ authz::load_config() {
   case "$agent" in
     maestro|developer) agent="execute" ;;
     reviewer)          agent="review"  ;;
+    resolver)          agent="resolve" ;;
   esac
   local config="$AUTODUCKS_ROOT/autoducks.json"
 
