@@ -23,6 +23,11 @@ its::comment_issue() {
   printf '%s' "$2" >> "$LOGDIR/issue-$1.body"
 }
 
+export AUTODUCKS_COMMAND="${AUTODUCKS_COMMAND:-}"
+
+# Source the command-string helper (normally sourced via load-config.sh)
+# before the module under test, since notify_conflict's retry hint depends on it.
+source "$REPO_ROOT/.autoducks/core/config/command-string.sh"
 source "$NOTIFY_SH"
 
 export REPO="x/y"
