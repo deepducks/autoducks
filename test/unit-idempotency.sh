@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Idempotency smoke test — asserts the re-run invariants the pipeline must
 # never weaken:
-#   1. Architect: the tactical zone re-emitted on the issue body is
-#      byte-identical across runs, no matter what the design zone LLM writes.
+#   1. Architect: a design revision on an issue with an existing tactical
+#      plan always strips the tactical zone and supersedes the old plan
+#      (closes its task issues, drops Tactics:* labels); a first-pass design
+#      with no existing plan touches neither.
 #   2. Engineer: revising a plan that keeps the same task refs preserves the
 #      same task issue numbers (no duplicate task issues get minted).
 #   3. Developer: a task whose PR has already merged into the base branch
@@ -143,9 +145,9 @@ run_step() {
 }
 
 # =============================================================================
-# 1. Architect — tactical zone byte-identical across runs
+# 1. Architect — a revision strips the existing tactical plan and supersedes it
 # =============================================================================
-echo "── Architect: tactical zone survives re-runs untouched ──"
+echo "── Architect: existing tactical plan is stripped and superseded ──"
 
 ARCHITECT_PRE="$REPO_ROOT/.autoducks/agents/architect/pre.sh"
 ARCHITECT_POST="$REPO_ROOT/.autoducks/agents/architect/post.sh"
@@ -159,13 +161,14 @@ printf '%s' "$TACTICAL_CONTENT" > "$SCRATCH/a_tactical.md"
 assemble_body "$SCRATCH/a_design.md" "$SCRATCH/a_tactical.md" "$SCRATCH/a_body.md"
 
 jq -n --rawfile body "$SCRATCH/a_body.md" \
-  '{title: "Add search", body: $body, labels: ["Design:done"], author: "alice"}' \
+  '{title: "Add search", body: $body, labels: ["Design:done", "Tactics:done"], author: "alice"}' \
   > "$MOCK_ISSUE_DIR/$FEATURE_A.json"
 
 run_architect_round() {
   # run_architect_round <fake_llm_design_text> <out_body_file>
   local llm_design="$1" out="$2"
-  rm -f /tmp/autoducks-pre-failed /tmp/tactical-zone-preserved.flag /tmp/tactical-zone-preserved.md /tmp/design-spec.md
+  rm -f /tmp/autoducks-pre-failed /tmp/architect-strip-tactical.flag /tmp/architect-dropped-tasks.txt /tmp/design-spec.md
+  : > "$GH_LOG"
 
   run_step "$ARCHITECT_PRE" ISSUE_NUM="$FEATURE_A" RUN_ID=1 COMMENT_ID=1 COMMENTER=alice \
     || { fail "architect pre.sh failed (rc=$?): $(tail -5 "$SCRATCH/stderr.log")"; return 1; }
@@ -180,33 +183,74 @@ run_architect_round() {
 
 run_architect_round "## Problem Statement
 
-Design attempt one — the LLM's first re-draft of the design zone." "$SCRATCH/a_round1.md"
+Design attempt one — a revision that should strip the existing plan." "$SCRATCH/a_round1.md"
 
+if grep -qE '<!-- autoducks:tactical:(begin|end) -->' "$SCRATCH/a_round1.md"; then
+  fail "published body still contains a tactical zone after a design revision"
+else
+  pass "published body is design-only after stripping the existing tactical plan"
+fi
+
+if grep -q 'issue close 201 ' "$GH_LOG" && grep -q 'not_planned' "$GH_LOG"; then
+  pass "superseded task #201 closed as not_planned"
+else
+  fail "superseded task #201 was not closed as not_planned; log: $(grep 'issue close' "$GH_LOG" || echo none)"
+fi
+
+if grep -q 'remove-label Tactics:done' "$GH_LOG" && grep -q 'remove-label Tactics:crafting' "$GH_LOG"; then
+  pass "Tactics:done/Tactics:crafting labels dropped after strip"
+else
+  fail "Tactics:done/Tactics:crafting labels were not removed after strip"
+fi
+
+# Re-running again (e.g. a second revision) must behave the same way even
+# though the mock issue file was never mutated — same strip, same closure.
 run_architect_round "## Problem Statement
 
-Design attempt two — a completely different re-draft, different wording,
-different length, to prove the tactical zone doesn't move with it." "$SCRATCH/a_round2.md"
+Design attempt two — a second revision, different wording entirely." "$SCRATCH/a_round2.md"
 
-split_body "$SCRATCH/a_round1.md" "$SCRATCH/a_design1_out.md" "$SCRATCH/a_tactical1_out.md"
-split_body "$SCRATCH/a_round2.md" "$SCRATCH/a_design2_out.md" "$SCRATCH/a_tactical2_out.md"
-
-if diff -q "$SCRATCH/a_design1_out.md" "$SCRATCH/a_design2_out.md" > /dev/null 2>&1; then
-  fail "test setup issue: design zones should differ between rounds but didn't"
+if grep -qE '<!-- autoducks:tactical:(begin|end) -->' "$SCRATCH/a_round2.md"; then
+  fail "round 2: published body still contains a tactical zone after a design revision"
 else
-  pass "sanity: design zone did change between rounds (LLM output varied)"
+  pass "round 2: published body is design-only again"
 fi
 
-if diff -q "$SCRATCH/a_tactical1_out.md" "$SCRATCH/a_tactical2_out.md" > /dev/null 2>&1; then
-  pass "tactical zone is byte-identical across Architect re-runs"
+if diff -q "$SCRATCH/a_round1.md" "$SCRATCH/a_round2.md" > /dev/null 2>&1; then
+  fail "test setup issue: design bodies should differ between rounds but didn't"
 else
-  fail "tactical zone diverged across Architect re-runs:"
-  diff "$SCRATCH/a_tactical1_out.md" "$SCRATCH/a_tactical2_out.md" || true
+  pass "sanity: design body did change between rounds (LLM output varied)"
 fi
 
-if grep -q 'tasks: \[201\]' "$SCRATCH/a_tactical1_out.md" && grep -q 'tasks: \[201\]' "$SCRATCH/a_tactical2_out.md"; then
-  pass "tactical zone plan content preserved (waves/tasks intact)"
+echo ""
+
+echo "── Architect: first design (no existing tactical plan) touches nothing to supersede ──"
+
+FEATURE_B=56
+jq -n --arg body $'Just a plain issue description, no tactical zone yet.\n' \
+  '{title: "Add filters", body: $body, labels: ["Draft"], author: "alice"}' \
+  > "$MOCK_ISSUE_DIR/$FEATURE_B.json"
+
+rm -f /tmp/autoducks-pre-failed /tmp/architect-strip-tactical.flag /tmp/architect-dropped-tasks.txt /tmp/design-spec.md
+: > "$GH_LOG"
+
+run_step "$ARCHITECT_PRE" ISSUE_NUM="$FEATURE_B" RUN_ID=1 COMMENT_ID=1 COMMENTER=alice \
+  || fail "architect pre.sh failed on first-design issue (rc=$?): $(tail -5 "$SCRATCH/stderr.log")"
+
+printf '## Problem Statement\n\nA brand-new design, no prior plan to strip.\n' > /tmp/design-spec.md
+
+run_step "$ARCHITECT_POST" ISSUE_NUM="$FEATURE_B" RUN_ID=1 COMMENT_ID=1 COMMENTER=alice \
+  || fail "architect post.sh failed on first-design issue (rc=$?): $(tail -5 "$SCRATCH/stderr.log")"
+
+if grep -q 'issue close' "$GH_LOG"; then
+  fail "first-design run closed a task issue, but there was no existing plan to supersede"
 else
-  fail "tactical zone plan content lost"
+  pass "first-design run closes no task issues"
+fi
+
+if grep -q 'remove-label Tactics' "$GH_LOG"; then
+  fail "first-design run touched Tactics labels, but there was no existing plan"
+else
+  pass "first-design run leaves Tactics labels untouched"
 fi
 
 echo ""

@@ -33,22 +33,25 @@ if [[ ! -f /tmp/design-spec.md ]]; then
   exit 1
 fi
 
-# Update issue body with design spec, preserving the tactical zone if one
-# was stashed by pre.sh
-if [[ -f /tmp/tactical-zone-preserved.flag ]]; then
-  # Guard: flag set but content file vanished => lost state between steps.
-  # An empty-but-present file is valid and must NOT trip this.
-  if [[ ! -f /tmp/tactical-zone-preserved.md ]]; then
-    its::comment_issue "$ISSUE_NUM" "❌ Aborting \`${AUTODUCKS_COMMAND} architect\`: the preserved tactical zone went missing between steps. Publishing would wipe the tactical plan, so no changes were made. Re-run \`${AUTODUCKS_COMMAND} architect\`."
-    status_comment::fail "$ISSUE_NUM"
-    react_to_comment "$COMMENT_ID" "confused"
-    progress_labels::abort "$ISSUE_NUM" "Design:draft"
-    exit 1
+# Publish the design-only body. Any prior tactical zone is stripped — the
+# design has changed, so the old plan is torn down below rather than
+# re-emitted verbatim.
+its::update_issue_body "$ISSUE_NUM" /tmp/design-spec.md
+
+if [[ -f /tmp/architect-strip-tactical.flag ]]; then
+  # Close child task issues named in the discarded plan.
+  if [[ -s /tmp/architect-dropped-tasks.txt ]]; then
+    while read -r old; do
+      [[ -n "$old" ]] || continue
+      its::close_issue "$old" \
+        "Superseded by a design revision on #$ISSUE_NUM — re-run \`${AUTODUCKS_COMMAND} engineer\` to regenerate the plan." \
+        "not_planned" 2>/dev/null || true
+    done < /tmp/architect-dropped-tasks.txt
   fi
-  assemble_body /tmp/design-spec.md /tmp/tactical-zone-preserved.md /tmp/feature-body.md
-  its::update_issue_body "$ISSUE_NUM" /tmp/feature-body.md
-else
-  its::update_issue_body "$ISSUE_NUM" /tmp/design-spec.md
+  # Drop the planning state so the issue is back in "design done, needs plan".
+  its::remove_label "$ISSUE_NUM" "Tactics:done"     2>/dev/null || true
+  its::remove_label "$ISSUE_NUM" "Tactics:crafting" 2>/dev/null || true
+  ARCHITECT_STRIPPED=1
 fi
 
 # Issue classification (D10): the LLM writes "Feature" or "Bug" to
@@ -83,7 +86,7 @@ its::assign_issue "$ISSUE_NUM" "${COMMENTER:-}" 2>/dev/null || true
 
 react_to_comment "$COMMENT_ID" "+1"
 
-status_comment::finish "$ISSUE_NUM" "**Design complete** (classified as \`${ISSUE_KIND}\`).
+FINISH_MSG="**Design complete** (classified as \`${ISSUE_KIND}\`).
 
 The issue body now holds the full design — problem statement, proposed
 solution, technical design, dependencies, constraints, and out-of-scope notes.
@@ -92,6 +95,18 @@ Review and edit anything you'd like to steer before planning.
 **Next:** run \`${AUTODUCKS_COMMAND} engineer\` to break the design into a tactical plan and task issues.
 
 _Ran with \`${MODEL:-unknown}\` at effort \`${EFFORT:-unknown}\`._"
+
+if [[ "${ARCHITECT_STRIPPED:-0}" == "1" ]]; then
+  DROPPED_NUMBERS=""
+  if [[ -s /tmp/architect-dropped-tasks.txt ]]; then
+    DROPPED_NUMBERS=$(sed 's/^/#/' /tmp/architect-dropped-tasks.txt | paste -sd, - | sed 's/,/, /g')
+  fi
+  FINISH_MSG="$FINISH_MSG
+
+⚠️ **The previous tactical plan was removed.** Because the design changed, the old plan and its task issues (\`${DROPPED_NUMBERS}\`) were discarded to keep them from going stale. **Re-run \`${AUTODUCKS_COMMAND} engineer\`** to regenerate the plan before executing."
+fi
+
+status_comment::finish "$ISSUE_NUM" "$FINISH_MSG"
 
 # #auto: chain — hand off to the next queued agent, if any.
 chain::dispatch_next "${AUTO_CHAIN:-}" "$ISSUE_NUM"
