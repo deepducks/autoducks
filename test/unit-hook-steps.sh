@@ -63,6 +63,12 @@ check_pre_stage() {
 check_post_stage() {
   get_block "$1" "User post hook" | grep -qF "AUTODUCKS_STAGE: post"
 }
+check_pre_agent() {
+  get_block "$1" "User pre hook" | grep -qF "AUTODUCKS_AGENT: $2"
+}
+check_post_agent() {
+  get_block "$1" "User post hook" | grep -qF "AUTODUCKS_AGENT: $2"
+}
 
 echo "── per-agent hook contract (templates + mirrors) ──"
 for agent in "${AGENTS[@]}"; do
@@ -78,6 +84,8 @@ for agent in "${AGENTS[@]}"; do
     check_post_always "$file" && pass "$label: post hook gated by always()" || fail "$label: post hook missing always()"
     check_pre_stage "$file" && pass "$label: pre hook sets AUTODUCKS_STAGE: pre" || fail "$label: pre hook missing AUTODUCKS_STAGE: pre"
     check_post_stage "$file" && pass "$label: post hook sets AUTODUCKS_STAGE: post" || fail "$label: post hook missing AUTODUCKS_STAGE: post"
+    check_pre_agent "$file" "$agent" && pass "$label: pre hook sets AUTODUCKS_AGENT: $agent" || fail "$label: pre hook missing AUTODUCKS_AGENT: $agent"
+    check_post_agent "$file" "$agent" && pass "$label: post hook sets AUTODUCKS_AGENT: $agent" || fail "$label: post hook missing AUTODUCKS_AGENT: $agent"
     check_post_agent_outcome "$file" && pass "$label: post hook has AGENT_OUTCOME:" || fail "$label: post hook missing AGENT_OUTCOME:"
 
     hooks_region="$(get_block "$file" "User pre hook")"$'\n'"$(get_block "$file" "User post hook")"
@@ -145,6 +153,16 @@ if check_post_guard "$SEED_FILE" "developer"; then
   fail "seeded missing -post guard was NOT detected by the checker"
 else
   pass "seeded missing -post guard correctly caught"
+fi
+
+SEED_AGENT_FILE="$SCRATCH/seeded-agent-developer.yml"
+cp "$RUNTIME_DIR/autoducks-developer.yml" "$SEED_AGENT_FILE"
+sed -i.bak "/AUTODUCKS_AGENT: developer/d" "$SEED_AGENT_FILE"
+rm -f "$SEED_AGENT_FILE.bak"
+if check_pre_agent "$SEED_AGENT_FILE" "developer" || check_post_agent "$SEED_AGENT_FILE" "developer"; then
+  fail "seeded missing AUTODUCKS_AGENT was NOT detected by the checker"
+else
+  pass "seeded missing AUTODUCKS_AGENT correctly caught"
 fi
 
 echo ""

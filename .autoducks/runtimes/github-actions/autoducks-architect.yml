@@ -101,6 +101,7 @@ jobs:
           hashFiles('.github/actions/autoducks/architect-pre/action.yml') != ''
         uses: ./.github/actions/autoducks/architect-pre
         env:
+          AUTODUCKS_AGENT: architect
           AUTODUCKS_STAGE: pre
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           REPO: ${{ github.repository }}
@@ -126,6 +127,7 @@ jobs:
           hashFiles('.github/actions/autoducks/architect-post/action.yml') != ''
         uses: ./.github/actions/autoducks/architect-post
         env:
+          AUTODUCKS_AGENT: architect
           AUTODUCKS_STAGE: post
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           REPO: ${{ github.repository }}

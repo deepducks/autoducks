@@ -71,6 +71,8 @@ autoducks wires this in automatically — you don't edit the workflow YAML yours
     hashFiles('.github/actions/autoducks/developer-pre/action.yml') != ''
   uses: ./.github/actions/autoducks/developer-pre
   env:
+    AUTODUCKS_AGENT: developer
+    AUTODUCKS_STAGE: pre
     ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
     BASE_BRANCH: ${{ steps.ctx.outputs.base_branch }}
     REPO: ${{ github.repository }}
@@ -89,6 +91,8 @@ autoducks wires this in automatically — you don't edit the workflow YAML yours
     hashFiles('.github/actions/autoducks/developer-post/action.yml') != ''
   uses: ./.github/actions/autoducks/developer-post
   env:
+    AUTODUCKS_AGENT: developer
+    AUTODUCKS_STAGE: post
     ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
     BASE_BRANCH: ${{ steps.ctx.outputs.base_branch }}
     REPO: ${{ github.repository }}
@@ -105,6 +109,8 @@ Every hook receives a subset of these variables as environment variables:
 
 | Variable | Present on | Value |
 |----------|------------|-------|
+| `AUTODUCKS_AGENT` | all 16 hooks | the agent name, e.g. `developer` |
+| `AUTODUCKS_STAGE` | all 16 hooks | `pre` or `post` |
 | `ISSUE_NUM` | all 16 hooks | the triggering issue/feature number |
 | `REPO` | all 16 hooks | `owner/repo` |
 | `COMMENT_ID` | all 16 hooks | the triggering comment's ID, or `0` |

@@ -150,6 +150,7 @@ jobs:
           hashFiles('.github/actions/autoducks/reviewer-pre/action.yml') != ''
         uses: ./.github/actions/autoducks/reviewer-pre
         env:
+          AUTODUCKS_AGENT: reviewer
           AUTODUCKS_STAGE: pre
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           IS_PR: ${{ steps.ctx.outputs.is_pr }}
@@ -176,6 +177,7 @@ jobs:
           hashFiles('.github/actions/autoducks/reviewer-post/action.yml') != ''
         uses: ./.github/actions/autoducks/reviewer-post
         env:
+          AUTODUCKS_AGENT: reviewer
           AUTODUCKS_STAGE: post
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           IS_PR: ${{ steps.ctx.outputs.is_pr }}
