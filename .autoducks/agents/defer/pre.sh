@@ -61,7 +61,7 @@ else
 fi
 
 # ── Gather review feedback (read-only; PR need not be open) ─────────────
-its::list_pr_reviews "$PR_NUM" > /tmp/defer-reviews.json
+git::list_pr_reviews "$PR_NUM" > /tmp/defer-reviews.json
 its::list_comments "$PR_NUM" > /tmp/defer-comments.json
 
 REVIEW_COUNT=$(jq 'length' /tmp/defer-reviews.json 2>/dev/null || echo 0)
