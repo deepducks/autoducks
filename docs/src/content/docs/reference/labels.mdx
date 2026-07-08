@@ -21,6 +21,16 @@ Each pipeline stage has an in-progress and a done label:
 
 On failure, the in-progress label is removed and the done label is **not** applied — a stage label always reflects reality.
 
+## Review labels
+
+The [Reviewer](/agents/reviewer) sits outside the four-agent pipeline, but still carries its own stage labels — with two possible terminal states instead of one, driven by the review verdict:
+
+| Label | Applied by | Meaning |
+|-------|-----------|---------|
+| `Review:reviewing` | Reviewer | A PR review is in progress |
+| `Review:done` | Reviewer | Review finished with verdict `approve` or `comment` — no blocking findings |
+| `Review:changes` | Reviewer | Review finished with verdict `request-changes` — at least one `blocker`/`major` finding or a missing acceptance criterion |
+
 ## Classification and routing labels
 
 | Label | Applied by | Meaning |

@@ -15,7 +15,7 @@ Full documentation lives at **<https://autoducks.openvibes.tech>**.
 
 The same `execute` comment routes to the right agent by issue state — you never have to know which workflow runs. On a raw issue it cascades through the whole pipeline automatically (Architect → Engineer → Maestro → Developers). You can also chain agents explicitly: `/quack architect #auto:engineer+execute`.
 
-Utility agents: `/quack fix` (repair a failed task run), `/quack revert` (undo a feature, restore the human-authored issue), `/quack close` (tear everything down).
+Utility agents: `/quack review` (review a finished PR against its design and acceptance criteria — read-only, never merges), `/quack fix` (repair a failed task run), `/quack revert` (undo a feature, restore the human-authored issue), `/quack close` (tear everything down).
 
 ## Command syntax
 
