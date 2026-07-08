@@ -69,7 +69,7 @@ status_comment::note() {
   local label link
   label=$(status_comment::_label)
   link=$(status_comment::_run_link)
-  status_comment::_edit "$issue_id" "<img src=\"${AUTODUCKS_STATUS_GIF}\" width=\"24\" alt=\"Running...\" /> **\`${label}\`**: running on ${link}" "$details"
+  status_comment::_edit "$issue_id" "<img src=\"${AUTODUCKS_STATUS_GIF}\" height=\"32\" valign=\"middle\" alt=\"Running...\" /> **\`${label}\`**: running on ${link}" "$details"
 }
 
 # status_comment::_edit ISSUE_NUM HEADLINE [DETAILS]
