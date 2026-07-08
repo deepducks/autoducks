@@ -110,6 +110,7 @@ jobs:
           OVERRIDE_MODEL: ${{ steps.ctx.outputs.model }}
           OVERRIDE_EFFORT: ${{ steps.ctx.outputs.effort }}
           OVERRIDE_MAX_TURNS: ${{ steps.ctx.outputs.max_turns }}
+          STEERING_PROMPT: ${{ steps.ctx.outputs.steering_prompt }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
         if: steps.authz.outcome == 'success' && steps.pre.outputs.dor_skip != 'true'
