@@ -5,6 +5,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
+source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 
 trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
       status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
@@ -17,6 +18,10 @@ if [[ -f /tmp/autoducks-pre-failed ]]; then
   rm -f /tmp/autoducks-pre-failed
   exit 0
 fi
+
+# defer clears no in-progress label — pass an empty label so the helper
+# skips the abort and only handles the neutral status comment + exit.
+cancellation::handle "$ISSUE_NUM" ""
 
 # The LLM judged there was nothing substantive worth deferring — green skip,
 # no issue created.

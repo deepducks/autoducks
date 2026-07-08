@@ -6,6 +6,7 @@ source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
+source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/dispatch-chain.sh"
 
@@ -22,6 +23,8 @@ if [[ -f /tmp/autoducks-pre-failed ]]; then
   rm -f /tmp/autoducks-pre-failed
   exit 0
 fi
+
+cancellation::handle "$ISSUE_NUM" "Design:draft"
 
 # Check design spec was produced
 if [[ ! -f /tmp/design-spec.md ]]; then
