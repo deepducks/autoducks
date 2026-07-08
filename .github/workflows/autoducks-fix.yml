@@ -76,4 +76,5 @@ jobs:
           COMMENTER: ${{ github.event.comment.user.login }}
           MODEL: ${{ steps.directive.outputs.model || steps.agent.outputs.model }}
           EFFORT: ${{ steps.directive.outputs.effort || steps.agent.outputs.effort }}
+          JOB_STATUS: ${{ job.status }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
