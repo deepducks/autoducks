@@ -98,7 +98,7 @@ jobs:
             echo "commenter=${{ inputs.actor }}" >> "$GITHUB_OUTPUT"
           elif [[ "${{ github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/merge') }}" == "true" ]]; then
             echo "mode=merge" >> "$GITHUB_OUTPUT"
-            echo "issue_num=$(printf '%s' "$COMMENT_BODY" | grep -oE '#[0-9]+' | head -1 | tr -d '#')" >> "$GITHUB_OUTPUT"
+            echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
             echo "dry_run=false" >> "$GITHUB_OUTPUT"
             echo "commenter=${{ github.event.comment.user.login }}" >> "$GITHUB_OUTPUT"
           elif [[ "${{ github.event_name }}" == "issues" ]]; then
@@ -123,6 +123,7 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
           DRY_RUN: ${{ steps.ctx.outputs.dry_run }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
@@ -144,15 +145,17 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
           DRY_RUN: ${{ steps.ctx.outputs.dry_run }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Merge
         if: steps.authz.outcome == 'success' && steps.ctx.outputs.mode == 'merge'
-        run: bash .autoducks/agents/merge/merge.sh
+        run: bash .autoducks/agents/product/merge.sh
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ steps.ctx.outputs.commenter }}
           DRY_RUN: ${{ steps.ctx.outputs.dry_run }}

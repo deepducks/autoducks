@@ -77,7 +77,12 @@ LABELS=("Feature|6F42C1|Orchestration feature issue"
         "Bug|D73A4A|Autoducks bug pipeline"
         "Task|1D76DB|Autoducks task issue"
         "Draft|CCCCCC|Draft issue, not yet designed"
-        "smoke-test|FFA500|Smoke test marker")
+        "smoke-test|FFA500|Smoke test marker"
+        "Priority:Critical|B60205|Autoducks triage priority: Critical"
+        "Priority:High|D93F0B|Autoducks triage priority: High"
+        "Priority:Medium|FBCA04|Autoducks triage priority: Medium"
+        "Priority:Low|0E8A16|Autoducks triage priority: Low"
+        "Duplicate|CFD3D7|Closed as a duplicate of another issue")
 
 # Progress labels: sourced from progress-labels.sh so the two lists can't drift apart.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

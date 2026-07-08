@@ -70,7 +70,7 @@ fi
 
 # Copy scripts
 mkdir -p scripts
-for f in setup.sh install.sh update-triggers.sh smoke-test.sh smoke-test-plan.sh; do
+for f in setup.sh install.sh update-triggers.sh smoke-test.sh smoke-test-plan.sh smoke-test-product.sh; do
   if [[ -f "$TMP_DIR/scripts/$f" ]]; then
     cp "$TMP_DIR/scripts/$f" "scripts/$f"
   fi
