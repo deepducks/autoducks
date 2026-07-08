@@ -15,6 +15,10 @@
     "required_check": false,
     "check_name": "Autoducks: Reviewer"
   },
+  "resolver": {
+    "auto": true,
+    "opt_out_label": "Resolve:off"
+  },
   "triggers": {
     "architect": [],
     "engineer":  [],
@@ -24,7 +28,8 @@
     "close":     [],
     "review":    [],
     "rework":    [],
-    "defer":     []
+    "defer":     [],
+    "resolve":   []
   },
   "security": {
     "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"],
@@ -40,7 +45,8 @@
       "close":     { "trusted_associations": ["OWNER", "MEMBER"] },
       "review":    { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
       "rework":    { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
-      "defer":     { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR"] }
+      "defer":     { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR"] },
+      "resolve":   { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] }
     }
   }
 }

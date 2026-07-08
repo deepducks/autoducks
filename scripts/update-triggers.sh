@@ -194,6 +194,31 @@ EOF
   fi
 }
 
+# The Resolver auto-fires when a commit is pushed (synchronize) to an open,
+# non-draft feature/fix PR (base = integration branch, excluding task PRs the
+# same way the Reviewer does), plus the manual /resolve comment.
+render_resolver() {
+  local -a all=(resolve); mapfile -t c < <(read_custom resolve); all+=("${c[@]}")
+  cat <<'EOF'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.action == 'synchronize' &&
+       github.event.pull_request.draft == false &&
+       (startsWith(github.event.pull_request.head.ref, 'feature/') ||
+        startsWith(github.event.pull_request.head.ref, 'fix/')) &&
+       !startsWith(github.event.pull_request.base.ref, 'feature/') &&
+       !startsWith(github.event.pull_request.base.ref, 'fix/')) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.comment.author_association != 'MANNEQUIN' &&
+EOF
+  if ((${#all[@]} == 1)); then
+    printf "       startsWith(github.event.comment.body, '%s'))\n" "$(cmd_for resolve)"
+  else
+    emit_group "       " "(" "        " "))" "${all[@]}"
+  fi
+}
+
 # Rework and Defer fire on comments on both issues and PRs, just like the
 # Reviewer, so their guards also omit the `pull_request == null` clause — do
 # NOT reuse render_simple for this reason.
@@ -273,6 +298,7 @@ apply_file autoducks-engineer.yml  render_engineer
 apply_file autoducks-maestro.yml   render_maestro
 apply_file autoducks-developer.yml render_developer
 apply_file autoducks-reviewer.yml  render_reviewer
+apply_file autoducks-resolver.yml  render_resolver
 apply_file autoducks-rework.yml    render_rework
 apply_file autoducks-defer.yml     render_defer
 apply_file autoducks-fix.yml       render_simple fix
