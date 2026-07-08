@@ -32,7 +32,7 @@ if [[ -f /tmp/questions.md ]]; then
   ask_questions "$ISSUE_NUM" /tmp/questions.md
   react_to_comment "$COMMENT_ID" "+1"
   progress_labels::abort "$ISSUE_NUM" "Tactics:crafting"
-  status_comment::finish "$ISSUE_NUM" "**Blocked on questions.** The Engineer needs answers before it can plan — see the questions comment below, answer them, then re-run \`${AUTODUCKS_COMMAND} engineer\`."
+  status_comment::finish "$ISSUE_NUM" "**Blocked on questions.** The Engineer needs answers before it can plan — see the questions comment below, answer them, then re-run \`$(autoducks_command_for engineer)\`."
   # A blocked plan never continues the #auto: chain.
   exit 0
 fi
@@ -65,7 +65,7 @@ fi
 # can only happen if zone classification zeroed the design zone (the historical
 # Case C bug); abort loudly instead of wiping the human-authored spec.
 if [[ ! -s /tmp/design-zone.md && -s /tmp/issue-body-raw.md ]]; then
-  its::comment_issue "$ISSUE_NUM" "❌ Aborting \`${AUTODUCKS_COMMAND} engineer\`: the design zone resolved to empty while the issue body is non-empty. Publishing would wipe the human-authored design, so no changes were made. Check the \`<!-- autoducks:tactical:begin -->\` / \`<!-- autoducks:tactical:end -->\` markers and re-run."
+  its::comment_issue "$ISSUE_NUM" "❌ Aborting \`$(autoducks_command_for engineer)\`: the design zone resolved to empty while the issue body is non-empty. Publishing would wipe the human-authored design, so no changes were made. Check the \`<!-- autoducks:tactical:begin -->\` / \`<!-- autoducks:tactical:end -->\` markers and re-run."
   status_comment::fail "$ISSUE_NUM"
   react_to_comment "$COMMENT_ID" "confused"
   progress_labels::abort "$ISSUE_NUM" "Tactics:crafting"
@@ -162,14 +162,14 @@ if [[ "$TASK_COUNT" -ne 1 && -s /tmp/link-outcomes.tsv ]]; then
   elif (( LINKED == TOTAL )); then
     LINK_SUMMARY=$'\n> All tasks linked as native sub-issues — the parent issue now shows a progress bar in the GitHub UI.'
   else
-    LINK_SUMMARY=$"\n> Sub-issue linking: $LINKED/$TOTAL tasks linked ($ERR errors, $FORBID forbidden, $UNAVAIL unavailable). Retry \`${AUTODUCKS_COMMAND} engineer\` to reconcile."
+    LINK_SUMMARY=$"\n> Sub-issue linking: $LINKED/$TOTAL tasks linked ($ERR errors, $FORBID forbidden, $UNAVAIL unavailable). Retry \`$(autoducks_command_for engineer)\` to reconcile."
   fi
 fi
 
 if [[ "$TASK_COUNT" -eq 1 ]]; then
   status_comment::finish "$ISSUE_NUM" "**Tactical plan complete** (single task — no child issues created; the task lives in the tactical zone of this issue).
 
-**Next:** run \`${AUTODUCKS_COMMAND} execute\` to implement it.
+**Next:** run \`$(autoducks_command_for execute)\` to implement it.
 
 _Ran with \`${MODEL:-unknown}\` at effort \`${EFFORT:-unknown}\`._"
 else
@@ -178,7 +178,7 @@ else
 Tasks created: $TASK_NUMBERS. The plan, wave order, and \`## Progress\`
 checklist now live in the tactical zone of the issue body.
 ${LINK_SUMMARY}
-**Next:** run \`${AUTODUCKS_COMMAND} execute\` to start the Maestro, which
+**Next:** run \`$(autoducks_command_for execute)\` to start the Maestro, which
 dispatches tasks in dependency order.
 
 _Ran with \`${MODEL:-unknown}\` at effort \`${EFFORT:-unknown}\`._"
