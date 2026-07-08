@@ -19,6 +19,17 @@
     "auto": true,
     "opt_out_label": "Resolve:off"
   },
+  "product": {
+    "enabled": true,
+    "schedule": "0 9 * * *",
+    "priority_backend": "auto",
+    "project_number": null,
+    "priority_field": "Priority",
+    "auto_merge_duplicates": true,
+    "max_closes_per_run": 5,
+    "confidence_threshold": "high",
+    "max_issues_per_run": 100
+  },
   "triggers": {
     "architect": [],
     "engineer":  [],
@@ -29,7 +40,9 @@
     "review":    [],
     "rework":    [],
     "defer":     [],
-    "resolve":   []
+    "resolve":   [],
+    "triage":    [],
+    "merge":     []
   },
   "security": {
     "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"],
@@ -46,7 +59,9 @@
       "review":    { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
       "rework":    { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
       "defer":     { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR"] },
-      "resolve":   { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] }
+      "resolve":   { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
+      "product":   { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
+      "merge":     { "trusted_associations": ["OWNER", "MEMBER"] }
     }
   }
 }
