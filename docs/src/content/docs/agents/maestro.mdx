@@ -7,7 +7,7 @@ import { Aside } from '@astrojs/starlight/components';
 import Mermaid from '../../../components/Mermaid.astro';
 
 ```
-/quack execute
+/execute
 ```
 
 The Maestro is a **pure bash** state machine — no LLM invoked. It owns all pipeline git (branch + draft PR), reads the wave plan from the issue, determines which tasks are done, and dispatches the next wave of [Developers](/agents/developer) in parallel.
@@ -38,7 +38,7 @@ flowchart LR
 
 | Event | Condition |
 |-------|-----------|
-| Issue comment | `/quack execute` (or `run`/`work`) on a non-Task issue with the `Tactics:done` label |
+| Issue comment | `/execute` (or `run`/`work`) on a non-Task issue with the `Tactics:done` label |
 | PR merged | PR merged into a branch starting with `feature/` or `fix/` — the **advancement trigger** |
 | Workflow dispatch | `feature_issue` number — chain dispatch from the Engineer, or manual |
 

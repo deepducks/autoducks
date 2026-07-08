@@ -70,7 +70,7 @@ if [[ -z "$FEATURE_NUM" ]]; then
     # (D1) — the pipeline guarantees design + plan first.
     status_comment::delegate "$ISSUE_NUM" "This issue has no parent feature/bug and standalone execution was retired: every issue now goes through the pipeline so a reviewed design and plan exist before code is written.
 
-**Next:** comment \`${AUTODUCKS_COMMAND} execute\` on the parent issue — or, if this issue *is* the whole work item, run \`${AUTODUCKS_COMMAND} architect #auto:engineer+execute\` here to design, plan, and execute it."
+**Next:** comment \`$(autoducks_command_for execute)\` on the parent issue — or, if this issue *is* the whole work item, run \`$(autoducks_command_for architect) #auto:engineer+execute\` here to design, plan, and execute it."
     touch /tmp/autoducks-dor-delegated
     [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "dor_skip=true" >> "$GITHUB_OUTPUT"
     exit 0

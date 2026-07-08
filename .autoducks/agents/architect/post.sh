@@ -44,7 +44,7 @@ if [[ -f /tmp/architect-strip-tactical.flag ]]; then
     while read -r old; do
       [[ -n "$old" ]] || continue
       its::close_issue "$old" \
-        "Superseded by a design revision on #$ISSUE_NUM — re-run \`${AUTODUCKS_COMMAND} engineer\` to regenerate the plan." \
+        "Superseded by a design revision on #$ISSUE_NUM — re-run \`$(autoducks_command_for engineer)\` to regenerate the plan." \
         "not_planned" 2>/dev/null || true
     done < /tmp/architect-dropped-tasks.txt
   fi
@@ -92,7 +92,7 @@ The issue body now holds the full design — problem statement, proposed
 solution, technical design, dependencies, constraints, and out-of-scope notes.
 Review and edit anything you'd like to steer before planning.
 
-**Next:** run \`${AUTODUCKS_COMMAND} engineer\` to break the design into a tactical plan and task issues.
+**Next:** run \`$(autoducks_command_for engineer)\` to break the design into a tactical plan and task issues.
 
 _Ran with \`${MODEL:-unknown}\` at effort \`${EFFORT:-unknown}\`._"
 
@@ -103,7 +103,7 @@ if [[ "${ARCHITECT_STRIPPED:-0}" == "1" ]]; then
   fi
   FINISH_MSG="$FINISH_MSG
 
-⚠️ **The previous tactical plan was removed.** Because the design changed, the old plan and its task issues (\`${DROPPED_NUMBERS}\`) were discarded to keep them from going stale. **Re-run \`${AUTODUCKS_COMMAND} engineer\`** to regenerate the plan before executing."
+⚠️ **The previous tactical plan was removed.** Because the design changed, the old plan and its task issues (\`${DROPPED_NUMBERS}\`) were discarded to keep them from going stale. **Re-run \`$(autoducks_command_for engineer)\`** to regenerate the plan before executing."
 fi
 
 status_comment::finish "$ISSUE_NUM" "$FINISH_MSG"

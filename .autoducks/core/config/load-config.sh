@@ -35,10 +35,10 @@ if ! command -v jq &>/dev/null; then
   exit 1
 fi
 
-# ── Slash-command prefix (configurable; default /quack) ─────────────
+# ── Slash-command namespace (configurable; default none) ────────────
 export AUTODUCKS_COMMAND
-AUTODUCKS_COMMAND="$(jq -r '.command // "/quack"' "$_config")"
-[[ "$AUTODUCKS_COMMAND" =~ ^/[a-z0-9-]+$ ]] || AUTODUCKS_COMMAND="/quack"
+AUTODUCKS_COMMAND="$(jq -r '.command // ""' "$_config")"
+[[ "$AUTODUCKS_COMMAND" =~ ^$|^/?[a-z0-9-]+$ ]] || AUTODUCKS_COMMAND=""
 
 # ── Provider env vars ───────────────────────────────────────────────
 export AUTODUCKS_ITS_PROVIDER
@@ -86,6 +86,9 @@ AUTODUCKS_MERGE_METHOD="$(echo "$_merged" | jq -r '.merge_method // "auto"')"
 # ── Source provider interfaces ──────────────────────────────────────
 source "$AUTODUCKS_ROOT/providers/its/interface.sh"
 source "$AUTODUCKS_ROOT/providers/git/interface.sh"
+
+# ── Command-string helper (must be available in every runtime) ──────
+source "$AUTODUCKS_ROOT/core/config/command-string.sh"
 
 # Only source LLM interface outside GitHub Actions runtime
 if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then

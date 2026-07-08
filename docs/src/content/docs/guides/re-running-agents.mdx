@@ -45,8 +45,8 @@ Either one returns the issue to the discovery phase, where `/quack architect` an
 Two mechanisms work today, and a third is planned:
 
 1. **Edit the issue body.** The Architect always re-reads the current body on every run — a design you've hand-edited is preserved in revision mode rather than being rewritten, so editing the body is the primary way to steer it.
-2. **Leave a preceding issue comment.** The Engineer's revision context already includes the last 20 comments (and `/quack fix`'s failure context includes the last 10), so feedback left as a comment *before* you re-run reaches the agent even though the trigger comment itself carries no extra text today.
-3. **A trigger-comment prompt** *(planned enhancement)* — once it lands, free text placed directly in the trigger comment (e.g. `/quack architect <your instructions>` or `/quack engineer <your instructions>`) will be passed to the agent as additional context for that run, without needing a separate preceding comment. Until then, use (1) or (2).
+2. **Leave a preceding issue comment.** The Engineer's revision context already includes the last 20 comments (and `/fix`'s failure context includes the last 10), so feedback left as a comment *before* you re-run reaches the agent even though the trigger comment itself carries no extra text today.
+3. **A trigger-comment prompt** *(planned enhancement)* — once it lands, free text placed directly in the trigger comment (e.g. `/architect <your instructions>` or `/engineer <your instructions>`) will be passed to the agent as additional context for that run, without needing a separate preceding comment. Until then, use (1) or (2).
 
 <Aside type="tip">
 For the Engineer specifically, Questions Mode is the same mechanism: it posts blocking questions and stops the chain, and your answers — left as comments — are exactly the "preceding comment" context that steers the re-run.

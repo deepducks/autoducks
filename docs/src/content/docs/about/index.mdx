@@ -5,7 +5,7 @@ description: Why autoducks is built the way it is.
 
 ## One command, guarded stages
 
-autoducks is designed so the *simplest* thing a user can do — comment `/quack execute` on an issue — is also the *safest*: every agent has a **Definition of Ready**, and when a prerequisite is missing it dispatches the missing agent automatically instead of failing or, worse, coding without a plan. The pipeline guarantees that a reviewed design and a tactical plan exist before any code is written.
+autoducks is designed so the *simplest* thing a user can do — comment `/execute` on an issue — is also the *safest*: every agent has a **Definition of Ready**, and when a prerequisite is missing it dispatches the missing agent automatically instead of failing or, worse, coding without a plan. The pipeline guarantees that a reviewed design and a tactical plan exist before any code is written.
 
 This replaced an earlier "standalone execution" mode where any issue could go straight to code. It was convenient, but nothing guaranteed the issue was actually well-defined. The current answer keeps the convenience (one comment, full autonomy) and adds the guarantee — and because the Architect **revises rather than rewrites**, teams that write detailed specs pass through the design stage without losing a word.
 
@@ -45,7 +45,7 @@ autoducks does not proxy LLM calls, charge per-seat, or require a vendor bot. Yo
 
 ### Feedback that edits itself
 
-Each run posts **one** bot-owned status comment and edits it in place (Running → ✅ / 🔁 / ⚠️), instead of stacking milestone comments. Reactions (👀 👍 😕) stay on *your* comment. The bot never edits human content — which is what makes `/quack revert`'s "delete bot comments, restore the human body" contract possible.
+Each run posts **one** bot-owned status comment and edits it in place (Running → ✅ / 🔁 / ⚠️), instead of stacking milestone comments. Reactions (👀 👍 😕) stay on *your* comment. The bot never edits human content — which is what makes `/revert`'s "delete bot comments, restore the human body" contract possible.
 
 ### Security before feedback
 

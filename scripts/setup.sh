@@ -146,7 +146,7 @@ if [[ -z "$FIRST_ISSUE" ]]; then
   manual "Sub-issues API check skipped — repository has no issues to probe.
       Re-run scripts/setup.sh after your first issue exists, or trust the
       Engineer agent's runtime probe to report the state on the first
-      \`/quack engineer\` run."
+      \`/engineer\` run."
 else
   HTTP=$(gh api "repos/$REPO/issues/$FIRST_ISSUE/sub_issues" \
          --include -H "Accept: application/vnd.github+json" 2>/dev/null \

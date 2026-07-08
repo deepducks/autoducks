@@ -11,7 +11,6 @@ set -euo pipefail
 #                              (default: "infra")
 #   AUTODUCKS_FAIL_BRANCH    — pushed branch with preserved work (max_turns only)
 notify_failure() {
-  local _CMD="${AUTODUCKS_COMMAND:-/quack}"
   [[ -n "${_AUTODUCKS_NOTIFIED:-}" ]] && return 0
   _AUTODUCKS_NOTIFIED=1
 
@@ -28,28 +27,28 @@ notify_failure() {
   case "$category" in
     merge-conflict)
       diagnosis="The task PR could not be merged into the feature branch (likely a conflict with work merged by another wave task)."
-      retry="\`${_CMD} fix\` on this task"
+      retry="\`$(autoducks_command_for fix)\` on this task"
       ;;
     no-changes)
       diagnosis="The agent finished but produced no code changes."
-      retry="\`${_CMD} fix\` (or refine the issue spec and re-run)"
+      retry="\`$(autoducks_command_for fix)\` (or refine the issue spec and re-run)"
       ;;
     scope-missing)
       diagnosis="The agent did not produce the expected output file (spec / tactical plan)."
-      retry="re-run \`${_CMD} architect\` or \`${_CMD} engineer\`"
+      retry="re-run \`$(autoducks_command_for architect)\` or \`$(autoducks_command_for engineer)\`"
       ;;
     parse)
       diagnosis="The tactical plan could not be parsed into tasks."
-      retry="re-run \`${_CMD} engineer\`"
+      retry="re-run \`$(autoducks_command_for engineer)\`"
       ;;
     max_turns)
       diagnosis="The agent hit its turn limit before finishing — **partial work has been preserved** (see the branch below)."
-      retry="\`${_CMD} fix\` to resume from the partial branch"
+      retry="\`$(autoducks_command_for fix)\` to resume from the partial branch"
       ;;
     *)
       category="infra"
       diagnosis="The run hit an unexpected error before it could finish (API, git, or runtime issue)."
-      retry="\`${_CMD} fix\` to retry"
+      retry="\`$(autoducks_command_for fix)\` to retry"
       ;;
   esac
 
@@ -110,7 +109,6 @@ will **not** advance until the task is resolved.
 # act on it directly.
 # Usage: notify_conflict <issue_id> <run_id> <branch> <pr_number> [feature_issue_id]
 notify_conflict() {
-  local _CMD="${AUTODUCKS_COMMAND:-/quack}"
   local issue_id="$1"
   local run_id="$2"
   local branch="$3"
@@ -127,7 +125,7 @@ The agent finished its work, but PR #${pr_number} (branch \`${branch}\`) has a
 
 **Next:** resolve the conflict on PR #${pr_number} (rebase or merge the target
 branch into \`${branch}\` and fix the conflicting files), then comment
-\`${_CMD} fix\` to retry."
+\`$(autoducks_command_for fix)\` to retry."
 
   its::comment_issue "$issue_id" "$body" || true
 
@@ -139,7 +137,7 @@ wave orchestrator has paused and will **not** advance until it is resolved.
 
 📄 [View the run logs](https://github.com/$repo/actions/runs/$run_id).
 
-**Next:** resolve the conflict on PR #${pr_number}, then comment \`${_CMD} fix\`
+**Next:** resolve the conflict on PR #${pr_number}, then comment \`$(autoducks_command_for fix)\`
 on task #$issue_id; the orchestrator resumes automatically once its PR merges."
     its::comment_issue "$feature_issue_id" "$feature_body" || true
   fi

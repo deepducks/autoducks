@@ -1,19 +1,19 @@
 ---
 title: Lifecycle of an issue
-description: Everything that happens between "/quack execute" on a raw issue and a PR ready for review.
+description: Everything that happens between "/execute" on a raw issue and a PR ready for review.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 This is the whole system on one page: a raw issue driven to a reviewed PR by a single comment. Every row is something you can actually see in the issue tracker — a comment, a label, a branch, or a PR.
 
-**Setup:** issue **#42** — *"Add dark mode toggle"* — with a two-sentence body. You comment `/quack execute`.
+**Setup:** issue **#42** — *"Add dark mode toggle"* — with a two-sentence body. You comment `/execute`.
 
 ## The timeline
 
 | # | Actor | What happens | What you see |
 |---|-------|--------------|--------------|
-| 1 | You | Comment on #42 | `/quack execute` |
+| 1 | You | Comment on #42 | `/execute` |
 | 2 | Security gate | Authorizes you *before any feedback* | *(nothing — denied users get only a denial message)* |
 | 3 | **Engineer** | Claims the comment (issue isn't a Task and has no `Tactics:done`) | 👀 on your comment; status comment posted |
 | 4 | Engineer | Definition of Ready fails — no `Design:done` — delegates | Status edited: 🔁 *not ready — delegated*; Architect dispatched with chain `engineer+execute` |
@@ -48,7 +48,7 @@ Because of this, an interrupted pipeline resumes by re-issuing the same comment 
 
 - **Bug instead of feature:** the Architect labels it `Bug`; the pipeline branch becomes `fix/42-…`. Nothing else changes.
 - **Single-task plan:** the Engineer skips child issues; the Maestro dispatches the Developer on #42 itself.
-- **You review between stages:** run `/quack architect`, `engineer`, `execute` separately — the cascade only fills in stages you skipped.
+- **You review between stages:** run `/architect`, `engineer`, `execute` separately — the cascade only fills in stages you skipped.
 - **The Engineer has questions:** it posts them and stops the chain; answer in comments and re-run.
 
 <Aside type="tip">

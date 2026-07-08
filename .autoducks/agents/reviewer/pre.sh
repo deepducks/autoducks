@@ -48,7 +48,7 @@ else
 fi
 
 if [[ -z "$PR_NUM" ]]; then
-  skip_review "No open pull request was found for this issue. Run \`${AUTODUCKS_COMMAND} execute\` to implement it first, then re-run \`${AUTODUCKS_COMMAND} review\`."
+  skip_review "No open pull request was found for this issue. Run \`$(autoducks_command_for execute)\` to implement it first, then re-run \`$(autoducks_command_for review)\`."
 fi
 
 PR_META_JSON=$(git::get_pr "$PR_NUM")

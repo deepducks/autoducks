@@ -62,7 +62,7 @@ if body_has_markers /tmp/issue-body-raw.md; then
   SPLIT_RC=0
   split_body /tmp/issue-body-raw.md /tmp/design-zone-discard.md /tmp/tactical-zone-discard.md || SPLIT_RC=$?
   if [[ "$SPLIT_RC" -eq 2 ]]; then
-    its::comment_issue "$ISSUE_NUM" "❌ Tactical zone markers are malformed (mismatched or out of order). Please restore the \`<!-- autoducks:tactical:begin -->\` and \`<!-- autoducks:tactical:end -->\` markers in the issue body and re-run \`${AUTODUCKS_COMMAND} architect\`."
+    its::comment_issue "$ISSUE_NUM" "❌ Tactical zone markers are malformed (mismatched or out of order). Please restore the \`<!-- autoducks:tactical:begin -->\` and \`<!-- autoducks:tactical:end -->\` markers in the issue body and re-run \`$(autoducks_command_for architect)\`."
     _AUTODUCKS_NOTIFIED=1
     status_comment::fail "$ISSUE_NUM" 2>/dev/null || true
     react_to_comment "$COMMENT_ID" "confused"

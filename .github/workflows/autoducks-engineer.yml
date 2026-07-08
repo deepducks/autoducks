@@ -44,12 +44,12 @@ jobs:
        github.event.issue.pull_request == null &&
        github.event.comment.author_association != 'MANNEQUIN' &&
        (
-         startsWith(github.event.comment.body, '/quack engineer') ||
-         startsWith(github.event.comment.body, '/quack tactics') ||
+         startsWith(github.event.comment.body, '/engineer') ||
+         startsWith(github.event.comment.body, '/tactics') ||
          (
-           (startsWith(github.event.comment.body, '/quack execute') ||
-            startsWith(github.event.comment.body, '/quack work') ||
-            startsWith(github.event.comment.body, '/quack run')) &&
+           (startsWith(github.event.comment.body, '/execute') ||
+            startsWith(github.event.comment.body, '/work') ||
+            startsWith(github.event.comment.body, '/run')) &&
            !(github.event.issue.type.name == 'Task' ||
              contains(github.event.issue.labels.*.name, 'Task')) &&
            !contains(github.event.issue.labels.*.name, 'Tactics:done')

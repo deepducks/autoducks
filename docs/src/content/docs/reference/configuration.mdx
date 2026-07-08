@@ -11,7 +11,7 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
 
 ```json
 {
-  "command": "/quack",
+  "command": "",
   "providers": {
     "its": "github",
     "git": "github",
@@ -52,15 +52,32 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
 
 ## `command`
 
-The slash-command prefix. Must match `^/[a-z0-9-]+$`; anything else falls back to the default.
+An optional **namespace word**. Commands are short-form by default — a bare verb right after the slash (`/execute`, `/architect`) — and `command` is the escape hatch for teams that want (or need) a namespaced prefix instead (`/quack execute`, `/quack architect`), e.g. to avoid colliding with another bot's slash commands on the same repository.
 
-**Default:** `/quack`
+**Default:** `""` (empty — short-form commands, no namespace word)
 
-GitHub Actions evaluates workflow `if:` guards without reading repository files, so the prefix is **baked into the workflow YAML**. After changing it, regenerate and commit the guards:
+Validation is `/`-tolerant: `^$` (empty) or `^/?[a-z0-9-]+$` (a lowercase word, with or without a leading slash). `"quack"` and `"/quack"` are equivalent — both normalize to the namespace word `quack` and produce `/quack <verb>` triggers. Anything else falls back to the default (empty).
+
+```json
+{ "command": "" }       // short-form (default): /execute, /architect, /review...
+{ "command": "quack" }  // namespaced:            /quack execute, /quack architect...
+{ "command": "/quack" } // identical to above — the leading slash is optional
+```
+
+GitHub Actions evaluates workflow `if:` guards without reading repository files, so the namespace (like [custom trigger aliases](#custom-trigger-aliases)) is **baked into the workflow YAML**. After changing it, regenerate and commit the guards:
 
 ```bash
 bash scripts/update-triggers.sh
 ```
+
+### Bounded blast radius
+
+A bare verb (`/execute`) is more likely to appear at the start of an unrelated comment than a namespaced one (`/quack execute`) — that's the tradeoff for the shorter surface. Two independent safeguards bound the consequences of an off-target fire:
+
+- **The [Authorization Gate](/reference/security)** runs before anything else — an accidental match from an untrusted commenter is denied before any LLM call, comment, branch, or PR.
+- **Agents are safe, state-based no-ops when there's nothing to do** — they recompute from visible ITS/git state rather than blindly acting, so a stray trigger on an issue with no matching state (e.g. `/revert` on an issue that was never planned) does nothing destructive.
+
+If your repository's comment traffic makes even a gated, no-op accidental match undesirable, set `command` to a namespace word.
 
 ## `providers`
 
@@ -134,7 +151,7 @@ Per-team alias verbs, keyed by agent (`architect`, `engineer`, `execute`, `fix`,
 
 Rules: lowercase `[a-z0-9-]+`, no collision with built-in verbs/aliases, unique across agents. Aliases resolve to the canonical verb everywhere — routing, `#auto:` chains, and cascade included.
 
-Like the prefix, aliases must be **baked into the workflow guards**:
+Like the namespace, aliases must be **baked into the workflow guards**:
 
 ```bash
 bash scripts/update-triggers.sh

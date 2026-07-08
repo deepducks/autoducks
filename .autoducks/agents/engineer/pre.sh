@@ -65,7 +65,7 @@ if ! echo "$ISSUE_LABELS" | grep -qx 'Design:done'; then
   fi
   # Delegation refused (chain loop / too deep) — fail loudly instead of
   # planning on an unready issue.
-  its::comment_issue "$ISSUE_NUM" "❌ \`${AUTODUCKS_COMMAND} engineer\`: issue is not ready (missing \`Design:done\`) and the Architect could not be auto-dispatched (chain loop or depth limit). Run \`${AUTODUCKS_COMMAND} architect\` manually, then retry."
+  its::comment_issue "$ISSUE_NUM" "❌ \`$(autoducks_command_for engineer)\`: issue is not ready (missing \`Design:done\`) and the Architect could not be auto-dispatched (chain loop or depth limit). Run \`$(autoducks_command_for architect)\` manually, then retry."
   _AUTODUCKS_NOTIFIED=1
   status_comment::fail "$ISSUE_NUM"
   react_to_comment "${COMMENT_ID:-}" "confused"
@@ -91,7 +91,7 @@ if body_has_markers /tmp/issue-body-raw.md; then
   SPLIT_RC=0
   split_body /tmp/issue-body-raw.md /tmp/design-zone.md /tmp/tactical-zone-current.md || SPLIT_RC=$?
   if [[ "$SPLIT_RC" -eq 2 ]]; then
-    its::comment_issue "$ISSUE_NUM" "❌ Tactical zone markers are malformed (mismatched or out of order). Please restore the \`<!-- autoducks:tactical:begin -->\` and \`<!-- autoducks:tactical:end -->\` markers in the issue body and re-run \`${AUTODUCKS_COMMAND} engineer\`."
+    its::comment_issue "$ISSUE_NUM" "❌ Tactical zone markers are malformed (mismatched or out of order). Please restore the \`<!-- autoducks:tactical:begin -->\` and \`<!-- autoducks:tactical:end -->\` markers in the issue body and re-run \`$(autoducks_command_for engineer)\`."
     _AUTODUCKS_NOTIFIED=1
     status_comment::fail "$ISSUE_NUM"
     react_to_comment "$COMMENT_ID" "confused"
