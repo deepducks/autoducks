@@ -45,13 +45,19 @@ hashify() {
   echo "${out% }"
 }
 
-# report MESSAGE — milestone narration always flows into the persistent,
-# marker-anchored orchestration comment (one comment per feature, edited in
-# place across runs). For human-initiated runs the transient per-run status
-# comment stays reserved for the running → ✅ lifecycle headline only.
+# report MESSAGE [TERMINAL] — milestone narration always flows into the
+# persistent, marker-anchored orchestration comment (one comment per feature,
+# edited in place across runs). For human-initiated runs the transient
+# per-run status comment stays reserved for the running → ✅ lifecycle
+# headline only, so it is only finished when TERMINAL="true" (run
+# completion) — never on intermediate wave-dispatch/waiting narration.
 report() {
-  orchestrator_comment::upsert "$FEATURE" "$1"
-  [[ -s /tmp/autoducks-status-comment-id ]] && status_comment::finish "$FEATURE"
+  local msg="$1" terminal="${2:-false}"
+  orchestrator_comment::upsert "$FEATURE" "$msg"
+  if [[ "$terminal" == "true" ]]; then
+    local f; f=$(_status_comment::_id_file "$FEATURE")
+    [[ -s "$f" ]] && status_comment::finish "$FEATURE"
+  fi
   return 0
 }
 
@@ -69,7 +75,8 @@ if ! echo "$ISSUE_LABELS" | grep -qx 'Tactics:done'; then
   if chain::dispatch_prerequisite "engineer" "execute" "${AUTO_CHAIN:-}" "$FEATURE"; then
     DELEGATE_MSG="This issue has no \`Tactics:done\` label, so the **Engineer** was dispatched first to produce the tactical plan. Execution resumes automatically when planning finishes."
     orchestrator_comment::upsert "$FEATURE" "🔁 **Not ready to execute** — $DELEGATE_MSG"
-    [[ -s /tmp/autoducks-status-comment-id ]] && status_comment::delegate "$FEATURE"
+    _f=$(_status_comment::_id_file "$FEATURE")
+    [[ -s "$_f" ]] && status_comment::delegate "$FEATURE"
     react_to_comment "${COMMENT_ID:-}" "+1" 2>/dev/null || true
     exit 0
   fi
@@ -134,7 +141,7 @@ if [[ "$IS_SINGLE" == "true" ]]; then
     create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "$FEATURE"
     progress_labels::finish "$FEATURE" "Work:orchestrating" "Work:done"
     its::assign_issue "$FEATURE" "${COMMENTER:-}" 2>/dev/null || true
-    report "🎉 **Single-task plan complete!** The PR is ready for review."
+    report "🎉 **Single-task plan complete!** The PR is ready for review." "true"
   fi
 
   react_to_comment "${COMMENT_ID:-}" "+1" 2>/dev/null || true
@@ -290,7 +297,7 @@ Every task across all $TOTAL_WAVES waves has merged into the feature branch and
 the PR is ready.
 
 **Next:** review and merge the PR to ship, or comment \`$(autoducks_command_for close)\`
-to tear the pipeline artifacts down."
+to tear the pipeline artifacts down." "true"
   else
     # Blocked — not all previous waves done
     report "⏳ **Orchestrator waiting.**
