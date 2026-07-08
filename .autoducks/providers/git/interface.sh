@@ -40,9 +40,11 @@ done
 #   git::find_branches_matching(pattern)              → branch names, one per line
 #   git::update_pr_body(pr_number, body)
 #   git::mark_pr_ready(pr_number)
+#   git::mark_pr_draft(pr_number)
 #   git::get_pr(pr_number)                            → JSON object
 #   git::get_pr_diff(pr_number)                       → unified diff on stdout
 #   git::submit_pr_review(pr_number, event, body_file) → event ∈ {COMMENT, REQUEST_CHANGES, APPROVE}
+#   git::list_pr_reviews(pr_number)                    → JSON array (reviews + inline thread comments)
 
 REQUIRED_FUNCTIONS=(
   "git::create_branch"
@@ -61,9 +63,11 @@ REQUIRED_FUNCTIONS=(
   "git::find_branches_matching"
   "git::update_pr_body"
   "git::mark_pr_ready"
+  "git::mark_pr_draft"
   "git::get_pr"
   "git::get_pr_diff"
   "git::submit_pr_review"
+  "git::list_pr_reviews"
 )
 
 missing=0
