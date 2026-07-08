@@ -112,8 +112,9 @@ Consequences:
 
 - **User handles in CODEOWNERS** (`@alice`, `@bob`) — resolved by the gate directly. Works with the default token.
 - **Team handles in CODEOWNERS** (`@myorg/security-team`) — cannot be expanded with the default token. The gate logs a warning and skips the team entry; individual users listed elsewhere in CODEOWNERS still resolve.
+- **Team-based reviewer routing on the execution path** — cannot be expanded with the default token either. Task/feature PRs are still created, but without auto-assigned reviewers, and a warning is recorded in the run summary. The pipeline does not fail.
 
-To enable team expansion, provision a PAT or GitHub App token with `read:org` and expose it to the workflow as `AUTODUCKS_ORG_TOKEN`. The gate uses it if present, and falls back to `GITHUB_TOKEN` otherwise.
+To enable team expansion, provision a PAT or GitHub App token with `read:org` and expose it to the workflow as `AUTODUCKS_ORG_TOKEN`. The gate uses it if present, and falls back to `GITHUB_TOKEN` otherwise. The same `AUTODUCKS_ORG_TOKEN` also enables team expansion for execution-path reviewer routing — `read:org` is optional overall, and its absence only degrades these two team-expansion features to a warning, never a pipeline failure.
 
 ## Testing the gate with a sock-puppet account
 

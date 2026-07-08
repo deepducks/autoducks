@@ -46,6 +46,7 @@ its::add_label()               { :; }
 its::remove_label()            { :; }
 its::set_issue_type()          { :; }
 its::link_sub_issue()          { :; }
+its::sub_issues_available()    { :; }
 its::list_comments()           { :; }
 its::list_sub_issues()         { :; }
 its::get_issue_edit_history()  { :; }
@@ -307,6 +308,44 @@ run_authz "$D" \
   EVENT_NAME=issue_comment \
   REPO=x/y GH_TOKEN=t
 if [[ "$LAST_EXIT" -eq 0 ]]; then pass "root CODEOWNERS fallback works"; else fail "expected 0, got $LAST_EXIT"; fi
+
+echo "[3e] CODEOWNERS team unresolvable (read:org/403) → fail-closed default-deny"
+D=$(new_test_dir "t3e")
+write_config "$D" '{"codeowners":true}'
+cat > "$D/repo/.github/CODEOWNERS" <<EOF
+*   @acme/reviewers
+EOF
+mkdir -p "$D/bin"
+# Mock `gh` — simulates a missing `read:org` scope: the team members
+# lookup fails with a 403 on stderr and a non-zero exit.
+cat > "$D/bin/gh" <<'GH'
+#!/usr/bin/env bash
+case "$1" in
+  api)
+    echo "gh: HTTP 403: Resource not accessible by integration (required scopes: read:org)" >&2
+    exit 1
+    ;;
+esac
+exit 0
+GH
+chmod +x "$D/bin/gh"
+
+run_authz "$D" \
+  AUTODUCKS_AGENT=design \
+  ACTOR=zach \
+  AUTHOR_ASSOC=NONE \
+  EVENT_NAME=issue_comment \
+  REPO=x/y GH_TOKEN=t
+if [[ "$LAST_EXIT" -eq 77 ]]; then
+  pass "unresolved @org/team CODEOWNERS ref denies (fail-closed for authz)"
+else
+  fail "expected 77, got $LAST_EXIT"
+fi
+if grep -qi 'read:org\|required scopes\|HTTP 403' "$LAST_SUMMARY"; then
+  pass "scope-specific warning recorded for unresolvable team"
+else
+  fail "missing scope-specific warning: $(cat "$LAST_SUMMARY")"
+fi
 
 # ---------------------------------------------------------------------------
 # Test 4: Event bypasses

@@ -216,7 +216,11 @@ $(echo -e "$WORKLOG")"
 
     git::mark_pr_ready "$FINAL_PR_NUM" 2>/dev/null || true
 
-    # Request review from feature issue assignees
+    # Request review from feature issue assignees. Team-based reviewer
+    # routing can hit the same `read:org` scope limitation as CODEOWNERS
+    # expansion (see resolve-team.sh) — warn-and-continue so a missing
+    # AUTODUCKS_ORG_TOKEN degrades to "no auto-assigned reviewer", never a
+    # pipeline failure.
     ASSIGNEES=$(gh issue view "$FEATURE" --repo "$REPO" \
       --json assignees --jq '[.assignees[].login] | join(",")' 2>/dev/null || true)
     if [[ -n "$ASSIGNEES" ]]; then
