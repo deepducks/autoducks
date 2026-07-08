@@ -7,6 +7,19 @@ source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 
+trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
+      react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
+      progress_labels::abort "$ISSUE_NUM" "Spec:draft" 2>/dev/null || true; \
+      exit $_rc' ERR
+
+# pre.sh already posted its own failure comment, reacted, and aborted the
+# progress label (via the ERR trap or an explicit exit) — skip our checks so
+# we don't double-notify.
+if [[ -f /tmp/autoducks-pre-failed ]]; then
+  rm -f /tmp/autoducks-pre-failed
+  exit 0
+fi
+
 # Check if design spec was produced
 if [[ ! -f /tmp/design-spec.md ]]; then
   notify_failure "$ISSUE_NUM" "$RUN_ID"
