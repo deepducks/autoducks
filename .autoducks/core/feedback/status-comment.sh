@@ -27,6 +27,9 @@ status_comment::_label() {
     fix)       echo "Fix"       ;;
     revert)    echo "Revert"    ;;
     close)     echo "Close"     ;;
+    reviewer)  echo "Reviewer"  ;;
+    rework)    echo "Rework"    ;;
+    defer)     echo "Defer"     ;;
     *)         echo "${AUTODUCKS_AGENT:-agent}" ;;
   esac
 }
