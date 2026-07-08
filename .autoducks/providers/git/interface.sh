@@ -41,6 +41,8 @@ done
 #   git::update_pr_body(pr_number, body)
 #   git::mark_pr_ready(pr_number)
 #   git::get_pr(pr_number)                            → JSON object
+#   git::get_pr_diff(pr_number)                       → unified diff on stdout
+#   git::submit_pr_review(pr_number, event, body_file) → event ∈ {COMMENT, REQUEST_CHANGES, APPROVE}
 
 REQUIRED_FUNCTIONS=(
   "git::create_branch"
@@ -60,6 +62,8 @@ REQUIRED_FUNCTIONS=(
   "git::update_pr_body"
   "git::mark_pr_ready"
   "git::get_pr"
+  "git::get_pr_diff"
+  "git::submit_pr_review"
 )
 
 missing=0
