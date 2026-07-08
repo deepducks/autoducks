@@ -68,11 +68,13 @@ case "$VERDICT" in
     ;;
   request-changes)
     HEADLINE="🔴 **Review: request changes**"
-    NEXT="**Next:** run \`$(autoducks_command_for fix)\` on the task to address the findings, then re-run \`$(autoducks_command_for review)\`."
+    NEXT="**Next:** run \`$(autoducks_command_for rework)\` to address the findings on this PR now,
+or \`$(autoducks_command_for defer)\` to save them as a follow-up issue and merge as-is."
     ;;
   *)
     HEADLINE="💬 **Review: comment**"
-    NEXT="**Next:** address the feedback if needed, then merge PR #$PR_NUM."
+    NEXT="**Next:** run \`$(autoducks_command_for rework)\` to address the findings on this PR now,
+or \`$(autoducks_command_for defer)\` to save them as a follow-up issue and merge as-is."
     ;;
 esac
 
