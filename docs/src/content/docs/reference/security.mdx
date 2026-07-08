@@ -5,7 +5,7 @@ description: The Authorization Gate — threat model, trusted associations, conf
 
 import { Aside } from '@astrojs/starlight/components';
 
-Every autoducks trigger — every `/quack …` comment, every workflow dispatch — passes through the **Authorization Gate** before an agent runs. The gate is the single choke point between an untrusted event (a comment on a public repo) and a trusted action (spending your LLM budget to write code and open a PR).
+Every autoducks trigger — every `/<verb>` comment, every workflow dispatch — passes through the **Authorization Gate** before an agent runs. The gate is the single choke point between an untrusted event (a comment on a public repo) and a trusted action (spending your LLM budget to write code and open a PR).
 
 The gate is implemented by [`.autoducks/core/security/authorize.sh`](https://github.com/deepducks/autoducks/blob/main/.autoducks/core/security/authorize.sh). It is called at the top of every agent's `pre.sh` / `run.sh`. If it exits non-zero, the workflow stops before any LLM call, any comment, any branch, and any PR.
 
@@ -15,13 +15,13 @@ autoducks is designed to run on **public repositories** where anyone can open is
 
 ### Public-repo abuse
 
-A stranger opens an issue and comments `/quack execute` on a repository they don't contribute to. Without an authorization check, the workflow runs, spends the maintainer's LLM tokens, opens a branch, and leaves a PR. Multiplied across many strangers, this becomes a denial-of-wallet vector.
+A stranger opens an issue and comments `/execute` on a repository they don't contribute to. Without an authorization check, the workflow runs, spends the maintainer's LLM tokens, opens a branch, and leaves a PR. Multiplied across many strangers, this becomes a denial-of-wallet vector.
 
 **Mitigation:** the gate rejects the trigger unless the commenter's association with the repository is on the trusted list (see below).
 
 ### LLM-budget drain
 
-Even without malicious intent, a well-meaning drive-by comment (`/quack execute` from someone testing the bot on a public repo) causes real spend. The gate turns "who can spend my tokens" into an explicit config decision, not an implicit consequence of GitHub's permissions model.
+Even without malicious intent, a well-meaning drive-by comment (`/execute` from someone testing the bot on a public repo) causes real spend. The gate turns "who can spend my tokens" into an explicit config decision, not an implicit consequence of GitHub's permissions model.
 
 **Mitigation:** trusted associations default to `OWNER`, `MEMBER`, `COLLABORATOR` — three cohorts that already have a real relationship with the repository. `CONTRIBUTOR` is deliberately excluded (see below).
 
@@ -92,7 +92,7 @@ Keys: `architect`, `engineer`, `execute`, `fix`, `revert`, `close`. The **Maestr
 Per-agent overrides. If present, the per-agent `trusted_associations` **replaces** the global list for that specific agent — it is not merged. Use this to tighten destructive agents (e.g. `revert`, `close`) beyond the global default, or loosen read-only agents.
 
 <Aside type="caution">
-The per-agent list *replaces* the global list; it does not add to it. If you set `security.per_agent.revert.trusted_associations` to `["OWNER"]`, then `MEMBER`s can no longer run `/quack revert` even though they are on the global list.
+The per-agent list *replaces* the global list; it does not add to it. If you set `security.per_agent.revert.trusted_associations` to `["OWNER"]`, then `MEMBER`s can no longer run `/revert` even though they are on the global list.
 </Aside>
 
 ## CODEOWNERS integration
@@ -124,9 +124,9 @@ Because the gate keys off *who* commented, the only faithful way to test it is w
 1. **Create a second GitHub account** (a "sock puppet") that has *no* prior relationship with the repository. Do not add it as a collaborator, do not invite it to the org, do not merge any of its PRs.
 2. **Fork the repo** into the sock puppet's account. Verify by hovering the sock puppet's avatar in a fresh issue on the *upstream* repo — the association badge should say `NONE`, not `CONTRIBUTOR`.
 3. **Open a test issue** from the sock puppet on the upstream (public) repo. Give it a benign title like `Security gate test`.
-4. **Comment `/quack execute`** from the sock puppet.
+4. **Comment `/execute`** from the sock puppet.
 5. **Expect:** the workflow either does not run at all (if the gate rejects at the workflow-condition level) or runs, exits early with a non-zero code from `authorize.sh`, and leaves no branch, no PR, and no LLM invocation in the run logs. The trigger comment should not receive an 👀 reaction.
-6. **Repeat for every command surface** you rely on: `/quack architect`, `/quack engineer`, `/quack fix`, `/quack revert`, and `/quack close`.
+6. **Repeat for every command surface** you rely on: `/architect`, `/engineer`, `/fix`, `/revert`, and `/close`.
 7. **Now flip the sock puppet to trusted** (add as a collaborator, or add to `security.trusted_associations`) and re-run one command. Confirm it *does* run. This proves the gate is actually the thing blocking the earlier attempts, not an unrelated misconfiguration.
 
 <Aside type="tip">
@@ -137,8 +137,8 @@ Do this before publishing your repo, and again any time you change the `security
 
 `scripts/smoke-test.sh --security` automates the manual process above. It runs two scenarios back-to-back:
 
-- **Scenario A (allowed):** the authenticated runner posts `/quack execute` on a minimal feature issue and asserts the workflow proceeds normally (branch created, PR opened).
-- **Scenario B (denied):** a sock-puppet account posts `/quack execute` via a separate PAT and asserts the Authorization Gate fires correctly: 👎 reaction on the trigger comment, denial comment posted, no branch, no PR, and the LLM step skipped.
+- **Scenario A (allowed):** the authenticated runner posts `/execute` on a minimal feature issue and asserts the workflow proceeds normally (branch created, PR opened).
+- **Scenario B (denied):** a sock-puppet account posts `/execute` via a separate PAT and asserts the Authorization Gate fires correctly: 👎 reaction on the trigger comment, denial comment posted, no branch, no PR, and the LLM step skipped.
 
 ### Setting up `SOCK_PUPPET_TOKEN`
 

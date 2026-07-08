@@ -10,18 +10,18 @@ import { Aside } from '@astrojs/starlight/components';
 `#auto:` queues agents to run after the current one finishes, separated by `+`:
 
 ```
-/quack architect #auto:engineer+execute
+/architect #auto:engineer+execute
 ```
 
 ### Recipes
 
 | Goal | Comment |
 |------|---------|
-| Full pipeline, everything automatic | `/quack execute` *(the cascade builds the chain for you)* |
-| Full pipeline, explicit | `/quack architect #auto:engineer+execute` |
-| Design + plan, stop before code | `/quack architect #auto:engineer` |
-| Re-plan and re-execute after feedback | `/quack engineer #auto:execute` |
-| Design only | `/quack architect` |
+| Full pipeline, everything automatic | `/execute` *(the cascade builds the chain for you)* |
+| Full pipeline, explicit | `/architect #auto:engineer+execute` |
+| Design + plan, stop before code | `/architect #auto:engineer` |
+| Re-plan and re-execute after feedback | `/engineer #auto:execute` |
+| Design only | `/architect` |
 
 ### Semantics
 
@@ -35,13 +35,13 @@ import { Aside } from '@astrojs/starlight/components';
 ## Overrides
 
 ```
-/quack <verb> model:<m> effort:<e> turns:<n>
+/<verb> model:<m> effort:<e> turns:<n>
 ```
 
 | Override | Values | Also accepted |
 |----------|--------|---------------|
-| `model:` | `opus`, `sonnet`, `haiku`, any `claude-*` id | bare positional (`/quack execute opus`) |
-| `effort:` | `off`, `low`, `medium`, `high`, `max` | bare positional (`/quack execute max`) |
+| `model:` | `opus`, `sonnet`, `haiku`, any `claude-*` id | bare positional (`/execute opus`) |
+| `effort:` | `off`, `low`, `medium`, `high`, `max` | bare positional (`/execute max`) |
 | `turns:` | 1–1000 | `turns=`, `max-turns=`, `max_turns=` |
 
 ### How far an override reaches
@@ -52,7 +52,7 @@ import { Aside } from '@astrojs/starlight/components';
 | Chained agents (`#auto:` / cascade) | Applies **only if you set it explicitly** — otherwise each agent uses its own `defaults.json` |
 | Wave workers | The Maestro forwards your explicit overrides to every dispatched Developer |
 
-This is deliberate: `/quack architect model:opus #auto:engineer+execute` runs the *whole pipeline* on opus, while `/quack architect #auto:engineer+execute` lets the Architect use its default (opus) and the Developers theirs (sonnet).
+This is deliberate: `/architect model:opus #auto:engineer+execute` runs the *whole pipeline* on opus, while `/architect #auto:engineer+execute` lets the Architect use its default (opus) and the Developers theirs (sonnet).
 
 ### Resolution order
 
@@ -74,5 +74,5 @@ Cost tuning example — cheap workers, smart planner:
 { "model": "claude-sonnet-5", "effort": "high" }
 ```
 
-Then `/quack execute` plans with opus and builds with sonnet, no directive needed.
+Then `/execute` plans with opus and builds with sonnet, no directive needed.
 </Aside>

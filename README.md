@@ -8,22 +8,22 @@ Full documentation lives at **<https://autoducks.openvibes.tech>**.
 
 | Agent | Layer | What it does | Trigger phrases |
 |-------|-------|--------------|-----------------|
-| **Architect** | Design | Creates **or revises** the design of a feature/bug in the issue body | `/quack architect`, `/quack design` |
-| **Engineer** | Tactics | Breaks the design into task issues organized in dependency waves | `/quack engineer`, `/quack tactics` |
-| **Maestro** | Orchestration | Owns branches/PRs and dispatches execution waves in parallel | `/quack execute`, `/quack run`, `/quack work` |
+| **Architect** | Design | Creates **or revises** the design of a feature/bug in the issue body | `/architect`, `/design` |
+| **Engineer** | Tactics | Breaks the design into task issues organized in dependency waves | `/engineer`, `/tactics` |
+| **Maestro** | Orchestration | Owns branches/PRs and dispatches execution waves in parallel | `/execute`, `/run`, `/work` |
 | **Developer** | Build | Implements one task and merges its PR into the pipeline branch | (dispatched by the Maestro, or `execute` on a Task issue) |
 
-The same `execute` comment routes to the right agent by issue state — you never have to know which workflow runs. On a raw issue it cascades through the whole pipeline automatically (Architect → Engineer → Maestro → Developers). You can also chain agents explicitly: `/quack architect #auto:engineer+execute`.
+The same `execute` comment routes to the right agent by issue state — you never have to know which workflow runs. On a raw issue it cascades through the whole pipeline automatically (Architect → Engineer → Maestro → Developers). You can also chain agents explicitly: `/architect #auto:engineer+execute`.
 
-Utility agents: `/quack review` (review a finished PR against its design and acceptance criteria — read-only, never merges), `/quack fix` (repair a failed task run), `/quack revert` (undo a feature, restore the human-authored issue), `/quack close` (tear everything down).
+Utility agents: `/review` (review a finished PR against its design and acceptance criteria — read-only, never merges), `/fix` (repair a failed task run), `/revert` (undo a feature, restore the human-authored issue), `/close` (tear everything down).
 
 ## Command syntax
 
 ```
-/quack <trigger> [model:opus|sonnet|haiku] [effort:low|medium|high|max] [turns:N] [#auto:agent+agent]
+/<trigger> [model:opus|sonnet|haiku] [effort:low|medium|high|max] [turns:N] [#auto:agent+agent]
 ```
 
-The `/quack` prefix, trigger aliases, models, security, and branches are all configurable in `.autoducks/autoducks.json`.
+Commands are short-form by default — no prefix needed. Trigger aliases, models, security, branches, and an optional namespace (`/quack <trigger>`, for repos that want one) are all configurable in `.autoducks/autoducks.json`.
 
 ## Pluggable by design
 
@@ -44,10 +44,10 @@ See the [installation guide](https://autoducks.openvibes.tech/getting-started/in
 Open an issue describing what you want, then comment:
 
 ```
-/quack execute
+/execute
 ```
 
-The pipeline designs, plans, and implements it — opening a PR per task and a final PR for review. Prefer to review each stage? Run `/quack architect`, `/quack engineer`, and `/quack execute` one at a time.
+The pipeline designs, plans, and implements it — opening a PR per task and a final PR for review. Prefer to review each stage? Run `/architect`, `/engineer`, and `/execute` one at a time.
 
 ## Where to go next
 

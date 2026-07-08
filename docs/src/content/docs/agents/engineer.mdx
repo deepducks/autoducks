@@ -7,7 +7,7 @@ import { Aside } from '@astrojs/starlight/components';
 import Mermaid from '../../../components/Mermaid.astro';
 
 ```
-/quack engineer
+/engineer
 ```
 
 The Engineer decomposes a completed design into an execution plan: **task issues** with acceptance criteria, organized into **dependency waves** (tasks in the same wave run in parallel). The plan lives inside the issue body's *tactical zone*; the design above it is never touched.
@@ -36,8 +36,8 @@ flowchart LR
 
 | Event | Condition |
 |-------|-----------|
-| Issue comment | `/quack engineer` or `/quack tactics` |
-| Issue comment | `/quack execute` (or `run`/`work`) on an issue that is **not** a Task and does **not** have `Tactics:done` — execution intent is preserved: the plan chains straight into the Maestro |
+| Issue comment | `/engineer` or `/tactics` |
+| Issue comment | `/execute` (or `run`/`work`) on an issue that is **not** a Task and does **not** have `Tactics:done` — execution intent is preserved: the plan chains straight into the Maestro |
 | Workflow dispatch | Dispatched by the Architect's chain, or by the Maestro's Definition-of-Ready guard |
 
 ## Definition of Ready
@@ -82,10 +82,10 @@ See [Re-running agents](/guides/re-running-agents) for the full preserve/rewrite
 ## Overrides
 
 ```
-/quack engineer model:opus effort:max
-/quack engineer #auto:execute      # plan, then execute
+/engineer model:opus effort:max
+/engineer #auto:execute      # plan, then execute
 ```
 
 <Aside type="note">
-Leave review feedback as issue comments, then re-run `/quack engineer` — the revision context carries your comments to the planner.
+Leave review feedback as issue comments, then re-run `/engineer` — the revision context carries your comments to the planner.
 </Aside>
