@@ -13,7 +13,13 @@ set -euo pipefail
 #
 # Env: ISSUE_NUM (arg), REPO, RUN_ID, AUTODUCKS_AGENT
 
-_STATUS_ID_FILE="/tmp/autoducks-status-comment-id"
+# One id file per target issue/PR, so a single run can own an independent
+# status comment on several targets (e.g. the Reviewer mirrors to both the
+# feature issue and its PR). Single-target callers are unaffected — they always
+# pass the same issue_id, so start writes and finish reads the same file.
+_status_comment::_id_file() {
+  echo "/tmp/autoducks-status-comment-id.${1}"
+}
 
 # Hosted in this repo (D3: no third-party hotlinking).
 AUTODUCKS_STATUS_GIF="${AUTODUCKS_STATUS_GIF:-https://raw.githubusercontent.com/deepducks/autoducks/main/.autoducks/assets/loading.gif}"
@@ -39,7 +45,8 @@ status_comment::_run_link() {
 # Posts the Running… status comment and stashes its id for later edits.
 status_comment::start() {
   local issue_id="$1"
-  rm -f "$_STATUS_ID_FILE"
+  local f; f=$(_status_comment::_id_file "$1")
+  rm -f "$f"
   local label link body out cid
   label=$(status_comment::_label)
   link=$(status_comment::_run_link)
@@ -47,7 +54,7 @@ status_comment::start() {
   out=$(gh issue comment "$issue_id" --repo "$REPO" --body "$body" 2>/dev/null) || return 0
   # gh prints the comment URL: …/issues/N#issuecomment-<id>
   cid=$(echo "$out" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+' | head -1 || true)
-  [[ -n "$cid" ]] && echo "$cid" > "$_STATUS_ID_FILE"
+  [[ -n "$cid" ]] && echo "$cid" > "$f"
   return 0
 }
 
@@ -67,9 +74,10 @@ status_comment::_edit() {
   local issue_id="$1" headline="$2" details="${3:-}"
   local body="$headline"
   [[ -n "$details" ]] && body+=$'\n\n'"$details"
-  if [[ -s "$_STATUS_ID_FILE" ]]; then
+  local f; f=$(_status_comment::_id_file "$issue_id")
+  if [[ -s "$f" ]]; then
     local cid
-    cid=$(cat "$_STATUS_ID_FILE")
+    cid=$(cat "$f")
     if its::update_comment "$cid" "$body" 2>/dev/null; then
       return 0
     fi
