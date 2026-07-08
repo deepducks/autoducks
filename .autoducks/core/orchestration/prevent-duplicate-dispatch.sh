@@ -10,7 +10,7 @@ set -euo pipefail
 # reflects the dispatch ref rather than the task branch (which is created
 # inside execution/pre.sh), so no reliable per-task match exists for an
 # in-progress workflow run. The dispatch→PR window is protected by the
-# execution-side idempotency guard in .autoducks/agents/execution/pre.sh.
+# execution-side idempotency guard in .autoducks/agents/developer/pre.sh.
 prevent_duplicate_dispatch() {
   local task_number="$1"
   local feature_branch="$2"

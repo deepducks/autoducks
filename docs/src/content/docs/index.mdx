@@ -1,15 +1,62 @@
 ---
 title: autoducks
-description: Run any code agent, anywhere, with any provider.
+description: One comment runs design → plan → build on your own CI/CD, with your own LLM.
 template: splash
 hero:
-  tagline: Design → Plan → Execute — hands-free. Runs on your CI/CD platform, integrates with your issue tracker, connects to any LLM.
+  tagline: 'One comment — <code>/quack execute</code> — designs, plans, and builds. Agents run on your CI/CD platform, coordinate through your issue tracker, and call your own LLM.'
   actions:
-    - text: Get started
-      link: /getting-started/introduction
+    - text: Run your first issue
+      link: /getting-started/first-run
       icon: right-arrow
       variant: primary
+    - text: Command reference
+      link: /reference/slash-commands
+      icon: open-book
     - text: View on GitHub
       link: https://github.com/deepducks/autoducks
       icon: external
 ---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+import Mermaid from '../../components/Mermaid.astro';
+
+## The pipeline
+
+Four agents, one command. Each agent checks its own **Definition of Ready** and automatically dispatches the missing prerequisite — so `/quack execute` on a raw issue cascades through the whole pipeline.
+
+<Mermaid chart={`
+flowchart LR
+    A["Architect\\ndesign"]
+    E["Engineer\\nplan"]
+    M["Maestro\\norchestrate"]
+    D["Developer\\nbuild"]
+
+    A --> E --> M --> D
+    E -. "needs design?\\nruns Architect first" .-> A
+    M -. "needs plan?\\nruns Engineer first" .-> E
+
+    class A designPurple
+    class E tacticalPink
+    class M waveGreen
+    class D executionBlue
+
+    classDef designPurple fill:#f0d4f8,stroke:#a836e5,color:#a836e5
+    classDef tacticalPink fill:#f8d4e4,stroke:#e55398,color:#e55398
+    classDef waveGreen fill:#d4f8d4,stroke:#28a745,color:#28a745
+    classDef executionBlue fill:#cfe8ff,stroke:#0366d6,color:#0366d6
+`} />
+
+<CardGrid>
+  <Card title="Run your first issue" icon="rocket">
+    From a rough idea to a reviewed PR with one comment.
+    [Start here →](/getting-started/first-run)
+  </Card>
+  <Card title="Command reference" icon="open-book">
+    Every verb, override, and `#auto:` chain in one table.
+    [Slash commands →](/reference/slash-commands)
+  </Card>
+  <Card title="When things fail" icon="warning">
+    Status states, failure categories, and how to resume.
+    [Recovery guide →](/guides/when-things-fail)
+  </Card>
+</CardGrid>

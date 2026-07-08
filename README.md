@@ -1,21 +1,29 @@
 # autoducks
 
-autoducks lets you run code agents on your CI/CD platform, triggered by issue comments, with any LLM provider. Start with a single agent for task execution and add more layers as your needs grow — no need to adopt the full pipeline at once.
+autoducks lets you run code agents on your CI/CD platform, triggered by issue comments, with any LLM provider. One command drives a full design → plan → execute pipeline: each agent checks its own Definition of Ready and automatically dispatches the missing prerequisite, so you always get a reviewed design and plan before code is written.
 
 Full documentation lives at **<https://autoducks.openvibes.tech>**.
 
-## Layered agents, opt-in
+## Four agents, one pipeline
 
-Four agents compose into a pipeline. Each layer is independently usable.
+| Agent | Layer | What it does | Trigger phrases |
+|-------|-------|--------------|-----------------|
+| **Architect** | Design | Creates **or revises** the design of a feature/bug in the issue body | `/quack architect`, `/quack design` |
+| **Engineer** | Tactics | Breaks the design into task issues organized in dependency waves | `/quack engineer`, `/quack tactics` |
+| **Maestro** | Orchestration | Owns branches/PRs and dispatches execution waves in parallel | `/quack execute`, `/quack run`, `/quack work` |
+| **Developer** | Build | Implements one task and merges its PR into the pipeline branch | (dispatched by the Maestro, or `execute` on a Task issue) |
 
-| Layer | What it adds | Command |
-|-------|--------------|---------|
-| **Execution** | Implements a task from an issue, opens a PR | `/agents execute` |
-| **+ Tactical** | Breaks a feature spec into numbered task issues | `/agents devise` |
-| **+ Wave Orchestrator** | Runs tasks in parallel, respecting dependencies | automatic |
-| **+ Design** | Writes the spec from a rough idea | `/agents design` |
+The same `execute` comment routes to the right agent by issue state — you never have to know which workflow runs. On a raw issue it cascades through the whole pipeline automatically (Architect → Engineer → Maestro → Developers). You can also chain agents explicitly: `/quack architect #auto:engineer+execute`.
 
-A team that writes detailed issue specs can run Execution alone. A team working on small tasks can skip Tactical and Waves. Use as many or as few as you need.
+Utility agents: `/quack fix` (repair a failed task run), `/quack revert` (undo a feature, restore the human-authored issue), `/quack close` (tear everything down).
+
+## Command syntax
+
+```
+/quack <trigger> [model:opus|sonnet|haiku] [effort:low|medium|high|max] [turns:N] [#auto:agent+agent]
+```
+
+The `/quack` prefix, trigger aliases, models, security, and branches are all configurable in `.autoducks/autoducks.json`.
 
 ## Pluggable by design
 
@@ -31,17 +39,15 @@ curl -fsSL https://raw.githubusercontent.com/deepducks/autoducks/main/scripts/in
 
 See the [installation guide](https://autoducks.openvibes.tech/getting-started/installation/) for prerequisites and setup checks.
 
-If you're running autoducks on a **public repository**, read the [security guide](https://autoducks.openvibes.tech/reference/security/) first — the Authorization Gate is what stops strangers from spending your LLM budget.
-
 ## First command
 
-Open an issue describing a small change, then comment:
+Open an issue describing what you want, then comment:
 
 ```
-/agents execute
+/quack execute
 ```
 
-An LLM agent reads the issue, writes the code, and opens a PR. That's the recommended starting point — you can adopt the rest of the pipeline later.
+The pipeline designs, plans, and implements it — opening a PR per task and a final PR for review. Prefer to review each stage? Run `/quack architect`, `/quack engineer`, and `/quack execute` one at a time.
 
 ## Where to go next
 
@@ -49,18 +55,17 @@ An LLM agent reads the issue, writes the code, and opens a PR. That's the recomm
 |-------|------|
 | What autoducks is and how it works | <https://autoducks.openvibes.tech/getting-started/introduction/> |
 | Installation and setup | <https://autoducks.openvibes.tech/getting-started/installation/> |
-| Your first feature | <https://autoducks.openvibes.tech/getting-started/first-feature/> |
+| Your first run | <https://autoducks.openvibes.tech/getting-started/first-run/> |
 | Agents overview | <https://autoducks.openvibes.tech/agents/> |
-| Execution agent | <https://autoducks.openvibes.tech/agents/execution/> |
-| Tactical agent | <https://autoducks.openvibes.tech/agents/tactical/> |
-| Wave orchestrator | <https://autoducks.openvibes.tech/agents/wave-orchestrator/> |
-| Design agent | <https://autoducks.openvibes.tech/agents/design/> |
-| Utility commands (`fix`, `revert`, `close`) | <https://autoducks.openvibes.tech/agents/utilities/> |
+| Lifecycle of an issue | <https://autoducks.openvibes.tech/guides/pipeline-lifecycle/> |
+| Chaining & overrides | <https://autoducks.openvibes.tech/guides/chaining-and-overrides/> |
+| When things fail | <https://autoducks.openvibes.tech/guides/when-things-fail/> |
+| Migrating from `/agents` | <https://autoducks.openvibes.tech/guides/migrating-from-agents/> |
 | Slash command reference | <https://autoducks.openvibes.tech/reference/slash-commands/> |
 | Configuration | <https://autoducks.openvibes.tech/reference/configuration/> |
-| Runtimes | <https://autoducks.openvibes.tech/reference/runtimes/> |
+| Labels | <https://autoducks.openvibes.tech/reference/labels/> |
 | Branch naming | <https://autoducks.openvibes.tech/reference/branch-naming/> |
-| Security (Authorization Gate) | <https://autoducks.openvibes.tech/reference/security/> |
+| Security | <https://autoducks.openvibes.tech/reference/security/> |
 | Design philosophy | <https://autoducks.openvibes.tech/about/> |
 
 ## Contributing

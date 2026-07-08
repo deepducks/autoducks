@@ -8,6 +8,6 @@ trigger_loop_closure() {
 
   [[ -z "$feature_issue" || "$feature_issue" == "0" ]] && return 0
 
-  # No-op: pull_request: closed on autoducks-wave.yml is the canonical advancement trigger
+  # No-op: pull_request: closed on autoducks-maestro.yml is the canonical advancement trigger
   return 0
 }

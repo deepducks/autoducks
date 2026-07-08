@@ -17,10 +17,6 @@ reconcile_tasks() {
 
   : > /tmp/link-outcomes.tsv
 
-  # Ensure priority labels exist
-  for p in P0 P1 P2 P3; do
-    gh label create "priority:$p" --repo "$REPO" 2>/dev/null || true
-  done
   # Ensure Task label exists — color/desc must match scripts/setup.sh
   gh label create "Task" --color "1D76DB" --description "Autoducks task issue" \
     --repo "$REPO" 2>/dev/null || true

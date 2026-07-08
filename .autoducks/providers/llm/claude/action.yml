@@ -12,8 +12,8 @@ inputs:
     description: 'Claude model to use'
     required: false
     default: 'claude-sonnet-5'
-  reasoning:
-    description: 'Reasoning level (off, low, medium, high, max)'
+  effort:
+    description: 'Effort level (off, low, medium, high, max)'
     required: false
     default: 'high'
   max_turns:
@@ -51,9 +51,9 @@ runs:
       id: prompt
       shell: bash
       env:
-        REASONING: ${{ inputs.reasoning }}
+        EFFORT: ${{ inputs.effort }}
       run: |
-        case "$REASONING" in
+        case "$EFFORT" in
           off)    THINK_PHRASE="" ;;
           low)    THINK_PHRASE="Think before writing." ;;
           medium) THINK_PHRASE="Think hard before writing." ;;

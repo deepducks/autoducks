@@ -4,6 +4,13 @@ import starlight from '@astrojs/starlight';
 
 export default defineConfig({
   site: 'https://autoducks.dev',
+  redirects: {
+    '/agents/design': '/agents/architect',
+    '/agents/wave-orchestrator': '/agents/maestro',
+    '/agents/execution': '/agents/developer',
+    '/agents/tactical': '/agents/engineer',
+    '/getting-started/first-feature': '/getting-started/first-run',
+  },
   integrations: [
     starlight({
       expressiveCode: {
@@ -51,17 +58,27 @@ export default defineConfig({
           items: [
             { label: 'Introduction', slug: 'getting-started/introduction' },
             { label: 'Installation', slug: 'getting-started/installation' },
-            { label: 'Your first feature', slug: 'getting-started/first-feature' },
+            { label: 'Your first run', slug: 'getting-started/first-run' },
           ],
         },
         {
           label: 'Agents',
           items: [
             { label: 'Overview', slug: 'agents' },
-            { label: 'Design agent', slug: 'agents/design' },
-            { label: 'Wave orchestrator', slug: 'agents/wave-orchestrator' },
-            { label: 'Execution agent', slug: 'agents/execution' },
+            { label: 'Architect', slug: 'agents/architect' },
+            { label: 'Engineer', slug: 'agents/engineer' },
+            { label: 'Maestro', slug: 'agents/maestro' },
+            { label: 'Developer', slug: 'agents/developer' },
             { label: 'Utility commands', slug: 'agents/utilities' },
+          ],
+        },
+        {
+          label: 'Guides',
+          items: [
+            { label: 'Lifecycle of an issue', slug: 'guides/pipeline-lifecycle' },
+            { label: 'Chaining & overrides', slug: 'guides/chaining-and-overrides' },
+            { label: 'When things fail', slug: 'guides/when-things-fail' },
+            { label: 'Migrating from /agents', slug: 'guides/migrating-from-agents' },
           ],
         },
         {
@@ -69,9 +86,10 @@ export default defineConfig({
           items: [
             { label: 'Slash commands', slug: 'reference/slash-commands' },
             { label: 'Configuration', slug: 'reference/configuration' },
-            { label: 'Runtimes', slug: 'reference/runtimes' },
+            { label: 'Labels', slug: 'reference/labels' },
             { label: 'Branch naming', slug: 'reference/branch-naming' },
             { label: 'Security', slug: 'reference/security' },
+            { label: 'Runtimes', slug: 'reference/runtimes' },
           ],
         },
         {

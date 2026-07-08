@@ -20,7 +20,9 @@ from pathlib import Path
 ERROR_FILE = os.environ.get("PARSE_ERROR_FILE", "/tmp/parse-error.md")
 
 HEADING_RE = re.compile(
-    r"^### (?P<ref>\S+) — (?P<title>.+?) `priority:(?P<priority>P\d)`\s*$",
+    # Priority suffixes were retired (D14) but stay tolerated for plans
+    # produced by older installs / revisions that mimic the old format.
+    r"^### (?P<ref>\S+) — (?P<title>.+?)(?: `priority:P\d`)?\s*$",
     re.MULTILINE,
 )
 
@@ -34,7 +36,7 @@ SECTION_RE = re.compile(
 TEMPLATE_HINT = (
     "Required structure inside `## Tasks`:\n\n"
     "```\n"
-    "### T1 — Short title `priority:P0`\n\n"
+    "### T1 — Short title\n\n"
     "**Summary:** <one sentence, optionally followed by a ```code``` block>\n\n"
     "**Tasks:**\n- [ ] action 1\n- [ ] action 2\n\n"
     "**Acceptance Criteria:**\n- [ ] criterion 1\n\n"
@@ -133,8 +135,8 @@ def split_task_blocks(tasks_content: str, tasks_masked: str):
     matches = list(HEADING_RE.finditer(tasks_masked))
     if not matches:
         fail(
-            "No `### <ref> — <title> `priority:PN`` task headings found inside `## Tasks`.",
-            hint="Each task must start with e.g. `### T1 — Short title `priority:P0``.",
+            "No `### <ref> — <title>` task headings found inside `## Tasks`.",
+            hint="Each task must start with e.g. `### T1 — Short title`.",
             excerpt=tasks_content,
         )
     for i, m in enumerate(matches):
@@ -220,13 +222,12 @@ def main() -> None:
     for heading, body, body_masked in split_task_blocks(tasks_content, tasks_masked):
         ref_str = heading.group("ref")
         title = heading.group("title").strip()
-        priority = heading.group("priority")
         sections = parse_task_body(body, body_masked, ref_str)
         entries.append({
             "ref": coerce_ref(ref_str),
             "title": title,
             "body": build_issue_body(sections),
-            "labels": [f"priority:{priority}", "Task"],
+            "labels": ["Task"],
         })
 
     with open(out_path, "w") as f:

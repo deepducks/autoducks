@@ -5,7 +5,7 @@
 #
 # PURPOSE
 # -------
-# Generic smoke test for the autoducks-wave / autoducks-execute / autoducks-fix
+# Generic smoke test for the autoducks-maestro / autoducks-developer / autoducks-fix
 # workflow trio. Creates a feature issue with 3 trivial tasks in 2 waves, kickstarts the
 # orchestrator, and optionally waits for completion.
 #
@@ -24,8 +24,8 @@
 # REQUIREMENTS
 # ------------
 # - gh CLI authenticated with repo access
-# - autoducks-wave.yml, autoducks-execute.yml, autoducks-fix.yml workflows installed
-# - `Feature`, `Ready`, and `smoke-test` labels (created automatically if missing)
+# - autoducks-maestro.yml, autoducks-developer.yml, autoducks-fix.yml workflows installed
+# - `Feature`, `Tactics:done`, and `smoke-test` labels (created automatically if missing)
 # - ANTHROPIC_API_KEY secret configured
 # - Claude Code GitHub App installed on the repo
 # - Actions permission "Read and write" enabled
@@ -44,7 +44,7 @@
 #   Task 3: Create a second new file
 #
 # This validates:
-# - Wave orchestrator kickstart via /agents execute comment
+# - Wave orchestrator kickstart via /quack execute comment
 # - Task worker triggered by wave dispatch
 # - Branch creation under feature/<N>-<slug>/task/<T>-<slug>
 # - Auto PR creation and merge
@@ -52,15 +52,15 @@
 # - Wave progression (wave 1 → wave 2)
 # - Parallel task execution
 # - Final PR creation (feature/<N>-<slug> → main)
-# - Reaction 👀 on /agents execute trigger comment (workflow started)
+# - Reaction 👀 on /quack execute trigger comment (workflow started)
 # - Reaction 👍 after final PR opens (workflow succeeded)
-# - /agents close tears down branches, PRs, and tasks (when --cleanup)
+# - /quack close tears down branches, PRs, and tasks (when --cleanup)
 #
 # NOT COVERED (planned for a separate test harness):
-# - /agents devise end-to-end (this test skips planning, creates issues directly)
+# - /quack engineer end-to-end (this test skips planning, creates issues directly)
 # - Native issue types (Feature / Task) — set by the tactical-agent reconcile step
 # - Sub-issue relationships — same reason
-# - /agents revert path
+# - /quack revert path
 # =============================================================================
 
 set -euo pipefail
@@ -119,12 +119,12 @@ if [[ "$SECURITY" == true ]]; then
   echo ""
 
   # Ensure labels exist
-  gh label create "Ready"      --color "0E8A16" --description "Plan complete, ready for execution" $REPO_ARG 2>/dev/null || true
+  gh label create "Tactics:done" --color "D93F0B" --description "Tactical plan complete" $REPO_ARG 2>/dev/null || true
   gh label create "smoke-test" --color "FFA500" --description "Smoke test" $REPO_ARG 2>/dev/null || true
   gh label create "priority:P0" --color "B60205" --description "Critical" $REPO_ARG 2>/dev/null || true
 
   # ---------------------------------------------------------------------------
-  # Scenario A — Authorized trigger: runner posts /agents execute → proceeds
+  # Scenario A — Authorized trigger: runner posts /quack execute → proceeds
   # ---------------------------------------------------------------------------
   echo "--- Scenario A: Authorized trigger ---"
 
@@ -151,7 +151,7 @@ None")
 
   FEATURE_A_URL=$(gh issue create $REPO_ARG \
     --title "Security Scenario A: Authorized ${TIMESTAMP}" \
-    --label "Feature,Ready,smoke-test" \
+    --label "Feature,Tactics:done,smoke-test" \
     --body "## Purpose
 
 Security smoke test — authorized trigger path.
@@ -173,7 +173,7 @@ waves:
   gh api "repos/$REPO_NAME/issues/$FEATURE_A" --method PATCH -f "type=Feature" --silent 2>/dev/null \
     || echo "  ⚠️  Could not set issue type=Feature"
 
-  COMMENT_A_URL=$(gh issue comment $FEATURE_A $REPO_ARG --body "/agents execute")
+  COMMENT_A_URL=$(gh issue comment $FEATURE_A $REPO_ARG --body "/quack execute")
   COMMENT_A_ID=$(echo "$COMMENT_A_URL" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+$' || echo "")
   echo "  Kickstart comment posted (id: ${COMMENT_A_ID:-unknown})"
 
@@ -228,14 +228,14 @@ waves:
   echo ""
 
   # ---------------------------------------------------------------------------
-  # Scenario B — Denied trigger: sock-puppet (NONE) posts /agents execute
+  # Scenario B — Denied trigger: sock-puppet (NONE) posts /quack execute
   # ---------------------------------------------------------------------------
   echo "--- Scenario B: Unauthorized trigger (sock-puppet, NONE association) ---"
 
   FEATURE_B_URL=$(gh issue create $REPO_ARG \
     --title "Security Scenario B: Denied ${TIMESTAMP}" \
-    --label "Feature,Ready,smoke-test" \
-    --body "Sandbox issue — tests that /agents execute from an unauthorized account is denied by the Authorization Gate.")
+    --label "Feature,Tactics:done,smoke-test" \
+    --body "Sandbox issue — tests that /quack execute from an unauthorized account is denied by the Authorization Gate.")
   FEATURE_B=$(echo "$FEATURE_B_URL" | grep -oE '[0-9]+$')
   echo "  Sandbox feature: #$FEATURE_B"
 
@@ -245,11 +245,11 @@ waves:
   # Capture timestamp before posting for workflow run lookup
   B_RUN_BEFORE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-  echo "  Posting /agents execute as sock-puppet (NONE association)..."
+  echo "  Posting /quack execute as sock-puppet (NONE association)..."
   B_COMMENT_ID=$(GH_TOKEN="$SOCK_PUPPET_TOKEN" gh api \
     "repos/$REPO_NAME/issues/$FEATURE_B/comments" \
     --method POST \
-    -f "body=/agents execute" \
+    -f "body=/quack execute" \
     --jq '.id' 2>/dev/null || echo "")
 
   if [[ -z "$B_COMMENT_ID" ]]; then
@@ -381,7 +381,7 @@ echo ""
 
 # --- Ensure labels exist ---
 echo "[1/5] Ensuring labels exist..."
-gh label create "Ready"   --color "0E8A16" --description "Plan complete, ready for execution" $REPO_ARG 2>/dev/null || true
+gh label create "Tactics:done" --color "D93F0B" --description "Tactical plan complete" $REPO_ARG 2>/dev/null || true
 gh label create "smoke-test" --color "FFA500" --description "Smoke test" $REPO_ARG 2>/dev/null || true
 gh label create "priority:P0" --color "B60205" --description "Critical" $REPO_ARG 2>/dev/null || true
 
@@ -509,7 +509,7 @@ fi
 
 META_URL=$(gh issue create $REPO_ARG \
   --title "Feature: Smoke Test ${TIMESTAMP}" \
-  --label "Feature,Ready,smoke-test" \
+  --label "Feature,Tactics:done,smoke-test" \
   --body "$META_BODY")
 FEATURE=$(echo "$META_URL" | grep -oE '[0-9]+$')
 echo "  Feature: #$FEATURE"
@@ -521,7 +521,7 @@ gh api "repos/$REPO_NAME/issues/$FEATURE" --method PATCH -f "type=Feature" --sil
 
 # --- Kickstart ---
 echo "[4/5] Kickstarting the loop..."
-KICKSTART_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/agents execute")
+KICKSTART_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/quack execute")
 KICKSTART_ID=$(echo "$KICKSTART_URL" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+$' || echo "")
 echo "  Kickstart comment posted (id: ${KICKSTART_ID:-unknown})."
 
@@ -585,15 +585,15 @@ while [[ $WAITED -lt $MAX_WAIT ]]; do
 
       if [[ "$CLEANUP" == true ]]; then
         echo ""
-        echo "Cleaning up via /agents close (also exercises the close workflow)..."
+        echo "Cleaning up via /quack close (also exercises the close workflow)..."
 
-        # First close the final feature PR if it's still open — /agents close
+        # First close the final feature PR if it's still open — /quack close
         # will close it too, but doing it here avoids a GitHub-API race.
         gh pr close $PR_NUM $REPO_ARG --comment "Smoke test validated — closing." 2>/dev/null || true
 
-        # Trigger /agents close on the feature issue
-        gh issue comment $FEATURE $REPO_ARG --body "/agents close"
-        echo "  /agents close triggered. Waiting for teardown..."
+        # Trigger /quack close on the feature issue
+        gh issue comment $FEATURE $REPO_ARG --body "/quack close"
+        echo "  /quack close triggered. Waiting for teardown..."
 
         # Poll for feature issue closed state (up to 60s)
         CLOSE_WAITED=0
@@ -608,7 +608,7 @@ while [[ $WAITED -lt $MAX_WAIT ]]; do
         done
 
         if [[ "$STATE" != "CLOSED" ]]; then
-          echo "  ⚠️  /agents close didn't finish within 60s — falling back to manual cleanup"
+          echo "  ⚠️  /quack close didn't finish within 60s — falling back to manual cleanup"
           for i in $TASK1 $TASK2 $TASK3 $FEATURE; do
             gh issue close $i $REPO_ARG --comment "Smoke test cleanup" 2>/dev/null || true
           done

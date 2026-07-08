@@ -1,0 +1,78 @@
+---
+title: Chaining & overrides
+description: Drive multiple agents with one comment, and tune model, effort, and turns per run.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Chaining with `#auto:`
+
+`#auto:` queues agents to run after the current one finishes, separated by `+`:
+
+```
+/quack architect #auto:engineer+execute
+```
+
+### Recipes
+
+| Goal | Comment |
+|------|---------|
+| Full pipeline, everything automatic | `/quack execute` *(the cascade builds the chain for you)* |
+| Full pipeline, explicit | `/quack architect #auto:engineer+execute` |
+| Design + plan, stop before code | `/quack architect #auto:engineer` |
+| Re-plan and re-execute after feedback | `/quack engineer #auto:execute` |
+| Design only | `/quack architect` |
+
+### Semantics
+
+- **Order matters** — verbs run left to right after the current agent.
+- **Aliases normalize**: `#auto:tactics+run` ≡ `#auto:engineer+execute` (custom aliases too).
+- **Dedup + cap**: a verb appears at most once per chain; chains cap at 5 verbs.
+- **Loop protection**: a Definition-of-Ready delegation refuses to dispatch an agent that's already in the chain, failing loudly instead of looping.
+- **Blocking stops the chain**: Questions Mode or any failure halts the remaining chain — resolve and re-run.
+- **The cascade composes with your chain**: if the Engineer isn't ready, your pending chain is re-queued *behind* the Architect, not lost. An `execute`-routed run keeps your execution intent the same way.
+
+## Overrides
+
+```
+/quack <verb> model:<m> effort:<e> turns:<n>
+```
+
+| Override | Values | Also accepted |
+|----------|--------|---------------|
+| `model:` | `opus`, `sonnet`, `haiku`, any `claude-*` id | bare positional (`/quack execute opus`) |
+| `effort:` | `off`, `low`, `medium`, `high`, `max` | bare positional (`/quack execute max`) |
+| `turns:` | 1–1000 | `turns=`, `max-turns=`, `max_turns=` |
+
+### How far an override reaches
+
+| Path | Behavior |
+|------|----------|
+| The triggered run | Always applies |
+| Chained agents (`#auto:` / cascade) | Applies **only if you set it explicitly** — otherwise each agent uses its own `defaults.json` |
+| Wave workers | The Maestro forwards your explicit overrides to every dispatched Developer |
+
+This is deliberate: `/quack architect model:opus #auto:engineer+execute` runs the *whole pipeline* on opus, while `/quack architect #auto:engineer+execute` lets the Architect use its default (opus) and the Developers theirs (sonnet).
+
+### Resolution order
+
+For each parameter, the first defined value wins:
+
+1. Inline directive in your comment
+2. `.autoducks/agents/<agent>/defaults.json`
+3. `defaults` in `.autoducks/autoducks.json`
+4. Provider default (`max_turns` only: `50`)
+
+<Aside type="tip">
+Cost tuning example — cheap workers, smart planner:
+
+```json
+// .autoducks/agents/engineer/defaults.json
+{ "model": "claude-opus-4-8", "effort": "high" }
+
+// .autoducks/agents/developer/defaults.json
+{ "model": "claude-sonnet-5", "effort": "high" }
+```
+
+Then `/quack execute` plans with opus and builds with sonnet, no directive needed.
+</Aside>

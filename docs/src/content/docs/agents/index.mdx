@@ -1,63 +1,92 @@
 ---
 title: Agents overview
-description: All autoducks agents, their roles, and how they interact.
+description: The four pipeline agents, their guards, and how one command routes between them.
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 import Mermaid from '../../../components/Mermaid.astro';
 
-autoducks agents are organized into **adoptable layers** — start with the Execution agent alone and add layers as your needs grow. You don't need to adopt everything at once.
-
-## Layers
+autoducks runs four pipeline agents — **Architect → Engineer → Maestro → Developer** — plus three utilities. You drive them with one command surface, and each agent guards its own entry: if a prerequisite is missing, the agent **dispatches it automatically** and re-queues itself behind it (the *Definition-of-Ready cascade*).
 
 <Mermaid chart={`
 flowchart LR
-    E["Execution\n/agents execute"]
-    W["+ Wave Orchestrator\nparallel task dispatch"]
-    T["+ Tactical\ntask decomposition"]
-    D["+ Design\nspec generation"]
+    A["Architect\\ndesign"]
+    E["Engineer\\nplan"]
+    M["Maestro\\norchestrate"]
+    D["Developer\\nbuild"]
 
-    E --> W --> T --> D
+    A --> E --> M --> D
+    E -. "no Design:done →\\nArchitect first" .-> A
+    M -. "no Tactics:done →\\nEngineer first" .-> E
 
-    class E executionBlue
-    class W waveGreen
-    class T tacticalPink
-    class D designPurple
+    class A designPurple
+    class E tacticalPink
+    class M waveGreen
+    class D executionBlue
 
-    classDef executionBlue fill:#cfe8ff,stroke:#0366d6,color:#0366d6
-    classDef waveGreen fill:#d4f8d4,stroke:#28a745,color:#28a745
-    classDef tacticalPink fill:#f8d4e4,stroke:#e55398,color:#e55398
     classDef designPurple fill:#f0d4f8,stroke:#a836e5,color:#a836e5
+    classDef tacticalPink fill:#f8d4e4,stroke:#e55398,color:#e55398
+    classDef waveGreen fill:#d4f8d4,stroke:#28a745,color:#28a745
+    classDef executionBlue fill:#cfe8ff,stroke:#0366d6,color:#0366d6
 `} />
 
-Start at **Execution** and add layers progressively. Each layer is independent — you can use Tactical without Design, or run Execution directly without any orchestration.
+## The four agents at a glance
 
-| Agent | Command | Type | What it does |
-|-------|---------|------|--------------|
-| [Design](/agents/design) | `/agents design` | LLM | Writes a technical spec from a feature request |
-| [Tactical](/agents/tactical) | `/agents devise` | LLM | Decomposes the spec into numbered task issues |
-| [Wave Orchestrator](/agents/wave-orchestrator) | `/agents execute` (on Feature) | Bash | Sequences and dispatches execution agents by wave |
-| [Execution](/agents/execution) | `/agents execute` (on task) | LLM | Implements a single task and opens a PR |
+| | [**Architect**](/agents/architect) | [**Engineer**](/agents/engineer) | [**Maestro**](/agents/maestro) | [**Developer**](/agents/developer) |
+|---|---|---|---|---|
+| **Purpose** | Creates **or revises** the design of features and bugs | Creates the execution plan: tasks + dependency waves | Coordinates parallel execution waves, owns branches/PRs | Implements one task |
+| **Type** | LLM | LLM | Bash (no LLM) | LLM |
+| **Trigger phrases** | `architect`, `design` | `engineer`, `tactics` — or `execute` on an unplanned issue | `execute`, `run`, `work` on an issue with `Tactics:done` | same verbs, on a Task issue |
+| **Definition of Ready** | none (any issue) | `Design:done` | `Tactics:done` | Task with a parent whose pipeline branch exists |
+| **Auto-dispatch when not ready** | — | Architect | Engineer `#auto:execute` | Maestro on the parent |
+| **Stage labels** | `Design:draft` → `Design:done` | `Tactics:crafting` → `Tactics:done` | `Work:orchestrating` → `Work:done` | `Work:coding` → `Work:done` |
+| **Definition of Done** | structured design; type/label `Feature`/`Bug` | plan + subtasks created and linked | all subtasks closed, final PR ready | task PR merged; task closed |
+
+## How `execute` routes
+
+The same comment is claimed by exactly **one** workflow, decided by issue state — you never pick the agent yourself:
+
+| You comment `/quack execute` on… | Who answers |
+|---|---|
+| A **Task** issue (type or label `Task`) | Developer |
+| An issue with the **`Tactics:done`** label | Maestro |
+| Anything else (raw issue, or designed but unplanned) | Engineer — cascading to the Architect if `Design:done` is missing |
+
+So `/quack execute` on a fresh issue runs the whole pipeline: Architect → Engineer → Maestro → Developers. See the [lifecycle walkthrough](/guides/pipeline-lifecycle) for what that looks like comment by comment.
 
 ## Utility commands
 
 | Command | Type | What it does |
 |---------|------|--------------|
-| [`/agents fix`](/agents/utilities#agents-fix) | LLM | Retries a failed task using failure context |
-| [`/agents revert`](/agents/utilities#agents-revert) | Bash | Undoes tactical planning, restores the original issue |
-| [`/agents close`](/agents/utilities#agents-close) | Bash | Full cleanup: closes issues, PRs, and branches |
-
-See the [Utility commands](/agents/utilities) page for full details.
+| [`/quack fix`](/agents/utilities#quack-fix) | LLM | Repairs a failed task run, resuming preserved partial work |
+| [`/quack revert`](/agents/utilities#quack-revert) | Bash | Undoes planning, restores the human-authored issue |
+| [`/quack close`](/agents/utilities#quack-close) | Bash | Full cleanup: closes issues, PRs, and deletes branches |
 
 ## LLM vs. bash
 
-A deliberate design choice: **only agents that need reasoning use LLM**. Orchestration, reconciliation, and cleanup are pure deterministic bash.
+A deliberate design choice: **only agents that need reasoning use an LLM**. Orchestration, reconciliation, and cleanup are pure deterministic bash.
 
 | Needs LLM | Pure bash |
 |-----------|-----------|
-| Design, Tactical, Execution, Fix | Wave Orchestrator, Revert, Close |
+| Architect, Engineer, Developer, Fix | Maestro, Revert, Close |
 
-This makes wave progression fast, cheap (no API calls), and auditable. Bash agents can be read and understood without running them.
+This makes wave progression fast, cheap (no API calls), and auditable.
+
+## Feedback protocol
+
+Every run gives feedback in two layers:
+
+1. **Reactions on your comment** — 👀 started, 👍 success, 😕 failure.
+2. **A bot-owned status comment**, edited in place as the run progresses:
+
+| Status | Meaning |
+|--------|---------|
+| <img src="https://raw.githubusercontent.com/deepducks/autoducks/main/.autoducks/assets/loading.gif" width="16" alt="spinner" /> **`Agent`**: running on *workflow #id* | The run is in progress |
+| ✅ **`Agent`**: finished working | Done — the friendly details and next step follow |
+| 🔁 **`Agent`**: not ready — delegated | A Definition-of-Ready guard dispatched the prerequisite agent |
+| ⚠️ **`Agent`**: failed | See the categorized failure report posted below it |
+
+The bot never edits *your* comment — reactions stay on it, and `/quack revert` can safely delete all bot content while preserving everything human-authored.
 
 ## Provider abstraction
 
@@ -69,16 +98,4 @@ All agents use three provider interfaces:
 | **Git** | `git::` | `github` | Branches, commits, merges |
 | **LLM** | `llm::` | `claude` | Agent reasoning, code writing |
 
-Switching providers requires implementing the same function signatures under a new provider directory — agent logic stays unchanged. For example, adding GitLab support means creating `providers/its/gitlab/` with the same function surface as `providers/its/github/`.
-
-## Reaction protocol
-
-All agents use emoji reactions to report status on the trigger comment:
-
-| Emoji | Meaning |
-|-------|---------|
-| 👀 | Agent started (pre-execution) |
-| 👍 | Agent completed successfully |
-| 😕 | Agent failed |
-
-This lets you see at a glance which command triggered which run and whether it succeeded — without reading log output.
+Switching providers means implementing the same function signatures under a new provider directory — agent logic stays unchanged.

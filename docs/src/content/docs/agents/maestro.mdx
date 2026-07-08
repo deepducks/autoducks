@@ -1,0 +1,91 @@
+---
+title: Maestro
+description: Deterministic bash orchestrator — owns branches and PRs, dispatches execution waves.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Mermaid from '../../../components/Mermaid.astro';
+
+```
+/quack execute
+```
+
+The Maestro is a **pure bash** state machine — no LLM invoked. It owns all pipeline git (branch + draft PR), reads the wave plan from the issue, determines which tasks are done, and dispatches the next wave of [Developers](/agents/developer) in parallel.
+
+**Type:** Bash (deterministic, no LLM) · **Script:** `.autoducks/agents/maestro/run.sh` · **Verbs:** `execute`, `run`, `work` (on an issue with `Tactics:done`)
+
+<Mermaid chart={`
+flowchart LR
+    Triggers@{ shape: bolt, label: "Triggers" }
+    Maestro["Maestro"]
+    Issue@{ shape: notch-rect, label: "Issue\\nlabel: Tactics:done" }
+    Developers@{ shape: processes, label: "Developers" }
+
+    Triggers --triggers--> Maestro
+    Maestro -. depends on .-> Issue
+    Maestro -- dispatches --> Developers
+
+    class Triggers triggersOrange
+    class Maestro waveGreen
+    class Developers executionBlue
+
+    classDef triggersOrange fill:#ffe8d4,stroke:#d66a28,color:#d66a28
+    classDef waveGreen fill:#d4f8d4,stroke:#28a745,color:#28a745
+    classDef executionBlue fill:#cfe8ff,stroke:#0366d6,color:#0366d6
+`} />
+
+## Triggers
+
+| Event | Condition |
+|-------|-----------|
+| Issue comment | `/quack execute` (or `run`/`work`) on a non-Task issue with the `Tactics:done` label |
+| PR merged | PR merged into a branch starting with `feature/` or `fix/` — the **advancement trigger** |
+| Workflow dispatch | `feature_issue` number — chain dispatch from the Engineer, or manual |
+
+Advancement is **event-driven**: every task PR merged into the pipeline branch re-triggers the Maestro, which recomputes wave state and continues. No polling, no hidden state.
+
+## Definition of Ready
+
+Requires **`Tactics:done`**. Without it there is nothing to orchestrate — the Maestro posts a 🔁 status and dispatches the **Engineer** with `#auto:execute`, so execution resumes automatically when planning finishes (and the Engineer itself cascades to the Architect if the design is missing).
+
+## Owns the pipeline git
+
+The Maestro — not the Engineer — creates and maintains:
+
+- the **pipeline branch**, cut from `base_branch`: `feature/<id>-<slug>` for Features, **`fix/<id>-<slug>` for Bugs**;
+- the **draft PR** from that branch into `integration_branch`.
+
+Both are idempotent — re-runs reuse what exists.
+
+## Behavior
+
+1. Reacts 👀; posts a status comment for human-triggered runs (event-driven re-runs narrate through 🌊/⏳/🎉 milestone comments instead).
+2. Checks the Definition of Ready; ensures branch + draft PR.
+3. Parses the wave plan from the tactical zone. **No waves block? Single-task plan** — dispatches the Developer on the issue itself and finishes when its PR merges.
+4. Detects completed tasks by scanning merged PRs into the pipeline branch for `fixes/closes/resolves #N`; ticks the `## Progress` checkboxes.
+5. Computes wave states; finds the first pending wave whose predecessors are all done.
+6. **Next wave found** → applies `Work:orchestrating` and dispatches one Developer per unfinished task (in parallel), forwarding any `model:`/`effort:`/`turns:` overrides and the original command author. Posts the 🌊 wave summary.
+7. **All waves done** → assembles the final PR: `Closes #…` for every task and the issue, plus a **Work Log** harvested from each task PR's Implementation Summary. Marks the PR ready, requests review from the issue assignees, `Work:orchestrating` → `Work:done`, assigns the command author, posts 🎉.
+8. **Blocked** (earlier wave still open) → posts ⏳ and waits for the next merge event.
+
+## Duplicate-dispatch protection
+
+Three independent guards prevent a task from running twice when merge events race:
+
+1. The Maestro skips tasks that already have an open PR claiming them.
+2. The Developer's pre-flight skips if any open **or merged** PR claims the task.
+3. A per-task concurrency group serializes same-task workflow runs.
+
+## Required permissions
+
+```yaml
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+```
+
+<Aside type="note">
+The Maestro is 100% deterministic. Every decision — which wave is next, which tasks to skip, when the PR is ready — is derived from ITS and Git state: merged PRs, labels, branch existence. There is no hidden state; an interrupted pipeline resumes by re-triggering with the same comment.
+</Aside>

@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # =============================================================================
-# update-triggers.sh — bake custom trigger aliases into the workflow guards
+# update-triggers.sh — bake the slash-command prefix and custom trigger
+# aliases into the workflow guards
 # =============================================================================
 #
 # GitHub Actions evaluates `jobs.*.if` with a file-blind expression engine, so
-# per-team custom aliases (declared in .autoducks/autoducks.json under
-# `triggers.<agent>[]`) cannot be resolved at run time — they must be baked into
-# the workflow YAML. This script regenerates every affected guard from a
+# the configurable slash-command prefix (`command` in .autoducks/autoducks.json,
+# default `/quack`) and per-team custom aliases (declared under
+# `triggers.<agent>[]`) cannot be resolved at run time — they must be baked
+# into the workflow YAML. This script regenerates the affected guards from a
 # deterministic template (built-in aliases + validated custom aliases) and
 # writes BOTH the canonical runtime template and its .github/workflows/ mirror,
 # so the setup runtime-sync check keeps passing.
@@ -17,19 +19,19 @@
 # USAGE
 #   bash scripts/update-triggers.sh
 #
-# After running, commit the modified .github/workflows/autoducks-*.yml (and the
-# mirrored .autoducks/runtimes/github-actions/*.yml).
+# After running, commit the modified .github/workflows/autoducks-*.yml (and
+# the mirrored .autoducks/runtimes/github-actions/*.yml).
 # =============================================================================
 
 set -euo pipefail
 
-# Run from repo root (where .autoducks/autoducks.json lives).
+# Must run from the repo root (where .autoducks/autoducks.json lives).
 if [[ ! -f ".autoducks/autoducks.json" ]]; then
-  echo "update-triggers: .autoducks/autoducks.json not found — run from repo root" >&2
+  echo "update-triggers: .autoducks/autoducks.json not found — run from the repo root" >&2
   exit 1
 fi
 if ! command -v jq &>/dev/null; then
-  echo "update-triggers: jq is required but not installed" >&2
+  echo "update-triggers: jq required but not installed" >&2
   exit 1
 fi
 
@@ -40,6 +42,10 @@ WORKFLOW_DIR=".github/workflows"
 # Validate the entire triggers block up front (format + collisions). This is a
 # hard error — a bad alias must never be baked into a guard.
 AUTODUCKS_CONFIG="$CONFIG" bash .autoducks/core/config/generate-trigger-conditions.sh
+
+# Slash-command prefix (validated; falls back to /quack on garbage)
+CMD="$(jq -r '.command // "/quack"' "$CONFIG")"
+[[ "$CMD" =~ ^/[a-z0-9-]+$ ]] || CMD="/quack"
 
 RENDER_FILE="$(mktemp)"
 trap 'rm -f "$RENDER_FILE"' EXIT
@@ -57,7 +63,7 @@ emit_group() {
   local fi="$1" fp="$2" ci="$3" ls="$4"; shift 4
   local a=("$@") n=$# i clause
   for ((i = 0; i < n; i++)); do
-    clause="startsWith(github.event.comment.body, '/agents ${a[i]}')"
+    clause="startsWith(github.event.comment.body, '$CMD ${a[i]}')"
     if ((i == 0)); then
       printf '%s%s%s' "$fi" "$fp" "$clause"
     else
@@ -71,69 +77,68 @@ emit_group() {
   done
 }
 
-# ── Per-guard renderers (full `if:` block, up to but not including runs-on) ──
-render_design() {
-  local -a all=(design plan); mapfile -t c < <(read_custom design); all+=("${c[@]}")
+# ── Per-guard renderers (the full block, up to but not including runs-on) ──
+render_architect() {
+  local -a all=(architect design); mapfile -t c < <(read_custom architect); all+=("${c[@]}")
   cat <<'EOF'
     if: >-
+      github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request == null &&
        github.event.comment.author_association != 'MANNEQUIN' &&
 EOF
-  emit_group "       " "(" "        " ")) ||" "${all[@]}"
-  cat <<'EOF'
-      (github.event_name == 'issues' &&
-       github.event.issue.author_association != 'MANNEQUIN' &&
-       contains(github.event.issue.labels.*.name, 'Draft'))
-EOF
+  emit_group "       " "(" "        " "))" "${all[@]}"
 }
 
-render_tactical() {
-  local -a dv=(devise drilldown specify) ex=(execute work run start)
-  mapfile -t tc < <(read_custom tactical); dv+=("${tc[@]}")
+render_engineer() {
+  local -a dv=(engineer tactics) ex=(execute work run)
+  mapfile -t tc < <(read_custom engineer); dv+=("${tc[@]}")
   mapfile -t ec < <(read_custom execute);  ex+=("${ec[@]}")
   cat <<'EOF'
     if: >-
-      github.event.issue.pull_request == null &&
-      github.event.comment.author_association != 'MANNEQUIN' &&
-      (
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request == null &&
+       github.event.comment.author_association != 'MANNEQUIN' &&
+       (
 EOF
-  emit_group "        " "" "        " " ||" "${dv[@]}"
+  emit_group "         " "" "         " " ||" "${dv[@]}"
   cat <<'EOF'
-        (
+         (
 EOF
-  emit_group "          " "(" "           " ") &&" "${ex[@]}"
+  emit_group "           " "(" "            " ") &&" "${ex[@]}"
   cat <<'EOF'
-          (github.event.issue.type.name == 'Feature' ||
-           contains(github.event.issue.labels.*.name, 'Feature')) &&
-          !contains(github.event.issue.labels.*.name, 'Ready')
-        )
-      )
+           !(github.event.issue.type.name == 'Task' ||
+             contains(github.event.issue.labels.*.name, 'Task')) &&
+           !contains(github.event.issue.labels.*.name, 'Tactics:done')
+         )
+       ))
 EOF
 }
 
-render_wave() {
-  local -a ex=(execute work run start); mapfile -t ec < <(read_custom execute); ex+=("${ec[@]}")
+render_maestro() {
+  local -a ex=(execute work run); mapfile -t ec < <(read_custom execute); ex+=("${ec[@]}")
   cat <<'EOF'
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
        github.event.pull_request.merged == true &&
-       startsWith(github.event.pull_request.base.ref, 'feature/')) ||
+       (startsWith(github.event.pull_request.base.ref, 'feature/') ||
+        startsWith(github.event.pull_request.base.ref, 'fix/'))) ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request == null &&
        github.event.comment.author_association != 'MANNEQUIN' &&
 EOF
   emit_group "       " "(" "        " ") &&" "${ex[@]}"
   cat <<'EOF'
-       (github.event.issue.type.name == 'Feature' ||
-        contains(github.event.issue.labels.*.name, 'Feature')) &&
-       contains(github.event.issue.labels.*.name, 'Ready'))
+       !(github.event.issue.type.name == 'Task' ||
+         contains(github.event.issue.labels.*.name, 'Task')) &&
+       contains(github.event.issue.labels.*.name, 'Tactics:done'))
 EOF
 }
 
-render_execute() {
-  local -a ex=(execute work run start); mapfile -t ec < <(read_custom execute); ex+=("${ec[@]}")
+render_developer() {
+  local -a ex=(execute work run); mapfile -t ec < <(read_custom execute); ex+=("${ec[@]}")
   cat <<'EOF'
     if: >-
       github.event_name == 'workflow_dispatch' ||
@@ -143,13 +148,13 @@ render_execute() {
 EOF
   emit_group "       " "(" "        " ") &&" "${ex[@]}"
   cat <<'EOF'
-       !(github.event.issue.type.name == 'Feature' ||
-         contains(github.event.issue.labels.*.name, 'Feature')))
+       (github.event.issue.type.name == 'Task' ||
+        contains(github.event.issue.labels.*.name, 'Task')))
 EOF
 }
 
-# fix / revert / close have no built-in aliases: a bare single-clause guard when
-# no custom aliases exist (byte-identical to the shipped template), or a
+# fix / revert / close have no built-in aliases: bare single-clause guard
+# when no custom aliases exist (byte-identical to the shipped template),
 # parenthesized OR-group when custom aliases are present.
 render_simple() { # $1 = canonical verb / config key
   local verb="$1"
@@ -160,7 +165,7 @@ render_simple() { # $1 = canonical verb / config key
       github.event.comment.author_association != 'MANNEQUIN' &&
 EOF
   if ((${#all[@]} == 1)); then
-    printf "      startsWith(github.event.comment.body, '/agents %s')\n" "$verb"
+    printf "      startsWith(github.event.comment.body, '%s %s')\n" "$CMD" "$verb"
   else
     emit_group "      " "(" "       " ")" "${all[@]}"
   fi
@@ -189,12 +194,12 @@ apply_file() { # $1 = basename, $2.. = render function + args
 }
 
 echo "Regenerating trigger guards from $CONFIG ..."
-apply_file autoducks-design.yml   render_design
-apply_file autoducks-tactical.yml render_tactical
-apply_file autoducks-wave.yml     render_wave
-apply_file autoducks-execute.yml  render_execute
-apply_file autoducks-fix.yml      render_simple fix
-apply_file autoducks-revert.yml   render_simple revert
-apply_file autoducks-close.yml    render_simple close
+apply_file autoducks-architect.yml render_architect
+apply_file autoducks-engineer.yml  render_engineer
+apply_file autoducks-maestro.yml   render_maestro
+apply_file autoducks-developer.yml render_developer
+apply_file autoducks-fix.yml       render_simple fix
+apply_file autoducks-revert.yml    render_simple revert
+apply_file autoducks-close.yml     render_simple close
 
 echo "Done. Commit the modified .github/workflows/ and .autoducks/runtimes/ files."

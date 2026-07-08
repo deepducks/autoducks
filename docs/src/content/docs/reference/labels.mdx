@@ -1,0 +1,41 @@
+---
+title: Labels
+description: Every label autoducks applies, and what each one means.
+---
+
+Labels are autoducks' state machine: they route commands, record stage progress, and drive the Definition-of-Ready cascade. Agents create and apply all of them automatically — you never label anything by hand.
+
+## Stage labels
+
+Each pipeline stage has an in-progress and a done label:
+
+| Label | Applied by | Meaning |
+|-------|-----------|---------|
+| `Design:draft` | Architect | Design is being written |
+| `Design:done` | Architect | Design complete — the **Engineer's Definition of Ready** |
+| `Tactics:crafting` | Engineer | Plan is being written |
+| `Tactics:done` | Engineer | Plan complete — the **Maestro's routing signal** and the Engineer's revision-mode marker |
+| `Work:orchestrating` | Maestro | Waves are being coordinated on this issue |
+| `Work:coding` | Developer | This task is being implemented |
+| `Work:done` | Maestro / Developer | Work complete (all waves finished, or task merged) |
+
+On failure, the in-progress label is removed and the done label is **not** applied — a stage label always reflects reality.
+
+## Classification and routing labels
+
+| Label | Applied by | Meaning |
+|-------|-----------|---------|
+| `Feature` | Architect / Engineer | Routing + classification; pipeline branch `feature/…` |
+| `Bug` | Architect | Same pipeline as features; pipeline branch `fix/…` |
+| `Task` | Engineer | A task issue split from a plan — routes `execute` to the Developer |
+| `Draft` | you (optional) | Human marker for "still needs design"; removed by the Architect |
+
+Labels are the route-critical signal on every repository kind; the native issue *types* (Feature/Task/Bug) are a best-effort visual enhancement on organization repos.
+
+## Retired labels
+
+These belonged to the previous taxonomy and are **cleaned up on sight** by the Engineer, Revert, and Close agents:
+
+`Spec:draft`, `Spec:plan`, `Tactics:ready`, `Ready`, `Work:progress`, `Tactics:single`, `priority:P0`–`priority:P3`
+
+If you're migrating an older install, see [Migrating from /agents](/guides/migrating-from-agents).

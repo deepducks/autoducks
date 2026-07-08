@@ -4,11 +4,12 @@
 
 # Ordered as (name, color, description) triples.
 AUTODUCKS_PROGRESS_LABELS=(
-  "Spec:draft|C5DEF5|Design agent is drafting the specification"
-  "Spec:plan|1F6FEB|Design specification complete"
-  "Tactics:crafting|F9D0C4|Tactical agent is crafting the plan"
-  "Tactics:ready|D93F0B|Tactical plan complete"
-  "Work:progress|BFE5BF|Work in progress (Execution or Wave)"
+  "Design:draft|C5DEF5|Architect agent is drafting the design"
+  "Design:done|1F6FEB|Design complete"
+  "Tactics:crafting|F9D0C4|Engineer agent is crafting the tactical plan"
+  "Tactics:done|D93F0B|Tactical plan complete"
+  "Work:orchestrating|BFE5BF|Maestro is orchestrating execution waves"
+  "Work:coding|C2E0C6|Developer is implementing the task"
   "Work:done|0E8A16|Work complete"
 )
 
@@ -26,7 +27,7 @@ progress_labels::ensure() {
 
 # Add the in-progress label for a layer, clearing the paired done label
 # (in case this is a re-run over a previously completed layer).
-# Usage: progress_labels::start ISSUE_NUM Spec:draft Spec:plan
+# Usage: progress_labels::start ISSUE_NUM Design:draft Design:done
 progress_labels::start() {
   local issue_id="$1" in_progress="$2" done_label="$3"
   its::remove_label "$issue_id" "$done_label" 2>/dev/null || true
@@ -34,7 +35,7 @@ progress_labels::start() {
 }
 
 # Swap in-progress for done on success.
-# Usage: progress_labels::finish ISSUE_NUM Spec:draft Spec:plan
+# Usage: progress_labels::finish ISSUE_NUM Design:draft Design:done
 progress_labels::finish() {
   local issue_id="$1" in_progress="$2" done_label="$3"
   its::remove_label "$issue_id" "$in_progress" 2>/dev/null || true
@@ -42,7 +43,7 @@ progress_labels::finish() {
 }
 
 # On failure, only clear the in-progress label. Never sets the done label.
-# Usage: progress_labels::abort ISSUE_NUM Spec:draft
+# Usage: progress_labels::abort ISSUE_NUM Design:draft
 progress_labels::abort() {
   local issue_id="$1" in_progress="$2"
   its::remove_label "$issue_id" "$in_progress" 2>/dev/null || true

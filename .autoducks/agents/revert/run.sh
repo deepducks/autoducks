@@ -22,14 +22,16 @@ fi
 
 # Close task issues
 for t in "${TASK_NUMBERS[@]:-}"; do
-  its::close_issue "$t" "Reverted by \`/agents revert\` on #$FEATURE" "not_planned" 2>/dev/null || echo "::warning::Could not close #$t"
+  its::close_issue "$t" "Reverted by \`${AUTODUCKS_COMMAND} revert\` on #$FEATURE" "not_planned" 2>/dev/null || echo "::warning::Could not close #$t"
 done
 
-# Remove labels
-its::remove_label "$FEATURE" "Ready" 2>/dev/null || true
+# Remove labels (current taxonomy + legacy pre-rename labels, so revert
+# cleans up issues created by older installs too)
 its::remove_label "$FEATURE" "draft" 2>/dev/null || true
-for lbl in "Spec:draft" "Spec:plan" "Tactics:crafting" "Tactics:ready" \
-           "Work:progress" "Work:done" "Tactics:single"; do
+for lbl in "Design:draft" "Design:done" "Tactics:crafting" "Tactics:done" \
+           "Work:orchestrating" "Work:coding" "Work:done" \
+           "Spec:draft" "Spec:plan" "Tactics:ready" "Work:progress" \
+           "Ready" "Tactics:single"; do
   its::remove_label "$FEATURE" "$lbl" 2>/dev/null || true
 done
 

@@ -52,6 +52,11 @@ authz::audit() {
 # revert/close default to trusted=OWNER,MEMBER.
 authz::load_config() {
   local agent="$1"
+  # The Maestro and Developer are both faces of the `execute` command — they
+  # share its per_agent security policy.
+  case "$agent" in
+    maestro|developer) agent="execute" ;;
+  esac
   local config="$AUTODUCKS_ROOT/autoducks.json"
 
   [[ -f "$config" ]] || { echo "authorize: config not found: $config" >&2; return 1; }

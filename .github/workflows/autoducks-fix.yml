@@ -9,12 +9,13 @@ permissions:
   issues: write
   pull-requests: write
   id-token: write
+
 jobs:
   fix:
     if: >-
       github.event.issue.pull_request == null &&
       github.event.comment.author_association != 'MANNEQUIN' &&
-      startsWith(github.event.comment.body, '/agents fix')
+      startsWith(github.event.comment.body, '/quack fix')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,6 +44,7 @@ jobs:
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
       - name: Pre-execution
+        id: pre
         if: steps.authz.outcome == 'success'
         run: bash .autoducks/agents/fix/pre.sh
         env:
@@ -50,6 +52,7 @@ jobs:
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id }}
           RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ github.event.comment.user.login }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
         if: steps.authz.outcome == 'success'
@@ -58,7 +61,7 @@ jobs:
           prompt_file: .autoducks/agents/fix/prompt.md
           allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
           model: ${{ steps.directive.outputs.model || steps.agent.outputs.model }}
-          reasoning: ${{ steps.directive.outputs.reasoning || steps.agent.outputs.reasoning }}
+          effort: ${{ steps.directive.outputs.effort || steps.agent.outputs.effort }}
           max_turns: ${{ steps.directive.outputs.max_turns || steps.agent.outputs.max_turns }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -70,6 +73,7 @@ jobs:
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id }}
           RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ github.event.comment.user.login }}
           MODEL: ${{ steps.directive.outputs.model || steps.agent.outputs.model }}
-          REASONING: ${{ steps.directive.outputs.reasoning || steps.agent.outputs.reasoning }}
+          EFFORT: ${{ steps.directive.outputs.effort || steps.agent.outputs.effort }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}

@@ -1,121 +1,147 @@
 ---
 title: Slash commands
-description: Complete reference for all /agents commands.
+description: Complete reference for the /quack command surface.
 ---
 
-All autoducks commands are issued as issue comments using the `/agents` prefix.
+import { Aside } from '@astrojs/starlight/components';
 
-## Command overview
+All autoducks commands are issue comments. The full grammar:
 
-| Command | Issue type | Label required | What it triggers |
-|---------|-----------|----------------|-----------------|
-| `/agents design` | Any | — | [Design agent](/agents/design) |
-| `/agents devise` | Any | — | [Tactical agent](/agents/tactical) |
-| `/agents execute` | Feature | `Ready` | [Wave Orchestrator](/agents/wave-orchestrator) |
-| `/agents execute` | Feature | — (no `Ready`) | Tactical agent (auto-escalation) |
-| `/agents execute` | Non-Feature | — | [Execution agent](/agents/execution) |
-| `/agents fix` | Any | — | [Fix agent](/agents/fix) |
-| `/agents revert` | Feature | — | [Revert agent](/agents/revert) |
-| `/agents close` | Feature | — | [Close agent](/agents/close) |
+```
+/quack <trigger> [model:<model>] [effort:<level>] [turns:<n>] [#auto:<agent>+<agent>...]
+```
 
-> **"Feature" routing note:** In the table above, "Feature" refers to either the native GitHub issue type *or* the `Feature` label — whichever applies. On user-owned (personal) repositories, native issue types are not available, so the `Feature` label is the sole routing signal. The tactical and design agents apply this label automatically; no manual labeling is required.
+## Cheat sheet
+
+| You want to… | Comment |
+|---|---|
+| Run the whole pipeline on an issue | `/quack execute` |
+| Design (or revise the design) only | `/quack architect` |
+| Plan (or revise the plan) only | `/quack engineer` |
+| Design + plan, then stop for review | `/quack architect #auto:engineer` |
+| Re-run a failed task | `/quack fix` (on the task issue) |
+| Undo the plan, keep the issue | `/quack revert` |
+| Tear everything down | `/quack close` |
+| Use a stronger model at max effort | `/quack execute model:opus effort:max` |
+| Cap the agent's turns | `/quack execute turns:30` |
+
+## Command routing
+
+| Command | Issue state | Who answers |
+|---------|------------|-------------|
+| `/quack architect` | any | [Architect](/agents/architect) |
+| `/quack engineer` | any (needs `Design:done`, else cascades to Architect) | [Engineer](/agents/engineer) |
+| `/quack execute` | Task issue | [Developer](/agents/developer) |
+| `/quack execute` | has `Tactics:done` | [Maestro](/agents/maestro) |
+| `/quack execute` | anything else | [Engineer](/agents/engineer) → cascade |
+| `/quack fix` | any task | [Fix agent](/agents/utilities#quack-fix) |
+| `/quack revert` | planned issue | [Revert agent](/agents/utilities#quack-revert) |
+| `/quack close` | planned issue | [Close agent](/agents/utilities#quack-close) |
+
+> **Routing signals are labels** (with the native issue type as an org-only enhancement): `Task`, `Tactics:done`, `Design:done`, `Feature`/`Bug`. Agents apply them automatically — no manual labeling required.
 
 ## Built-in aliases
 
-Every installation ships with synonym verbs that resolve to the canonical
-command. They behave identically to the canonical verb — including
-`/agents execute` auto-escalation — and require no configuration.
+| Canonical verb | Aliases |
+|----------------|---------|
+| `architect` | `design` |
+| `engineer` | `tactics` |
+| `execute` | `run`, `work` |
+| `fix` / `revert` / `close` | *(none)* |
 
-| Canonical verb | Built-in aliases |
-|----------------|------------------|
-| `design` | `plan` |
-| `devise` | `drilldown`, `specify` |
-| `execute` | `work`, `run`, `start` |
-| `fix` | _(none)_ |
-| `revert` | _(none)_ |
-| `close` | _(none)_ |
+Aliases behave identically to the canonical verb, including routing and cascade.
 
-For example, `/agents plan` is equivalent to `/agents design`, and
-`/agents work` on a Feature + `Ready` issue triggers the Wave Orchestrator just
-like `/agents execute`.
+## Overrides
 
-## Custom aliases
+Overrides apply to the triggered run — and propagate to chained agents and wave workers **only when you set them explicitly** (each agent otherwise resolves its own defaults).
 
-Teams can register their own alias verbs per agent in
-`.autoducks/autoducks.json` under the `triggers` key. Because GitHub Actions
-evaluates workflow `if:` guards without reading repository files, custom aliases
-must be **baked into the workflow YAML at setup time** and the regenerated
-workflows committed. See the
-[configuration reference](/reference/configuration#custom-trigger-aliases) for
-the schema, validation rules, and the `update-triggers` command.
-
-## Directive arguments
-
-All commands accept optional inline arguments:
+### `model:`
 
 ```
-/agents <command> [--model <model>] [--reasoning <level>] [turns=<n>]
+/quack execute model:opus
+/quack architect model:claude-sonnet-5
 ```
 
-### `--model`
+| Alias | Resolves to |
+|-------|-------------|
+| `opus` | `claude-opus-4-8` |
+| `sonnet` | `claude-sonnet-5` |
+| `haiku` | `claude-haiku-4-5` |
+| any `claude-*` id | used as-is |
 
-Override the Claude model for this run. Accepts any valid Claude model ID.
+Bare aliases also work positionally: `/quack execute opus`.
 
-```
-/agents design --model claude-opus-4-7
-/agents execute --model claude-haiku-4-5-20251001
-```
+### `effort:`
 
-Default: value from `.autoducks/autoducks.json` → `defaults.model`
-
-### `--reasoning`
-
-Override the reasoning effort level.
+LLM effort level ("effort" follows the cross-provider convention — OpenAI `reasoning_effort`, Anthropic `output_config.effort`).
 
 | Value | Description |
 |-------|-------------|
+| `off` | No extended thinking |
 | `low` | Faster, less thorough |
 | `medium` | Balanced |
-| `high` | Slower, more thorough (default) |
+| `high` | Thorough (config default) |
+| `max` | Maximum reasoning depth |
 
 ```
-/agents devise --reasoning medium
+/quack engineer effort:max
 ```
 
-### `turns=<n>`
+Bare values also work positionally: `/quack engineer max`.
 
-Override the maximum number of agentic turns for this run. Unlike `--model` and `--reasoning`, this is a **positional** token, not a `--flag` — drop it anywhere after the command verb, alongside model/reasoning aliases:
+### `turns:`
+
+Maximum number of agentic turns for this run (1–1000). `turns=<n>`, `max-turns=<n>`, and `max_turns=<n>` are equivalent forms. Malformed or out-of-range values are ignored (the next tier of defaults applies).
 
 ```
-/agents execute sonnet high turns=80
+/quack execute turns:80
 ```
 
-`max-turns=<n>`, `max_turns=<n>`, and `turns:<n>` are accepted as equivalent forms. `<n>` must be a positive integer no greater than 1000; a malformed or out-of-range value is ignored rather than rejected, leaving the override empty so the next tier applies.
+On the wave path, the Maestro forwards `model:`/`effort:`/`turns:` from your comment to every dispatched Developer.
 
-This directive is parsed by the same comment parser everywhere, so `turns=<n>` propagates through the wave path too: on a Feature issue, the Wave Orchestrator picks it up from the triggering comment just like it does for `--model`/`--reasoning`.
+**Priority (highest to lowest):** inline directive → per-agent `defaults.json` → global `autoducks.json` → provider default (`50` for turns).
 
-**Priority (highest to lowest):** inline `turns=<n>` directive → per-agent `defaults.json` → global `.autoducks/autoducks.json` → provider action default.
+### `#auto:` — chaining
 
-Default: `50`, applied by the Claude provider action when `max_turns` is unset at every tier above — see [`defaults.max_turns`](/reference/configuration#defaultsmax_turns).
+Queue agents to run after this one finishes, separated by `+`:
 
-## Pipeline shortcut
+```
+/quack architect #auto:engineer            # design → plan → stop
+/quack architect #auto:engineer+execute    # full pipeline, explicit
+```
 
-If you comment `/agents execute` on a Feature issue that doesn't have the `Ready` label yet, autoducks will **auto-escalate** to the Tactical agent first, then proceed to execution. This lets you use a single command for the full pipeline without worrying about which step you're at.
+Semantics:
 
-If the issue also lacks a design spec (just a raw idea), comment `/agents design` first to get a proper spec before planning.
+- Verbs are alias-normalized (`#auto:tactics+run` ≡ `#auto:engineer+execute`), deduplicated, and capped at 5.
+- A verb can appear at most once in a chain (loop protection); Definition-of-Ready delegations re-queue the current agent into the same chain.
+- A chained `execute` targets the Maestro.
+- A blocked run (e.g. Engineer in Questions Mode) stops the chain — answer and re-run.
+
+See [Chaining & overrides](/guides/chaining-and-overrides) for recipes.
+
+## Configurable prefix
+
+The `/quack` prefix comes from `command` in `.autoducks/autoducks.json`. GitHub evaluates workflow `if:` guards without reading repository files, so after changing it you must re-bake the guards and commit:
+
+```bash
+bash scripts/update-triggers.sh
+```
+
+The same applies to [custom trigger aliases](/reference/configuration#custom-trigger-aliases).
 
 ## Programmatic dispatch
 
-The Wave Orchestrator and Execution agents can also be triggered programmatically — bypassing the issue comment trigger entirely. How this is done depends on the runtime.
-
-**GitHub Actions runtime** (using the `gh` CLI):
+Every pipeline workflow also accepts a direct `workflow_dispatch`:
 
 ```bash
-# Trigger the wave orchestrator for a feature issue
-gh workflow run autoducks-wave.yml -f feature_issue=42
+# Full pipeline from the design stage
+gh workflow run autoducks-architect.yml -f issue_number=42 -f auto_chain=engineer+execute
 
-# Trigger an execution agent directly
-gh workflow run autoducks-execute.yml -f issue_number=43 -f base_branch=feature/42-my-feature
+# Orchestrate a planned issue
+gh workflow run autoducks-maestro.yml -f feature_issue=42
+
+# One task against a specific base branch
+gh workflow run autoducks-developer.yml -f issue_number=43 -f base_branch=feature/42-my-feature
 ```
 
-Other runtimes expose this through their own workflow/pipeline trigger mechanism.
+Inputs `actor`, `model`, `effort`, `max_turns`, and `auto_chain` are available on the architect/engineer workflows (`actor` sets the done-assignee).

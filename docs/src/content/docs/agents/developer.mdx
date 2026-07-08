@@ -1,0 +1,72 @@
+---
+title: Developer
+description: Implements a single task, opens its PR, and merges it into the pipeline branch.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Mermaid from '../../../components/Mermaid.astro';
+
+The Developer implements one task: it cuts a task branch from the pipeline branch, writes the code, opens a PR (`fixes #N` + Implementation Summary), **auto-merges** it into the pipeline branch, and closes the task. It is normally dispatched by the [Maestro](/agents/maestro), wave by wave.
+
+**Type:** LLM (Claude) · **Scripts:** `.autoducks/agents/developer/{pre,post}.sh` · **Verbs:** `execute`, `run`, `work` (on a Task issue)
+
+<Mermaid chart={`
+flowchart LR
+    Triggers@{ shape: bolt, label: "Triggers" }
+    Developer["Developer"]
+    PR@{ shape: notch-rect, label: "Task PR\\n→ pipeline branch\\n(auto-merged)" }
+
+    Triggers --triggers--> Developer
+    Developer -- opens & merges --> PR
+
+    class Triggers triggersOrange
+    class Developer executionBlue
+
+    classDef triggersOrange fill:#ffe8d4,stroke:#d66a28,color:#d66a28
+    classDef executionBlue fill:#cfe8ff,stroke:#0366d6,color:#0366d6
+`} />
+
+## Triggers
+
+| Event | Condition |
+|-------|-----------|
+| Workflow dispatch | `issue_number` + `base_branch` — dispatched by the Maestro |
+| Issue comment | `/quack execute` (or `run`/`work`) on a **Task** issue |
+
+## Definition of Ready
+
+A task needs its **pipeline context** — the parent issue's branch to cut from and merge into. When dispatched by the Maestro, the context comes with the dispatch. When you comment on a Task directly, the Developer resolves the parent itself:
+
+- Parent found, branch exists → proceeds against it.
+- Parent found, branch missing → posts 🔁 and **delegates to the Maestro on the parent**, which creates the branch and dispatches this task back in wave order.
+- No parent at all → standalone execution was retired: the pipeline guarantees a reviewed design and plan before code. The status comment tells you exactly what to run instead (`/quack architect #auto:engineer+execute` if this issue *is* the whole work item).
+
+## Behavior
+
+1. Reacts 👀, posts the status comment.
+2. **Idempotency guard:** if any PR — open or merged — already claims this task (`fixes #N`), the run skips quietly (this is one of the three [duplicate-dispatch guards](/agents/maestro#duplicate-dispatch-protection)).
+3. Applies `Work:coding`; waits for the base branch to be visible; cuts the task branch, inheriting the pipeline prefix: `feature/<parent>-issue-<task>-<epoch>` or `fix/…`.
+4. **[LLM]** Implements the task spec — the LLM never runs git or the API; it only edits files and writes `/tmp/work-summary.md`.
+5. Commits, pushes, opens the PR into the pipeline branch with `fixes #N` and an **Implementation Summary** (harvested later into the final PR's Work Log).
+6. **Auto-merges** with the adaptive method (`merge_method: auto` probes merge → squash → rebase; three attempts with a rebase onto the base in between). A conflict posts a 🔀 report with resolution steps.
+7. Closes the task explicitly (sub-PR merges don't fire GitHub's auto-close), `Work:coding` → `Work:done`, assigns the command author, flips the status comment to ✅. The merge event itself re-triggers the Maestro.
+
+## When the turn limit hits
+
+If the LLM runs out of turns (`max_turns`), the Developer **preserves the work**: it commits `WIP:`, pushes the branch, and posts a `max_turns` failure report pointing at the preserved branch. `/quack fix` on the task resumes exactly from there. See [When things fail](/guides/when-things-fail).
+
+## Auto-merge policy
+
+Task PRs merge into a pipeline branch that itself undergoes **human review** before reaching `integration_branch` — that's why auto-merge is safe here. A task dispatched manually (via `workflow_dispatch` against the default branch) is **not** auto-merged; its PR waits for review.
+
+## Overrides
+
+Overrides ride along from the triggering comment — on the wave path, the Maestro forwards them to every worker:
+
+```
+/quack execute model:haiku effort:low turns:30
+```
+
+<Aside type="tip">
+Write acceptance criteria as testable checkboxes in the task — the Developer follows them literally, and the failure report quotes them when something doesn't hold.
+</Aside>

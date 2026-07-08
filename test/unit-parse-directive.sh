@@ -5,6 +5,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$REPO_ROOT/.autoducks/core/config/parse-directive.sh"
+CONFIG="$REPO_ROOT/.autoducks/autoducks.json"
+
 PASS=0
 FAIL=0
 
@@ -12,281 +14,149 @@ pass() { echo "  ✅ $1"; PASS=$((PASS + 1)); }
 fail() { echo "  ❌ $1"; FAIL=$((FAIL + 1)); }
 
 # ---------------------------------------------------------------------------
-# Helper: run the script with a given COMMENT_BODY and assert each of the
-# four output lines matches exactly.
+# Helper: run with COMMENT_BODY and assert selected output lines.
+#   assert_out LABEL BODY key=value [key=value ...]
+# Only the given keys are asserted; AUTODUCKS_CONFIG defaults to repo config.
 # ---------------------------------------------------------------------------
-run_case() {
-  local label="$1"
-  local body="$2"
-  local exp_command="$3"
-  local exp_model="$4"
-  local exp_reasoning="$5"
-  local exp_think="$6"
-  local exp_max_turns="${7:-}"
-
+assert_out() {
+  local label="$1" body="$2"; shift 2
   echo "[$label]"
   local out
-  out=$(COMMENT_BODY="$body" bash "$SCRIPT" </dev/null)
-
-  local got_command got_model got_reasoning got_think got_max_turns
-  got_command=$(printf '%s\n' "$out" | grep '^command=' || true)
-  got_model=$(printf '%s\n' "$out" | grep '^model=' || true)
-  got_reasoning=$(printf '%s\n' "$out" | grep '^reasoning=' || true)
-  got_think=$(printf '%s\n' "$out" | grep '^think_phrase=' || true)
-  got_max_turns=$(printf '%s\n' "$out" | grep '^max_turns=' || true)
-
-  local want_command="command=$exp_command"
-  local want_model="model=$exp_model"
-  local want_reasoning="reasoning=$exp_reasoning"
-  local want_think="think_phrase=$exp_think"
-  local want_max_turns="max_turns=$exp_max_turns"
-
-  if [[ "$got_command" == "$want_command" ]]; then
-    pass "command line matches ($got_command)"
-  else
-    fail "command mismatch — want '$want_command', got '$got_command'"
-  fi
-  if [[ "$got_model" == "$want_model" ]]; then
-    pass "model line matches ($got_model)"
-  else
-    fail "model mismatch — want '$want_model', got '$got_model'"
-  fi
-  if [[ "$got_reasoning" == "$want_reasoning" ]]; then
-    pass "reasoning line matches ($got_reasoning)"
-  else
-    fail "reasoning mismatch — want '$want_reasoning', got '$got_reasoning'"
-  fi
-  if [[ "$got_think" == "$want_think" ]]; then
-    pass "think_phrase line matches ($got_think)"
-  else
-    fail "think_phrase mismatch — want '$want_think', got '$got_think'"
-  fi
-  if [[ "$got_max_turns" == "$want_max_turns" ]]; then
-    pass "max_turns line matches ($got_max_turns)"
-  else
-    fail "max_turns mismatch — want '$want_max_turns', got '$got_max_turns'"
-  fi
+  out=$(COMMENT_BODY="$body" AUTODUCKS_CONFIG="${TEST_CONFIG:-$CONFIG}" bash "$SCRIPT" </dev/null)
+  local want key got
+  for want in "$@"; do
+    key="${want%%=*}"
+    got=$(printf '%s\n' "$out" | grep "^${key}=" || true)
+    if [[ "$got" == "$want" ]]; then
+      pass "$want"
+    else
+      fail "want '$want' — got '$got'"
+    fi
+  done
 }
 
 # ---------------------------------------------------------------------------
-# Test 1: unset / no /agents line — all outputs empty
-# ---------------------------------------------------------------------------
-echo "[1] no /agents line — all empty"
-out=$(COMMENT_BODY="" bash "$SCRIPT" </dev/null)
-line_count=$(printf '%s\n' "$out" | wc -l | tr -d ' ')
-if [[ "$line_count" == "6" ]]; then
-  pass "emits exactly 6 lines"
-else
-  fail "expected 6 lines, got $line_count: '$out'"
-fi
-if [[ "$(printf '%s\n' "$out" | grep '^original_command=')" == "original_command=" ]]; then
-  pass "original_command= is empty"
-else
-  fail "original_command not empty: '$(printf '%s\n' "$out" | grep '^original_command=')'"
-fi
-if [[ "$(printf '%s\n' "$out" | grep '^command=')" == "command=" ]]; then
-  pass "command= is empty"
-else
-  fail "command not empty: '$(printf '%s\n' "$out" | grep '^command=')'"
-fi
-if [[ "$(printf '%s\n' "$out" | grep '^model=')" == "model=" ]]; then
-  pass "model= is empty"
-else
-  fail "model not empty: '$(printf '%s\n' "$out" | grep '^model=')'"
-fi
-if [[ "$(printf '%s\n' "$out" | grep '^reasoning=')" == "reasoning=" ]]; then
-  pass "reasoning= is empty"
-else
-  fail "reasoning not empty: '$(printf '%s\n' "$out" | grep '^reasoning=')'"
-fi
-if [[ "$(printf '%s\n' "$out" | grep '^think_phrase=')" == "think_phrase=" ]]; then
-  pass "think_phrase= is empty"
-else
-  fail "think_phrase not empty: '$(printf '%s\n' "$out" | grep '^think_phrase=')'"
-fi
-if [[ "$(printf '%s\n' "$out" | grep '^max_turns=')" == "max_turns=" ]]; then
-  pass "max_turns= is empty"
-else
-  fail "max_turns not empty: '$(printf '%s\n' "$out" | grep '^max_turns=')'"
-fi
+echo "── canonical verbs and built-in aliases ──"
+
+assert_out "canonical architect" "/quack architect" \
+  "command=architect" "original_command=architect" "model=" "effort=" "auto_chain="
+
+assert_out "alias design → architect" "/quack design" \
+  "command=architect" "original_command=design"
+
+assert_out "canonical engineer" "/quack engineer" "command=engineer"
+assert_out "alias tactics → engineer" "/quack tactics" \
+  "command=engineer" "original_command=tactics"
+
+assert_out "canonical execute" "/quack execute" "command=execute"
+assert_out "alias run → execute" "/quack run" "command=execute" "original_command=run"
+assert_out "alias work → execute" "/quack work" "command=execute" "original_command=work"
+
+assert_out "fix passthrough" "/quack fix" "command=fix"
+assert_out "revert passthrough" "/quack revert" "command=revert"
+assert_out "close passthrough" "/quack close" "command=close"
+
+assert_out "uppercase verb is lowercased" "/quack ARCHITECT" "command=architect"
+
+echo "── retired aliases are NOT normalized (D8) ──"
+assert_out "devise stays raw" "/quack devise" "command=devise"
+assert_out "plan stays raw" "/quack plan" "command=plan"
+assert_out "drilldown stays raw" "/quack drilldown" "command=drilldown"
+assert_out "specify stays raw" "/quack specify" "command=specify"
+assert_out "start stays raw" "/quack start" "command=start"
+
+echo "── prefix handling ──"
+assert_out "old /agents prefix is ignored" "/agents execute" "command=" "model="
+assert_out "directive mid-comment ignored (must be line start)" \
+  "please /quack execute" "command="
+assert_out "directive on later line" $'some context\n/quack execute opus' \
+  "command=execute" "model=claude-opus-4-8"
+
+echo "── model overrides ──"
+assert_out "positional opus" "/quack execute opus" "model=claude-opus-4-8"
+assert_out "positional sonnet" "/quack execute sonnet" "model=claude-sonnet-5"
+assert_out "positional haiku" "/quack execute haiku" "model=claude-haiku-4-5"
+assert_out "named model:opus" "/quack execute model:opus" "model=claude-opus-4-8"
+assert_out "named model:claude-sonnet-5" "/quack execute model:claude-sonnet-5" \
+  "model=claude-sonnet-5"
+assert_out "unknown model ignored" "/quack execute model:gpt-4" "model="
+
+echo "── effort overrides ──"
+assert_out "positional high" "/quack execute high" \
+  "effort=high" "think_phrase=Think very hard before writing."
+assert_out "positional max" "/quack execute max" "effort=max"
+assert_out "named effort:low" "/quack execute effort:low" \
+  "effort=low" "think_phrase=Think before writing."
+assert_out "named effort:medium" "/quack execute effort:med" "effort=medium"
+assert_out "effort off yields empty think phrase" "/quack execute effort:off" \
+  "effort=off" "think_phrase="
+assert_out "no effort yields empty (defaults win downstream)" "/quack execute" \
+  "effort=" "think_phrase="
+assert_out "combined model+effort" "/quack architect opus max" \
+  "model=claude-opus-4-8" "effort=max"
+
+echo "── max_turns overrides ──"
+assert_out "turns:5" "/quack execute turns:5" "max_turns=5"
+assert_out "turns=12" "/quack execute turns=12" "max_turns=12"
+assert_out "max-turns=7" "/quack execute max-turns=7" "max_turns=7"
+assert_out "max_turns=9" "/quack execute max_turns=9" "max_turns=9"
+assert_out "turns:0 rejected" "/quack execute turns:0" "max_turns="
+assert_out "turns:1001 rejected" "/quack execute turns:1001" "max_turns="
+assert_out "turns garbage rejected" "/quack execute turns=abc" "max_turns="
+
+echo "── #auto: chaining ──"
+assert_out "single chain" "/quack architect #auto:engineer" "auto_chain=engineer"
+assert_out "multi chain" "/quack architect #auto:engineer+execute" \
+  "auto_chain=engineer+execute"
+assert_out "chain aliases normalized" "/quack architect #auto:tactics+run" \
+  "auto_chain=engineer+execute"
+assert_out "chain dedupes verbs" "/quack architect #auto:engineer+engineer+execute" \
+  "auto_chain=engineer+execute"
+assert_out "invalid chain verbs filtered" "/quack architect #auto:engineer+banana" \
+  "auto_chain=engineer"
+assert_out "wholly invalid chain empty" "/quack architect #auto:banana" "auto_chain="
+assert_out "chain with other tokens" "/quack architect opus #auto:engineer turns:3" \
+  "auto_chain=engineer" "model=claude-opus-4-8" "max_turns=3"
+
+echo "── no directive ──"
+assert_out "empty body" "" "command=" "model=" "effort=" "max_turns=" "auto_chain="
+assert_out "unrelated comment" "great work!" "command="
 
 # ---------------------------------------------------------------------------
-# Test 2: /agents devise — command set, model/reasoning empty
-# ---------------------------------------------------------------------------
-run_case "2] /agents devise" \
-  "/agents devise" \
-  "devise" "" "" ""
-
-# ---------------------------------------------------------------------------
-# Test 3: /agents devise opus
-# ---------------------------------------------------------------------------
-run_case "3] /agents devise opus" \
-  "/agents devise opus" \
-  "devise" "claude-opus-4-8" "" ""
-
-# ---------------------------------------------------------------------------
-# Test 4: /agents devise sonnet
-# ---------------------------------------------------------------------------
-run_case "4] /agents devise sonnet" \
-  "/agents devise sonnet" \
-  "devise" "claude-sonnet-5" "" ""
-
-# ---------------------------------------------------------------------------
-# Test 5: /agents devise haiku
-# ---------------------------------------------------------------------------
-run_case "5] /agents devise haiku" \
-  "/agents devise haiku" \
-  "devise" "claude-haiku-4-5" "" ""
-
-# ---------------------------------------------------------------------------
-# Test 6: /agents devise sonnet high
-# ---------------------------------------------------------------------------
-run_case "6] /agents devise sonnet high" \
-  "/agents devise sonnet high" \
-  "devise" "claude-sonnet-5" "high" "Think very hard before writing."
-
-# ---------------------------------------------------------------------------
-# Test 7: /agents devise off
-# ---------------------------------------------------------------------------
-run_case "7] /agents devise off" \
-  "/agents devise off" \
-  "devise" "" "off" ""
-
-# ---------------------------------------------------------------------------
-# Test 8: /agents devise max
-# ---------------------------------------------------------------------------
-run_case "8] /agents devise max" \
-  "/agents devise max" \
-  "devise" "" "max" "Ultrathink — take extensive time to reason before writing."
-
-# ---------------------------------------------------------------------------
-# Test 9: /agents execute opus ultrathink
-# ---------------------------------------------------------------------------
-run_case "9] /agents execute opus ultrathink" \
-  "/agents execute opus ultrathink" \
-  "execute" "claude-opus-4-8" "max" "Ultrathink — take extensive time to reason before writing."
-
-# ---------------------------------------------------------------------------
-# Test 10-15: built-in alias normalization → canonical verb
-# ---------------------------------------------------------------------------
-run_case "10] /agents plan → design" \
-  "/agents plan" \
-  "design" "" "" ""
-
-run_case "11] /agents drilldown → devise" \
-  "/agents drilldown" \
-  "devise" "" "" ""
-
-run_case "12] /agents specify → devise" \
-  "/agents specify" \
-  "devise" "" "" ""
-
-run_case "13] /agents work → execute" \
-  "/agents work" \
-  "execute" "" "" ""
-
-run_case "14] /agents run → execute" \
-  "/agents run" \
-  "execute" "" "" ""
-
-run_case "15] /agents start → execute" \
-  "/agents start" \
-  "execute" "" "" ""
-
-# Alias + model/reasoning tokens still parse (alias only occupies token [1]).
-run_case "16] /agents work sonnet high → execute" \
-  "/agents work sonnet high" \
-  "execute" "claude-sonnet-5" "high" "Think very hard before writing."
-
-# Canonical verbs pass through unchanged.
-run_case "17] /agents design passthrough" \
-  "/agents design" \
-  "design" "" "" ""
-
-# Unknown verb is left as-is (no built-in/custom match).
-run_case "18] /agents bogus passthrough" \
-  "/agents bogus" \
-  "bogus" "" "" ""
-
-# original_command records the raw verb before normalization.
-echo "[19] /agents plan — original_command preserved"
-out=$(COMMENT_BODY="/agents plan" bash "$SCRIPT" </dev/null)
-if [[ "$(printf '%s\n' "$out" | grep '^original_command=')" == "original_command=plan" ]]; then
-  pass "original_command=plan"
-else
-  fail "original_command mismatch: '$(printf '%s\n' "$out" | grep '^original_command=')'"
-fi
-if [[ "$(printf '%s\n' "$out" | grep '^command=')" == "command=design" ]]; then
-  pass "command=design"
-else
-  fail "command mismatch: '$(printf '%s\n' "$out" | grep '^command=')'"
-fi
-
-# ---------------------------------------------------------------------------
-# Test 20: custom alias resolution from a fixture autoducks.json
-# ---------------------------------------------------------------------------
-echo "[20] custom alias 'ship' → execute (config-driven)"
-_tmp_cwd=$(mktemp -d)
-mkdir -p "$_tmp_cwd/.autoducks"
-cat > "$_tmp_cwd/.autoducks/autoducks.json" <<'JSON'
-{ "triggers": { "design": ["spec"], "execute": ["go", "ship"] } }
+echo "── configurable prefix + custom aliases ──"
+TMP_CFG=$(mktemp)
+cat > "$TMP_CFG" <<'JSON'
+{
+  "command": "/duck",
+  "triggers": {
+    "architect": [],
+    "engineer": ["plan-it"],
+    "execute": ["ship"],
+    "fix": [],
+    "revert": [],
+    "close": []
+  }
+}
 JSON
-out=$(cd "$_tmp_cwd" && COMMENT_BODY="/agents ship" bash "$SCRIPT" </dev/null)
-if [[ "$(printf '%s\n' "$out" | grep '^command=')" == "command=execute" ]]; then
-  pass "custom alias 'ship' resolves to execute"
-else
-  fail "custom alias mismatch: '$(printf '%s\n' "$out" | grep '^command=')'"
-fi
-out=$(cd "$_tmp_cwd" && COMMENT_BODY="/agents spec" bash "$SCRIPT" </dev/null)
-if [[ "$(printf '%s\n' "$out" | grep '^command=')" == "command=design" ]]; then
-  pass "custom alias 'spec' resolves to design"
-else
-  fail "custom alias mismatch: '$(printf '%s\n' "$out" | grep '^command=')'"
-fi
-rm -rf "$_tmp_cwd"
 
-# ---------------------------------------------------------------------------
-# Test 21-27: max_turns token parsing
-# ---------------------------------------------------------------------------
-run_case "21] /agents execute sonnet high turns=80" \
-  "/agents execute sonnet high turns=80" \
-  "execute" "claude-sonnet-5" "high" "Think very hard before writing." "80"
+TEST_CONFIG="$TMP_CFG" assert_out "custom prefix honored" "/duck execute" "command=execute"
+TEST_CONFIG="$TMP_CFG" assert_out "default prefix rejected under custom prefix" \
+  "/quack execute" "command="
+TEST_CONFIG="$TMP_CFG" assert_out "custom alias → canonical verb" "/duck plan-it" \
+  "command=engineer" "original_command=plan-it"
+TEST_CONFIG="$TMP_CFG" assert_out "custom execute alias" "/duck ship" "command=execute"
+TEST_CONFIG="$TMP_CFG" assert_out "custom alias in chain" "/duck architect #auto:ship" \
+  "auto_chain=execute"
 
-run_case "22] /agents execute turns=abc — malformed, stays empty" \
-  "/agents execute turns=abc" \
-  "execute" "" "" "" ""
+# Malformed prefix in config falls back to /quack
+TMP_CFG2=$(mktemp)
+echo '{"command": "quack no-slash", "triggers": {}}' > "$TMP_CFG2"
+TEST_CONFIG="$TMP_CFG2" assert_out "garbage prefix falls back to /quack" \
+  "/quack execute" "command=execute"
 
-run_case "23] /agents execute max-turns=200" \
-  "/agents execute max-turns=200" \
-  "execute" "" "" "" "200"
+rm -f "$TMP_CFG" "$TMP_CFG2"
 
-run_case "24] /agents execute max_turns=50" \
-  "/agents execute max_turns=50" \
-  "execute" "" "" "" "50"
-
-run_case "25] /agents execute turns:30" \
-  "/agents execute turns:30" \
-  "execute" "" "" "" "30"
-
-run_case "26] /agents execute turns=9999 — over upper bound, stays empty" \
-  "/agents execute turns=9999" \
-  "execute" "" "" "" ""
-
-run_case "27] /agents execute turns=0 — not positive, stays empty" \
-  "/agents execute turns=0" \
-  "execute" "" "" "" ""
-
-# ---------------------------------------------------------------------------
-# Summary
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== Unit Test Summary ==="
-echo "  Pass: $PASS"
-echo "  Fail: $FAIL"
-if [[ "$FAIL" -eq 0 ]]; then
-  echo "✅ All tests passed."
-  exit 0
-else
-  echo "❌ $FAIL test(s) failed."
-  exit 1
-fi
+echo "═══ parse-directive: $PASS passed, $FAIL failed ═══"
+[[ "$FAIL" -eq 0 ]] || exit 1

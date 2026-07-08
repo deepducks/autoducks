@@ -39,6 +39,8 @@ done
 #   its::list_sub_issues(issue_id)                   → JSON array
 #   its::get_issue_edit_history(issue_id)             → JSON array
 #   its::delete_comment(comment_id)
+#   its::update_comment(comment_id, body)
+#   its::assign_issue(issue_id, assignee)
 
 REQUIRED_FUNCTIONS=(
   "its::get_issue"
@@ -56,6 +58,8 @@ REQUIRED_FUNCTIONS=(
   "its::list_sub_issues"
   "its::get_issue_edit_history"
   "its::delete_comment"
+  "its::update_comment"
+  "its::assign_issue"
 )
 
 missing=0

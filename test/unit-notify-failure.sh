@@ -136,27 +136,27 @@ assert_category() {
 
 assert_category "merge-conflict" \
   "The task PR could not be merged into the feature branch" \
-  '`/agents fix` on this task'
+  '`/quack fix` on this task'
 
 assert_category "no-changes" \
   "The agent finished but produced no code changes." \
-  '`/agents fix` (or refine the issue spec and re-run)'
+  '`/quack fix` (or refine the issue spec and re-run)'
 
 assert_category "scope-missing" \
   "The agent did not produce the expected output file" \
-  're-run `/agents design` or `/agents devise`'
+  're-run `/quack architect` or `/quack engineer`'
 
 assert_category "parse" \
   "The tactical plan could not be parsed into tasks." \
-  're-run `/agents devise`'
+  're-run `/quack engineer`'
 
 assert_category "max_turns" \
   "partial work has been preserved" \
-  '`/agents fix` to resume from the partial branch'
+  '`/quack fix` to resume from the partial branch'
 
 assert_category "infra" \
   "The run hit an unexpected error before it could finish" \
-  '`/agents fix` to retry'
+  '`/quack fix` to retry'
 
 # ---------------------------------------------------------------------------
 # Test 5: unknown/unset category defaults to infra

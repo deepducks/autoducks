@@ -1,38 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 export AUTODUCKS_AGENT="fix"
+
+rm -f /tmp/autoducks-pre-failed
+
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
+source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
+source "$AUTODUCKS_ROOT/core/orchestration/branch-prefix.sh"
 
 react_to_comment "$COMMENT_ID" "eyes"
+status_comment::start "$ISSUE_NUM"
 
 PR_BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_INTEGRATION_BRANCH}"
 BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
 
-# Extract feature number from base branch
-FEATURE_NUM=""
-if [[ "$BASE_BRANCH" =~ ^feature/([0-9]+) ]]; then
-  FEATURE_NUM="${BASH_REMATCH[1]}"
-fi
+FEATURE_NUM=$(pipeline_branch_number "$BASE_BRANCH")
+TASK_PREFIX=$(branch_prefix_of "$BASE_BRANCH")
 
-# Marks the failure as pre.sh's so post.sh (which runs on `if: always()`)
-# knows not to notify a second time for the same failure.
 trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/null || true; \
+      status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
       react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
-      progress_labels::abort "$ISSUE_NUM" "Work:progress" 2>/dev/null || true; \
+      progress_labels::abort "$ISSUE_NUM" "Work:coding" 2>/dev/null || true; \
       touch /tmp/autoducks-pre-failed; \
       exit $_rc' ERR
 
-# Find existing partial branch from a previous attempt
-EXISTING_BRANCH=$(git::find_branches_matching "feature/${FEATURE_NUM:-0}-issue-${ISSUE_NUM}-" | sort | tail -1 || true)
+# Find the newest existing task branch for this issue — task branches carry
+# either pipeline prefix (feature/ or fix/, D10), so search both.
+EXISTING_BRANCH=$( { git::find_branches_matching "feature/${FEATURE_NUM:-0}-issue-${ISSUE_NUM}-" ; \
+                     git::find_branches_matching "fix/${FEATURE_NUM:-0}-issue-${ISSUE_NUM}-" ; } \
+                   | sort | tail -1 || true)
 
 if [[ -n "$EXISTING_BRANCH" ]]; then
   TASK_BRANCH="$EXISTING_BRANCH"
   git checkout "$TASK_BRANCH" 2>/dev/null || git checkout -b "$TASK_BRANCH" "origin/$TASK_BRANCH"
 else
-  TASK_BRANCH="feature/${FEATURE_NUM:-0}-issue-${ISSUE_NUM}-fix-$(date +%s)"
+  TASK_BRANCH="${TASK_PREFIX}/${FEATURE_NUM:-0}-issue-${ISSUE_NUM}-fix-$(date +%s)"
   git::configure_identity
   git checkout -b "$TASK_BRANCH"
 fi

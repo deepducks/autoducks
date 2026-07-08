@@ -6,17 +6,17 @@ description: Fix, revert, and close — lifecycle and recovery commands.
 import { Aside } from '@astrojs/starlight/components';
 import Mermaid from '../../../components/Mermaid.astro';
 
-Utility commands handle recovery, cleanup, and lifecycle operations. They work independently of the main pipeline.
+Utility commands handle recovery, cleanup, and lifecycle operations. They sit **outside** the pipeline: no stage labels, no Definition-of-Ready cascade — but they go through the same [security gate](/reference/security) and give the same status-comment feedback.
 
-| Command | Type | What it does |
-|---------|------|--------------|
-| `/agents fix` | LLM | Retries a failed task using failure context from prior attempts |
-| `/agents revert` | Bash | Undoes tactical planning, restores the feature issue to its pre-plan state |
-| `/agents close` | Bash | Full cleanup: closes issues, PRs, and deletes branches |
+| Command | Type | What it does | Default security |
+|---------|------|--------------|------------------|
+| `/quack fix` | LLM | Repairs a failed task run, resuming preserved partial work | trusted associations |
+| `/quack revert` | Bash | Undoes planning, restores the human-authored issue | `OWNER`, `MEMBER` |
+| `/quack close` | Bash | Full cleanup: closes issues, PRs, and deletes branches | `OWNER`, `MEMBER` |
 
 ---
 
-## `/agents fix`
+## `/quack fix`
 
 <Mermaid chart={`
 flowchart LR
@@ -32,30 +32,30 @@ flowchart LR
     classDef fixRed fill:#ffd4d4,stroke:#d62828,color:#d62828
 `} />
 
-The Fix agent recovers from failed execution attempts. It reads the task spec, inspects the failure context from recent comments, and resumes or replaces the prior implementation.
+Recovers a failed **task run**. It finds the newest existing task branch for the issue (searching both `feature/…` and `fix/…` prefixes — including `WIP:` branches preserved after a `max_turns` cutoff), reads the failure context from the last 10 comments, and fixes or completes the implementation on top of what's there.
 
-**Script:** `.autoducks/agents/fix/pre.sh` + `post.sh`  
-**Trigger:** Issue comment `/agents fix` on any task issue
+**Scripts:** `.autoducks/agents/fix/{pre,post}.sh` · **Trigger:** `/quack fix` on a task issue
 
 ### Behavior
 
-1. Reacts to the trigger comment with 👀.
-2. Searches for an existing partial branch from a prior failed attempt.
-   - **If found:** checks out that branch to continue where the previous attempt left off.
-   - **If not found:** creates a new fix branch `feature/{feature_num}-issue-{issue_num}-fix-{timestamp}`.
-3. Prepares the task spec and failure context from the last 10 comments.
-4. The LLM reads both, then fixes or completes the implementation.
-5. Commits and pushes. Reuses an existing PR if present; otherwise creates `Fix: {title}`.
-6. If feature-parented: auto-merges and triggers the wave orchestrator.
-7. Reacts with 👍 and confirms the fix.
+1. Reacts 👀, posts the status comment.
+2. Checks out the newest matching task branch, or creates `…-issue-<n>-fix-<epoch>` if none exists.
+3. **[LLM]** Reads the task spec + failure context and repairs the implementation.
+4. Commits (if there are changes — a reused branch may already carry them), pushes, **reuses the existing PR** or opens `Fix: <title>`.
+5. Under a parent: single-attempt merge (a conflict posts the 🔀 report), then the Maestro resumes. Standalone-dispatched fixes leave the PR for review.
+6. Assigns the command author; status comment flips to ✅.
+
+<Aside type="note">
+**Fix ≠ the Bug flow.** `/quack fix` repairs a *failed agent run*. A product **bug** goes through the full pipeline — `/quack execute` on the bug issue — and gets a `fix/…` pipeline branch via the [Architect's classification](/agents/architect#bug-classification).
+</Aside>
 
 <Aside type="tip">
-Before running `/agents fix`, add a comment to the task issue explaining what went wrong. The agent reads the last 10 comments as context, so more detail leads to better results.
+Before running `/quack fix`, comment what went wrong — the agent reads the last 10 comments as context, so more detail leads to better repairs.
 </Aside>
 
 ---
 
-## `/agents revert`
+## `/quack revert`
 
 <Mermaid chart={`
 flowchart LR
@@ -71,29 +71,22 @@ flowchart LR
     classDef revertYellow fill:#fff3cd,stroke:#856d00,color:#856d00
 `} />
 
-Undoes the work of the Tactical agent: closes all task issues and restores the feature issue body to how it looked before `/agents devise` was run.
+Undoes the Engineer's work: closes all task issues and restores the issue to how it looked before planning.
 
-**Script:** `.autoducks/agents/revert/run.sh`  
-**Type:** Bash — no LLM  
-**Trigger:** Issue comment `/agents revert` on a Feature issue
+**Script:** `.autoducks/agents/revert/run.sh` · **Type:** Bash — no LLM · **Trigger:** `/quack revert`
 
 ### Behavior
 
-1. Reacts with 👀.
-2. Extracts task numbers from the YAML `waves:` block in the feature issue body.
-3. Closes all task issues with a comment referencing the revert.
-4. Removes `Ready`, `draft`, and all six progress labels (`Spec:draft`, `Spec:plan`, `Tactics:crafting`, `Tactics:ready`, `Work:progress`, `Work:done`) from the feature issue.
-5. Restores the original issue body from edit history (last non-bot edit).
-6. Deletes all bot comments on the feature issue.
-7. Reacts with 👍.
+1. Extracts task numbers from the waves block and closes each task as not-planned.
+2. Strips pipeline labels — current taxonomy **and** legacy labels from older installs.
+3. Restores the original issue body from the edit history — the last edit made by a **human** (bot edits are ignored).
+4. Deletes all **bot** comments; every human comment survives. This works because agents only ever post and edit their own comments — they never touch yours.
 
-**Does not** delete branches or close PRs — use `/agents close` for that.
-
-Use this when the tactical plan needs to be completely redone. After reverting, run `/agents devise` again.
+**Does not** delete branches or close PRs — use `/quack close` for that. After reverting, run `/quack engineer` (or the full pipeline) again.
 
 ---
 
-## `/agents close`
+## `/quack close`
 
 <Mermaid chart={`
 flowchart LR
@@ -109,21 +102,15 @@ flowchart LR
     classDef closeGray fill:#e8e8e8,stroke:#586069,color:#586069
 `} />
 
-Full teardown of a feature and all associated work.
+Full teardown of a pipeline and all associated work.
 
-**Script:** `.autoducks/agents/close/run.sh`  
-**Type:** Bash — no LLM  
-**Trigger:** Issue comment `/agents close` on a Feature issue
+**Script:** `.autoducks/agents/close/run.sh` · **Type:** Bash — no LLM · **Trigger:** `/quack close`
 
 ### Behavior
 
-1. Reacts with 👀.
-2. Extracts task numbers from the YAML `waves:` block.
-3. For each task: finds branches, closes open PRs, deletes branches, closes the task issue.
-4. Closes the feature PR (if open) and deletes the feature branch.
-5. Strips all progress labels (`Spec:draft`, `Spec:plan`, `Tactics:crafting`, `Tactics:ready`, `Work:progress`, `Work:done`) along with `Ready` and `draft` from the feature issue as part of cleanup.
-6. Closes the feature issue with a cleanup summary.
-7. Reacts with 👍.
+1. For each task: finds its branches (both `feature/…` and `fix/…` prefixes), closes open PRs, deletes branches, closes the task issue.
+2. Closes the pipeline PR and deletes the pipeline branch (checks both prefixes, so it works even if the issue's kind changed after design).
+3. Strips all pipeline labels (current + legacy) and closes the issue with a cleanup summary.
 
 ### What gets removed
 
@@ -132,10 +119,10 @@ Full teardown of a feature and all associated work.
 | Task issues | Closed |
 | Task PRs | Closed |
 | Task branches | Deleted |
-| Feature branch | Deleted |
-| Feature PR | Closed |
-| Feature issue | Closed |
+| Pipeline branch (`feature/…` or `fix/…`) | Deleted |
+| Pipeline PR | Closed |
+| The issue itself | Closed |
 
 <Aside type="caution">
-`/agents close` is destructive. Deleted branches cannot be easily recovered. Use `/agents revert` if you only want to undo the plan while keeping the feature issue open.
+`/quack close` is destructive — deleted branches cannot be easily recovered. Use `/quack revert` if you only want to undo the plan while keeping the issue open.
 </Aside>

@@ -1,0 +1,95 @@
+---
+title: Engineer
+description: Breaks a design into task issues organized in dependency waves.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Mermaid from '../../../components/Mermaid.astro';
+
+```
+/quack engineer
+```
+
+The Engineer decomposes a completed design into an execution plan: **task issues** with acceptance criteria, organized into **dependency waves** (tasks in the same wave run in parallel). The plan lives inside the issue body's *tactical zone*; the design above it is never touched.
+
+**Type:** LLM (Claude) · **Scripts:** `.autoducks/agents/engineer/{pre,post}.sh` · **Verbs:** `engineer`, `tactics`
+
+<Mermaid chart={`
+flowchart LR
+    Triggers@{ shape: bolt, label: "Triggers" }
+    Engineer["Engineer"]
+    Issue@{ shape: notch-rect, label: "Issue\\nlabel: Tactics:done" }
+    Tasks@{ shape: processes, label: "Task issues" }
+
+    Triggers --triggers--> Engineer
+    Engineer -- edits tactical zone --> Issue
+    Engineer -- creates --> Tasks
+
+    class Triggers triggersOrange
+    class Engineer tacticalPink
+
+    classDef triggersOrange fill:#ffe8d4,stroke:#d66a28,color:#d66a28
+    classDef tacticalPink fill:#f8d4e4,stroke:#e55398,color:#e55398
+`} />
+
+## Triggers
+
+| Event | Condition |
+|-------|-----------|
+| Issue comment | `/quack engineer` or `/quack tactics` |
+| Issue comment | `/quack execute` (or `run`/`work`) on an issue that is **not** a Task and does **not** have `Tactics:done` — execution intent is preserved: the plan chains straight into the Maestro |
+| Workflow dispatch | Dispatched by the Architect's chain, or by the Maestro's Definition-of-Ready guard |
+
+## Definition of Ready
+
+The Engineer requires **`Design:done`**. Without it, planning would sit on top of an unstructured issue — so it posts a 🔁 status and dispatches the **Architect**, re-queuing itself (plus any pending `#auto:` chain, plus your `execute` intent if that's how it was invoked) behind it. If delegation would loop or exceed the chain depth, it fails loudly instead.
+
+## The two zones
+
+The issue body is split by HTML-comment sentinels:
+
+- **Design zone** — everything above `<!-- autoducks:tactical:begin -->`. Owned by the Architect and humans; the Engineer preserves it byte-for-byte and aborts loudly on malformed markers or any risk of wiping it.
+- **Tactical zone** — between the sentinels. Owned by the Engineer: the YAML wave plan, the `## Progress` checklist, and optional `## Notes`.
+
+## Behavior
+
+1. Reacts 👀, posts the status comment, checks the Definition of Ready, applies `Tactics:crafting`.
+2. **[LLM]** Reads the design (and, on revisions, the current plan + task issues + recent comments) and writes the plan: a ```` ```yaml waves: ```` block, `## Tasks` blocks (Summary / Tasks / Acceptance Criteria / References), and a `## Progress` checklist.
+3. **Questions Mode** — if the design is genuinely insufficient, the Engineer posts up to 5 blocking questions and stops instead of guessing. Answer in comments and re-run.
+4. The plan is parsed **deterministically** (`parse-plan.py`, sub-second, no LLM); parse errors post a template hint, never fail silently.
+5. Task issues are created/updated, typed and labeled `Task`, and linked as **native sub-issues** — with graceful degradation (a summary reports linked/forbidden/unavailable counts; the `## Progress` checklist is always the fallback). `Tn` placeholders in the body are replaced with real issue numbers.
+6. `Tactics:crafting` → **`Tactics:done`** — one label serves as both the completion record and the Maestro's routing signal. The command author is assigned; the status comment flips to ✅ with the next step; the chain continues (to the Maestro, when execution was requested).
+
+The Engineer is **pure ITS** — it never touches git. Branches and PRs belong to the [Maestro](/agents/maestro).
+
+## Single-task plans
+
+When the whole design fits one task, no child issue is created: the task body lives directly in the tactical zone (no waves block, no checklist). The Maestro detects this **structurally** — by the absence of a waves plan — and dispatches the Developer on the issue itself.
+
+## Revision mode
+
+Re-running the Engineer on an issue that already has `Tactics:done` revises the plan:
+
+- **Preserve** an existing task (number, comment history, assignees) by referencing its real issue number where you'd use a `Tn` placeholder.
+- **Add** tasks with fresh `Tn` placeholders.
+- **Drop** tasks by omitting them — they're closed as "superseded by revised plan".
+
+The revision context given to the LLM includes the read-only design zone, the current plan, every existing task's body, and the last 20 comments — so feedback you leave as comments steers the revision.
+
+## Output
+
+- **Tactical zone** with the wave plan and progress checklist
+- **Task issues** created and sub-issue-linked (multi-task plans)
+- **`Tactics:done`** applied — the Maestro's Definition of Ready
+- **Assignee** = whoever ran the command
+
+## Overrides
+
+```
+/quack engineer model:opus effort:max
+/quack engineer #auto:execute      # plan, then execute
+```
+
+<Aside type="note">
+Leave review feedback as issue comments, then re-run `/quack engineer` — the revision context carries your comments to the planner.
+</Aside>

@@ -4,8 +4,10 @@ export AUTODUCKS_AGENT="fix"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/robustness/assert-changes.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/trigger-loop-closure.sh"
+source "$AUTODUCKS_ROOT/core/orchestration/branch-prefix.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
 # Reconstruct state from git (pre.sh exports don't persist across GHA steps)
@@ -13,13 +15,14 @@ TASK_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 PR_BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_INTEGRATION_BRANCH}"
 BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
 FEATURE_NUM=""
-if [[ "$TASK_BRANCH" =~ ^feature/([0-9]+)-issue- ]]; then
-  FEATURE_NUM="${BASH_REMATCH[1]}"
+if [[ "$TASK_BRANCH" =~ ^(feature|fix)/([0-9]+)-issue- ]]; then
+  FEATURE_NUM="${BASH_REMATCH[2]}"
 fi
 
 trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/null || true; \
+      status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
       react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
-      progress_labels::abort "$ISSUE_NUM" "Work:progress" 2>/dev/null || true; \
+      progress_labels::abort "$ISSUE_NUM" "Work:coding" 2>/dev/null || true; \
       exit $_rc' ERR
 
 # pre.sh's own ERR trap already notified on failure — post.sh still runs
@@ -45,8 +48,9 @@ if [[ "${LLM_ERROR_SUBTYPE:-}" == "error_max_turns" ]]; then
   fi
 
   notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/null || true
+  status_comment::fail "$ISSUE_NUM" 2>/dev/null || true
   react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true
-  progress_labels::abort "$ISSUE_NUM" "Work:progress" 2>/dev/null || true
+  progress_labels::abort "$ISSUE_NUM" "Work:coding" 2>/dev/null || true
   exit 1
 fi
 
@@ -59,7 +63,7 @@ if ! git diff --cached --quiet 2>/dev/null; then
 fi
 git::push_branch "$TASK_BRANCH"
 
-# Check for existing PR
+# Reuse existing PR or create a new one
 EXISTING_PR=$(gh pr list --repo "$REPO" --head "$TASK_BRANCH" --base "$PR_BASE_BRANCH" --json number --jq '.[0].number // empty' 2>/dev/null || true)
 
 if [[ -z "$EXISTING_PR" ]]; then
@@ -78,8 +82,9 @@ if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
     else
       notify_conflict "$ISSUE_NUM" "$RUN_ID" "$TASK_BRANCH" "$PR_NUM" "$FEATURE_NUM"
     fi
+    status_comment::fail "$ISSUE_NUM"
     react_to_comment "$COMMENT_ID" "confused"
-    progress_labels::abort "$ISSUE_NUM" "Work:progress"
+    progress_labels::abort "$ISSUE_NUM" "Work:coding"
     exit 1
   fi
   trigger_loop_closure "$FEATURE_NUM"
@@ -87,24 +92,27 @@ fi
 
 react_to_comment "$COMMENT_ID" "+1"
 
+# Done-assignee (D15): the command author owns the next action.
+its::assign_issue "$ISSUE_NUM" "${COMMENTER:-}" 2>/dev/null || true
+
 if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
-  # Scenario B: fix PR auto-merged into the feature branch, orchestrator resumed
-  FIX_MSG="✅ **Fix applied and merged.**
+  # Fix PR auto-merged into the feature/bug branch, orchestrator resumed
+  FIX_MSG="**Fix applied and merged.**
 
-PR #$PR_NUM was merged into \`$BASE_BRANCH\` and the wave orchestrator has been
-re-triggered to resume the feature.
+PR #$PR_NUM was merged into \`$BASE_BRANCH\` and the Maestro has been
+re-triggered to resume the pipeline.
 
-**Next:** nothing — the orchestrator continues from here."
+**Next:** nothing — the Maestro continues from here."
 else
-  # Scenario A: fix PR awaits human review
-  FIX_MSG="✅ **Fix applied.**
+  # Fix PR awaits human review
+  FIX_MSG="**Fix applied.**
 
 PR #$PR_NUM is open and waiting for your review.
 
-**Next:** review and merge PR #$PR_NUM, or comment \`/agents fix\` again if the
+**Next:** review and merge PR #$PR_NUM, or comment \`${AUTODUCKS_COMMAND} fix\` again if the
 problem persists."
 fi
 
-its::comment_issue "$ISSUE_NUM" "$FIX_MSG
+status_comment::finish "$ISSUE_NUM" "$FIX_MSG
 
-_Ran with \`${MODEL:-unknown}\` at reasoning \`${REASONING:-unknown}\`._"
+_Ran with \`${MODEL:-unknown}\` at effort \`${EFFORT:-unknown}\`._"
