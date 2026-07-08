@@ -36,98 +36,103 @@ assert_out() {
 }
 
 # ---------------------------------------------------------------------------
-echo "── canonical verbs and built-in aliases ──"
+echo "── canonical verbs and built-in aliases (bare form, default namespace) ──"
 
-assert_out "canonical architect" "/quack architect" \
+assert_out "canonical architect" "/architect" \
   "command=architect" "original_command=architect" "model=" "effort=" "auto_chain="
 
-assert_out "alias design → architect" "/quack design" \
+assert_out "alias design → architect" "/design" \
   "command=architect" "original_command=design"
 
-assert_out "canonical engineer" "/quack engineer" "command=engineer"
-assert_out "alias tactics → engineer" "/quack tactics" \
+assert_out "canonical engineer" "/engineer" "command=engineer"
+assert_out "alias tactics → engineer" "/tactics" \
   "command=engineer" "original_command=tactics"
 
-assert_out "canonical execute" "/quack execute" "command=execute"
-assert_out "alias run → execute" "/quack run" "command=execute" "original_command=run"
-assert_out "alias work → execute" "/quack work" "command=execute" "original_command=work"
+assert_out "canonical execute" "/execute" "command=execute"
+assert_out "alias run → execute" "/run" "command=execute" "original_command=run"
+assert_out "alias work → execute" "/work" "command=execute" "original_command=work"
 
-assert_out "fix passthrough" "/quack fix" "command=fix"
-assert_out "revert passthrough" "/quack revert" "command=revert"
-assert_out "close passthrough" "/quack close" "command=close"
+assert_out "fix passthrough" "/fix" "command=fix"
+assert_out "revert passthrough" "/revert" "command=revert"
+assert_out "close passthrough" "/close" "command=close"
 
-assert_out "uppercase verb is lowercased" "/quack ARCHITECT" "command=architect"
+assert_out "uppercase verb is lowercased" "/ARCHITECT" "command=architect"
 
 echo "── retired aliases are NOT normalized (D8) ──"
-assert_out "devise stays raw" "/quack devise" "command=devise"
-assert_out "plan stays raw" "/quack plan" "command=plan"
-assert_out "drilldown stays raw" "/quack drilldown" "command=drilldown"
-assert_out "specify stays raw" "/quack specify" "command=specify"
-assert_out "start stays raw" "/quack start" "command=start"
+assert_out "devise stays raw" "/devise" "command=devise"
+assert_out "plan stays raw" "/plan" "command=plan"
+assert_out "drilldown stays raw" "/drilldown" "command=drilldown"
+assert_out "specify stays raw" "/specify" "command=specify"
+assert_out "start stays raw" "/start" "command=start"
 
-echo "── prefix handling ──"
-assert_out "old /agents prefix is ignored" "/agents execute" "command=" "model="
+echo "── directive position handling ──"
 assert_out "directive mid-comment ignored (must be line start)" \
-  "please /quack execute" "command="
-assert_out "directive on later line" $'some context\n/quack execute opus' \
+  "please /run" "command="
+assert_out "prose containing /fixed does not fire or normalize to fix" \
+  "I just /fixed a typo" "command="
+assert_out "directive on later line" $'some context\n/execute opus' \
   "command=execute" "model=claude-opus-4-8"
 
 echo "── model overrides ──"
-assert_out "positional opus" "/quack execute opus" "model=claude-opus-4-8"
-assert_out "positional sonnet" "/quack execute sonnet" "model=claude-sonnet-5"
-assert_out "positional haiku" "/quack execute haiku" "model=claude-haiku-4-5"
-assert_out "named model:opus" "/quack execute model:opus" "model=claude-opus-4-8"
-assert_out "named model:claude-sonnet-5" "/quack execute model:claude-sonnet-5" \
+assert_out "positional opus" "/execute opus" "model=claude-opus-4-8"
+assert_out "positional sonnet" "/execute sonnet" "model=claude-sonnet-5"
+assert_out "positional haiku" "/execute haiku" "model=claude-haiku-4-5"
+assert_out "named model:opus" "/execute model:opus" "model=claude-opus-4-8"
+assert_out "named model:claude-sonnet-5" "/execute model:claude-sonnet-5" \
   "model=claude-sonnet-5"
-assert_out "unknown model ignored" "/quack execute model:gpt-4" "model="
+assert_out "unknown model ignored" "/execute model:gpt-4" "model="
 
 echo "── effort overrides ──"
-assert_out "positional high" "/quack execute high" \
+assert_out "positional high" "/execute high" \
   "effort=high" "think_phrase=Think very hard before writing."
-assert_out "positional max" "/quack execute max" "effort=max"
-assert_out "named effort:low" "/quack execute effort:low" \
+assert_out "positional max" "/execute max" "effort=max"
+assert_out "named effort:low" "/execute effort:low" \
   "effort=low" "think_phrase=Think before writing."
-assert_out "named effort:medium" "/quack execute effort:med" "effort=medium"
-assert_out "effort off yields empty think phrase" "/quack execute effort:off" \
+assert_out "named effort:medium" "/execute effort:med" "effort=medium"
+assert_out "effort off yields empty think phrase" "/execute effort:off" \
   "effort=off" "think_phrase="
-assert_out "no effort yields empty (defaults win downstream)" "/quack execute" \
+assert_out "no effort yields empty (defaults win downstream)" "/execute" \
   "effort=" "think_phrase="
-assert_out "combined model+effort" "/quack architect opus max" \
+assert_out "combined model+effort" "/architect opus max" \
+  "model=claude-opus-4-8" "effort=max"
+assert_out "model:opus effort:max" "/execute model:opus effort:max" \
   "model=claude-opus-4-8" "effort=max"
 
 echo "── max_turns overrides ──"
-assert_out "turns:5" "/quack execute turns:5" "max_turns=5"
-assert_out "turns=12" "/quack execute turns=12" "max_turns=12"
-assert_out "max-turns=7" "/quack execute max-turns=7" "max_turns=7"
-assert_out "max_turns=9" "/quack execute max_turns=9" "max_turns=9"
-assert_out "turns:0 rejected" "/quack execute turns:0" "max_turns="
-assert_out "turns:1001 rejected" "/quack execute turns:1001" "max_turns="
-assert_out "turns garbage rejected" "/quack execute turns=abc" "max_turns="
+assert_out "turns:5" "/execute turns:5" "max_turns=5"
+assert_out "turns=12" "/execute turns=12" "max_turns=12"
+assert_out "max-turns=7" "/execute max-turns=7" "max_turns=7"
+assert_out "max_turns=9" "/execute max_turns=9" "max_turns=9"
+assert_out "turns:0 rejected" "/execute turns:0" "max_turns="
+assert_out "turns:1001 rejected" "/execute turns:1001" "max_turns="
+assert_out "turns garbage rejected" "/execute turns=abc" "max_turns="
 
 echo "── #auto: chaining ──"
-assert_out "single chain" "/quack architect #auto:engineer" "auto_chain=engineer"
-assert_out "multi chain" "/quack architect #auto:engineer+execute" \
+assert_out "single chain" "/architect #auto:engineer" "auto_chain=engineer"
+assert_out "multi chain" "/architect #auto:engineer+execute" \
   "auto_chain=engineer+execute"
-assert_out "chain aliases normalized" "/quack architect #auto:tactics+run" \
+assert_out "chain aliases normalized" "/architect #auto:tactics+run" \
   "auto_chain=engineer+execute"
-assert_out "chain dedupes verbs" "/quack architect #auto:engineer+engineer+execute" \
+assert_out "chain dedupes verbs" "/architect #auto:engineer+engineer+execute" \
   "auto_chain=engineer+execute"
-assert_out "invalid chain verbs filtered" "/quack architect #auto:engineer+banana" \
+assert_out "invalid chain verbs filtered" "/architect #auto:engineer+banana" \
   "auto_chain=engineer"
-assert_out "wholly invalid chain empty" "/quack architect #auto:banana" "auto_chain="
-assert_out "chain with other tokens" "/quack architect opus #auto:engineer turns:3" \
+assert_out "wholly invalid chain empty" "/architect #auto:banana" "auto_chain="
+assert_out "chain with other tokens" "/architect opus #auto:engineer turns:3" \
   "auto_chain=engineer" "model=claude-opus-4-8" "max_turns=3"
+assert_out "architect #auto:engineer+execute matches prior /quack equivalent" \
+  "/architect #auto:engineer+execute" "command=architect" "auto_chain=engineer+execute"
 
 echo "── no directive ──"
 assert_out "empty body" "" "command=" "model=" "effort=" "max_turns=" "auto_chain="
 assert_out "unrelated comment" "great work!" "command="
 
 # ---------------------------------------------------------------------------
-echo "── configurable prefix + custom aliases ──"
+echo "── configurable namespace + custom aliases ──"
 TMP_CFG=$(mktemp)
 cat > "$TMP_CFG" <<'JSON'
 {
-  "command": "/duck",
+  "command": "duck",
   "triggers": {
     "architect": [],
     "engineer": ["plan-it"],
@@ -139,22 +144,32 @@ cat > "$TMP_CFG" <<'JSON'
 }
 JSON
 
-TEST_CONFIG="$TMP_CFG" assert_out "custom prefix honored" "/duck execute" "command=execute"
-TEST_CONFIG="$TMP_CFG" assert_out "default prefix rejected under custom prefix" \
-  "/quack execute" "command="
+TEST_CONFIG="$TMP_CFG" assert_out "custom namespace honored" "/duck execute" "command=execute"
+TEST_CONFIG="$TMP_CFG" assert_out "bare form rejected under custom namespace" \
+  "/execute" "command="
 TEST_CONFIG="$TMP_CFG" assert_out "custom alias → canonical verb" "/duck plan-it" \
   "command=engineer" "original_command=plan-it"
 TEST_CONFIG="$TMP_CFG" assert_out "custom execute alias" "/duck ship" "command=execute"
 TEST_CONFIG="$TMP_CFG" assert_out "custom alias in chain" "/duck architect #auto:ship" \
   "auto_chain=execute"
 
-# Malformed prefix in config falls back to /quack
+# Namespace set to "quack": two-token parsing still works, bare form doesn't fire.
+TMP_CFG_QUACK=$(mktemp)
+echo '{"command": "quack", "triggers": {}}' > "$TMP_CFG_QUACK"
+TEST_CONFIG="$TMP_CFG_QUACK" assert_out "command:\"quack\" — /quack execute parses" \
+  "/quack execute" "command=execute"
+TEST_CONFIG="$TMP_CFG_QUACK" assert_out "command:\"quack\" — bare /execute does not fire" \
+  "/execute" "command="
+
+# Malformed namespace in config falls back to empty (bare short forms)
 TMP_CFG2=$(mktemp)
 echo '{"command": "quack no-slash", "triggers": {}}' > "$TMP_CFG2"
-TEST_CONFIG="$TMP_CFG2" assert_out "garbage prefix falls back to /quack" \
-  "/quack execute" "command=execute"
+TEST_CONFIG="$TMP_CFG2" assert_out "garbage namespace falls back to bare form" \
+  "/execute" "command=execute"
+TEST_CONFIG="$TMP_CFG2" assert_out "garbage namespace: malformed args still ignored" \
+  "/execute turns:0" "max_turns="
 
-rm -f "$TMP_CFG" "$TMP_CFG2"
+rm -f "$TMP_CFG" "$TMP_CFG_QUACK" "$TMP_CFG2"
 
 # ---------------------------------------------------------------------------
 # Helper: run with COMMENT_BODY and assert the decoded steering_prompt value.
@@ -180,22 +195,22 @@ assert_steering() {
 
 echo "── steering_prompt: free-text remainder ──"
 
-assert_steering "directive-only is empty" "/quack architect" ""
+assert_steering "directive-only is empty" "/architect" ""
 
 assert_steering "directive + prose" \
-  "/quack architect please add a caching layer" \
+  "/architect please add a caching layer" \
   "please add a caching layer"
 
 assert_steering "directive + tokens + prose" \
-  "/quack execute opus turns:5 please add a caching layer" \
+  "/execute opus turns:5 please add a caching layer" \
   "please add a caching layer"
 
 assert_steering "multi-line prose" \
-  $'/quack architect please review\nand consider caching layer\nfor performance' \
+  $'/architect please review\nand consider caching layer\nfor performance' \
   $'please review\nand consider caching layer\nfor performance'
 
 assert_steering "model:-like word mid-prose is not stripped" \
-  "/quack architect lets discuss the model:xyz option further" \
+  "/architect lets discuss the model:xyz option further" \
   "lets discuss the model:xyz option further"
 
 # ---------------------------------------------------------------------------
