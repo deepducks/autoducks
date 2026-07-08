@@ -69,6 +69,7 @@ export default defineConfig({
             { label: 'Engineer', slug: 'agents/engineer' },
             { label: 'Maestro', slug: 'agents/maestro' },
             { label: 'Developer', slug: 'agents/developer' },
+            { label: 'Reviewer', slug: 'agents/reviewer' },
             { label: 'Utility commands', slug: 'agents/utilities' },
           ],
         },

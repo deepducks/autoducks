@@ -19,6 +19,7 @@ All autoducks commands are issue comments. The full grammar:
 | Design (or revise the design) only | `/quack architect` |
 | Plan (or revise the plan) only | `/quack engineer` |
 | Design + plan, then stop for review | `/quack architect #auto:engineer` |
+| Review a finished PR before merging | `/quack review` |
 | Re-run a failed task | `/quack fix` (on the task issue) |
 | Undo the plan, keep the issue | `/quack revert` |
 | Tear everything down | `/quack close` |
@@ -34,6 +35,7 @@ All autoducks commands are issue comments. The full grammar:
 | `/quack execute` | Task issue | [Developer](/agents/developer) |
 | `/quack execute` | has `Tactics:done` | [Maestro](/agents/maestro) |
 | `/quack execute` | anything else | [Engineer](/agents/engineer) → cascade |
+| `/quack review` | feature/bug issue with an open pipeline PR, or the PR itself | [Reviewer](/agents/reviewer) |
 | `/quack fix` | any task | [Fix agent](/agents/utilities#quack-fix) |
 | `/quack revert` | planned issue | [Revert agent](/agents/utilities#quack-revert) |
 | `/quack close` | planned issue | [Close agent](/agents/utilities#quack-close) |
@@ -47,7 +49,7 @@ All autoducks commands are issue comments. The full grammar:
 | `architect` | `design` |
 | `engineer` | `tactics` |
 | `execute` | `run`, `work` |
-| `fix` / `revert` / `close` | *(none)* |
+| `fix` / `revert` / `close` / `review` | *(none)* |
 
 Aliases behave identically to the canonical verb, including routing and cascade.
 
