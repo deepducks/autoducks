@@ -41,6 +41,10 @@ done
 #   its::delete_comment(comment_id)
 #   its::update_comment(comment_id, body)
 #   its::assign_issue(issue_id, assignee)
+#   its::list_issues(state, limit?, extra_filter?)   → JSON array [{number,title,body,labels,type,updatedAt}]
+#   its::search_issues(query)                        → JSON array
+#   its::set_priority(issue_id, priority)            → token ∈ {project, labels, off, unavailable}
+#   its::priority_backend()                          → token ∈ {project, labels, off}
 
 REQUIRED_FUNCTIONS=(
   "its::get_issue"
@@ -60,6 +64,10 @@ REQUIRED_FUNCTIONS=(
   "its::delete_comment"
   "its::update_comment"
   "its::assign_issue"
+  "its::list_issues"
+  "its::search_issues"
+  "its::set_priority"
+  "its::priority_backend"
 )
 
 missing=0
