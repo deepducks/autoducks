@@ -10,6 +10,7 @@ source "$AUTODUCKS_ROOT/core/orchestration/reconcile-tasks.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/dispatch-chain.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
+source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 
 # Catch-all safety net for anything that fails before an explicit handler
 # runs (the explicit sites below set richer categories and are preferred;
@@ -26,6 +27,8 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
 if [[ -f /tmp/autoducks-pre-failed || -f /tmp/autoducks-dor-delegated ]]; then
   exit 0
 fi
+
+cancellation::handle "$ISSUE_NUM" "Tactics:crafting"
 
 # Questions mode: the agent wrote questions instead of a plan.
 if [[ -f /tmp/questions.md ]]; then
