@@ -52,6 +52,10 @@ Every slash-command run follows the same skeleton (security first, feedback alwa
 
 Failures never end as a silent red X: [`core/feedback/notify-failure.sh`](../core/feedback/notify-failure.sh) posts a categorized diagnosis (merge-conflict / no-changes / scope-missing / parse / max_turns / infra) with a run-log link and a retry hint, mirrored to the parent feature when a task fails.
 
+### Re-run semantics
+
+There is no separate resume path: **re-issuing the same trigger comment is always the intended way to resume, refine, or correct a run**, because every agent recomputes its behavior from currently-visible ITS/git state rather than any workflow-local cache. Concretely: the Architect revises the existing body instead of rewriting it and preserves the tactical zone byte-for-byte; the Engineer's `Tactics:done` re-run is revision mode (existing tasks preserved by number, dropped tasks closed as superseded); the Maestro is fully idempotent (reuses the pipeline branch/PR, never re-dispatches a task with an open or merged PR); and the utility agents (Fix/Revert/Close) are idempotent teardown/repair operations. See the [Re-running agents](../../docs/src/content/docs/guides/re-running-agents.mdx) guide for the full per-stage contract.
+
 ---
 
 ## Pipeline agents
