@@ -68,13 +68,9 @@ When the whole design fits one task, no child issue is created: the task body li
 
 ## Revision mode
 
-Re-running the Engineer on an issue that already has `Tactics:done` revises the plan:
+Re-running the Engineer on an issue that already has `Tactics:done` revises the plan rather than starting over — existing tasks are preserved by number, dropped tasks are closed as "superseded by revised plan", and new tasks get fresh `Tn` placeholders. The revision context given to the LLM includes the read-only design zone, the current plan, every existing task's body, and the last 20 comments — so feedback you leave as comments steers the revision.
 
-- **Preserve** an existing task (number, comment history, assignees) by referencing its real issue number where you'd use a `Tn` placeholder.
-- **Add** tasks with fresh `Tn` placeholders.
-- **Drop** tasks by omitting them — they're closed as "superseded by revised plan".
-
-The revision context given to the LLM includes the read-only design zone, the current plan, every existing task's body, and the last 20 comments — so feedback you leave as comments steers the revision.
+See [Re-running agents](/guides/re-running-agents) for the full preserve/rewrite contract across every stage, and how re-running compares to the other agents.
 
 ## Output
 

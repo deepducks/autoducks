@@ -121,6 +121,10 @@ Semantics:
 
 See [Chaining & overrides](/guides/chaining-and-overrides) for recipes.
 
+## Can I run this again?
+
+Yes — every agent recomputes from visible ITS/git state, so re-issuing the same comment is always safe and is how you resume an interrupted run, refine a design or plan, or retry after a fix. See [Re-running agents](/guides/re-running-agents) for what each stage does on a second run and how to steer it.
+
 ## Configurable prefix
 
 The `/quack` prefix comes from `command` in `.autoducks/autoducks.json`. GitHub evaluates workflow `if:` guards without reading repository files, so after changing it you must re-bake the guards and commit:

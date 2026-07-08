@@ -157,6 +157,48 @@ TEST_CONFIG="$TMP_CFG2" assert_out "garbage prefix falls back to /quack" \
 rm -f "$TMP_CFG" "$TMP_CFG2"
 
 # ---------------------------------------------------------------------------
+# Helper: run with COMMENT_BODY and assert the decoded steering_prompt value.
+#   assert_steering LABEL BODY EXPECTED_DECODED_PROSE
+# ---------------------------------------------------------------------------
+assert_steering() {
+  local label="$1" body="$2" expected="$3"
+  echo "[$label]"
+  local out b64 decoded
+  out=$(COMMENT_BODY="$body" AUTODUCKS_CONFIG="$CONFIG" bash "$SCRIPT" </dev/null)
+  b64=$(printf '%s\n' "$out" | grep '^steering_prompt=' | cut -d= -f2-)
+  if [[ -z "$b64" ]]; then
+    decoded=""
+  else
+    decoded=$(printf '%s' "$b64" | base64 -d)
+  fi
+  if [[ "$decoded" == "$expected" ]]; then
+    pass "steering_prompt decodes to '$expected'"
+  else
+    fail "want steering_prompt '$expected' — got '$decoded'"
+  fi
+}
+
+echo "── steering_prompt: free-text remainder ──"
+
+assert_steering "directive-only is empty" "/quack architect" ""
+
+assert_steering "directive + prose" \
+  "/quack architect please add a caching layer" \
+  "please add a caching layer"
+
+assert_steering "directive + tokens + prose" \
+  "/quack execute opus turns:5 please add a caching layer" \
+  "please add a caching layer"
+
+assert_steering "multi-line prose" \
+  $'/quack architect please review\nand consider caching layer\nfor performance' \
+  $'please review\nand consider caching layer\nfor performance'
+
+assert_steering "model:-like word mid-prose is not stripped" \
+  "/quack architect lets discuss the model:xyz option further" \
+  "lets discuss the model:xyz option further"
+
+# ---------------------------------------------------------------------------
 echo ""
 echo "═══ parse-directive: $PASS passed, $FAIL failed ═══"
 [[ "$FAIL" -eq 0 ]] || exit 1
