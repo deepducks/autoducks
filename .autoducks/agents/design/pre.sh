@@ -3,11 +3,20 @@ set -euo pipefail
 export AUTODUCKS_AGENT="design"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
+source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
+
+rm -f /tmp/autoducks-pre-failed
+
+trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
+      react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
+      progress_labels::abort "$ISSUE_NUM" "Spec:draft" 2>/dev/null || true; \
+      touch /tmp/autoducks-pre-failed; \
+      exit $_rc' ERR
 
 react_to_comment "$COMMENT_ID" "eyes"
 
-source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 progress_labels::ensure
 progress_labels::start "$ISSUE_NUM" "Spec:draft" "Spec:plan"
 
@@ -25,7 +34,9 @@ if body_has_markers /tmp/issue-body-raw.md; then
   split_body /tmp/issue-body-raw.md /tmp/design-zone-discard.md /tmp/tactical-zone-preserved.md || SPLIT_RC=$?
   if [[ "$SPLIT_RC" -eq 2 ]]; then
     its::comment_issue "$ISSUE_NUM" "❌ Tactical zone markers are malformed (mismatched or out of order). Please restore the \`<!-- autoducks:tactical:begin -->\` and \`<!-- autoducks:tactical:end -->\` markers in the issue body and re-run \`/agents design\`."
+    _AUTODUCKS_NOTIFIED=1
     react_to_comment "$COMMENT_ID" "confused"
+    touch /tmp/autoducks-pre-failed
     exit 1
   fi
   # Explicit signal — do NOT use `[[ -s ]]`, an empty-but-present tactical zone
