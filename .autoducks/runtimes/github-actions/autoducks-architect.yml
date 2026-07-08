@@ -95,7 +95,20 @@ jobs:
           COMMENTER: ${{ steps.ctx.outputs.commenter }}
           STEERING_PROMPT: ${{ steps.ctx.outputs.steering_prompt }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: User pre hook
+        if: >-
+          steps.authz.outcome == 'success' &&
+          hashFiles('.github/actions/autoducks/architect-pre/action.yml') != ''
+        uses: ./.github/actions/autoducks/architect-pre
+        env:
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
+        id: llm
         if: steps.authz.outcome == 'success'
         uses: ./.autoducks/providers/llm/claude
         with:
@@ -106,6 +119,19 @@ jobs:
           max_turns: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      - name: User post hook
+        if: >-
+          always() && steps.authz.outcome == 'success' &&
+          hashFiles('.github/actions/autoducks/architect-post/action.yml') != ''
+        uses: ./.github/actions/autoducks/architect-post
+        env:
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          AGENT_OUTCOME: ${{ steps.llm.outcome }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Post-execution
         if: always() && steps.authz.outcome == 'success'
         run: bash .autoducks/agents/architect/post.sh
