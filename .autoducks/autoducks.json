@@ -11,6 +11,17 @@
     "base_branch": "main",
     "merge_method": "auto"
   },
+  "product": {
+    "enabled": true,
+    "schedule": "0 9 * * *",
+    "priority_backend": "auto",
+    "project_number": null,
+    "priority_field": "Priority",
+    "auto_merge_duplicates": true,
+    "max_closes_per_run": 5,
+    "confidence_threshold": "high",
+    "max_issues_per_run": 100
+  },
   "triggers": {
     "architect": [],
     "engineer":  [],
@@ -18,7 +29,9 @@
     "fix":       [],
     "revert":    [],
     "close":     [],
-    "review":    []
+    "review":    [],
+    "triage":    [],
+    "merge":     []
   },
   "security": {
     "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"],
@@ -32,7 +45,9 @@
       "fix":       { },
       "revert":    { "trusted_associations": ["OWNER", "MEMBER"] },
       "close":     { "trusted_associations": ["OWNER", "MEMBER"] },
-      "review":    { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] }
+      "review":    { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
+      "product":   { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
+      "merge":     { "trusted_associations": ["OWNER", "MEMBER"] }
     }
   }
 }
