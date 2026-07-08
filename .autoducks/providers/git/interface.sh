@@ -41,7 +41,9 @@ done
 #   git::update_pr_body(pr_number, body)
 #   git::mark_pr_ready(pr_number)
 #   git::mark_pr_draft(pr_number)
-#   git::get_pr(pr_number)                            → JSON object
+#   git::get_pr(pr_number)                            → JSON object (number, title, body, state,
+#                                                        isDraft, headRefName, baseRefName,
+#                                                        mergeable, mergeStateStatus)
 #   git::get_pr_diff(pr_number)                       → unified diff on stdout
 #   git::submit_pr_review(pr_number, event, body_file) → event ∈ {COMMENT, REQUEST_CHANGES, APPROVE}
 #   git::list_pr_reviews(pr_number)                    → JSON array (reviews + inline thread comments)
