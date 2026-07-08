@@ -57,6 +57,7 @@ authz::load_config() {
   case "$agent" in
     maestro|developer) agent="execute" ;;
     reviewer)          agent="review"  ;;
+    triage)            agent="product" ;;
   esac
   local config="$AUTODUCKS_ROOT/autoducks.json"
 
@@ -70,8 +71,10 @@ authz::load_config() {
     "deny": [],
     "codeowners": false,
     "per_agent": {
-      "revert": { "trusted_associations": ["OWNER", "MEMBER"] },
-      "close":  { "trusted_associations": ["OWNER", "MEMBER"] }
+      "revert":  { "trusted_associations": ["OWNER", "MEMBER"] },
+      "close":   { "trusted_associations": ["OWNER", "MEMBER"] },
+      "product": { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
+      "merge":   { "trusted_associations": ["OWNER", "MEMBER"] }
     }
   }'
 
@@ -192,11 +195,13 @@ authz::allow_silent() {
 # ── Main ────────────────────────────────────────────────────────────────
 authz::main() {
   # 1 & 2 — event-level bypasses (checked BEFORE env-var validation because
-  # workflow_dispatch and PR-closure events legitimately have empty
-  # AUTHOR_ASSOC / ACTOR).
+  # workflow_dispatch, PR-closure, and schedule events legitimately have
+  # empty AUTHOR_ASSOC / ACTOR — a schedule event has no actor and is
+  # write-access-gated by construction).
   case "${EVENT_NAME:-}" in
     workflow_dispatch) authz::allow_silent ;;
     pull_request)      authz::allow_silent ;;
+    schedule)          authz::allow_silent ;;
   esac
 
   # Fail-closed on missing env for the actual authorization path.
