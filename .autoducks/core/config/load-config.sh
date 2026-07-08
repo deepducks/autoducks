@@ -83,6 +83,10 @@ fi
 export AUTODUCKS_MERGE_METHOD
 AUTODUCKS_MERGE_METHOD="$(echo "$_merged" | jq -r '.merge_method // "auto"')"
 
+# ── Review settings ─────────────────────────────────────────────────
+export AUTODUCKS_REVIEW_SECURITY_GUIDELINES
+AUTODUCKS_REVIEW_SECURITY_GUIDELINES="$(jq -r '.review.security_guidelines // ".autoducks/security-guidelines.md"' "$_config")"
+
 # ── Source provider interfaces ──────────────────────────────────────
 source "$AUTODUCKS_ROOT/providers/its/interface.sh"
 source "$AUTODUCKS_ROOT/providers/git/interface.sh"
