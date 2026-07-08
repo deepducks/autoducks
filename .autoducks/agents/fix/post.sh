@@ -6,6 +6,7 @@ source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/robustness/assert-changes.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/trigger-loop-closure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
 # Reconstruct state from git (pre.sh exports don't persist across GHA steps)
 TASK_BRANCH=$(git rev-parse --abbrev-ref HEAD)
@@ -13,6 +14,39 @@ BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
 FEATURE_NUM=""
 if [[ "$TASK_BRANCH" =~ ^feature/([0-9]+)-issue- ]]; then
   FEATURE_NUM="${BASH_REMATCH[1]}"
+fi
+
+trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/null || true; \
+      react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
+      progress_labels::abort "$ISSUE_NUM" "Work:progress" 2>/dev/null || true; \
+      exit $_rc' ERR
+
+# pre.sh's own ERR trap already notified on failure — post.sh still runs
+# (its step condition is `if: always()`), so bail out quietly to avoid a
+# duplicate failure comment.
+if [[ -f /tmp/autoducks-pre-failed ]]; then
+  exit 0
+fi
+
+# Agent hit its turn limit — preserve the partial branch instead of running
+# the normal assert/PR/merge flow, which assumes a finished implementation.
+if [[ "${LLM_ERROR_SUBTYPE:-}" == "error_max_turns" ]]; then
+  export AUTODUCKS_FAIL_CATEGORY="max_turns"
+  export AUTODUCKS_FAIL_PHASE="llm"
+
+  git add -A
+  git commit -m "WIP: partial work before max_turns (issue #${ISSUE_NUM})" || true
+  git::push_branch "$TASK_BRANCH" || true
+  export AUTODUCKS_FAIL_BRANCH="$TASK_BRANCH"
+
+  if [[ ! -s /tmp/work-summary.md ]]; then
+    echo "_No summary was produced before the turn limit was reached._" > /tmp/work-summary.md
+  fi
+
+  notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/null || true
+  react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true
+  progress_labels::abort "$ISSUE_NUM" "Work:progress" 2>/dev/null || true
+  exit 1
 fi
 
 # Check for changes (allow existing commits on reused branch)
@@ -38,6 +72,7 @@ if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
   if ! git::merge_pr "$PR_NUM"; then
     notify_failure "$ISSUE_NUM" "$RUN_ID" "$FEATURE_NUM"
     react_to_comment "$COMMENT_ID" "confused"
+    progress_labels::abort "$ISSUE_NUM" "Work:progress"
     exit 1
   fi
   trigger_loop_closure "$FEATURE_NUM"
