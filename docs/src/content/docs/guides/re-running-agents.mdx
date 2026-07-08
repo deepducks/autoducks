@@ -21,13 +21,24 @@ This is what makes re-running the intended mechanism for three different situati
 
 | Stage | What a second run does | How to steer it |
 |---|---|---|
-| [Architect](/agents/architect) | Judges the maturity of the current body: a raw/thin body is authored from scratch, a mature one is **revised** — structure, decisions, and wording are kept where sound; gaps are filled and loose prose is structured. The tactical zone, if present, is preserved byte-for-byte. Re-classifies `Feature`/`Bug` each time. | Edit the issue body before re-running. |
-| [Engineer](/agents/engineer) | If `Tactics:done` is already set, this is **revision mode**: existing tasks referenced by their real issue number are preserved (number, comment history, assignees); tasks omitted from the revised plan are closed as "superseded by revised plan"; new tasks get fresh `Tn` placeholders. The design zone above the tactical zone is read-only and untouched. | Leave a comment before re-running, or edit the design (see [How to steer a re-run](#how-to-steer-a-re-run)). |
-| [Maestro](/agents/maestro) | Fully idempotent: recomputes wave state from merged task PRs, **reuses** the existing pipeline branch and draft PR, and dispatches only the next eligible wave. Never re-dispatches a task that already has an open or merged PR (one of the [duplicate-dispatch guards](/agents/maestro#duplicate-dispatch-protection)). | Nothing to steer — it's pure bash. Re-issue `/execute`, or let the next task-PR merge re-trigger it automatically. |
-| [Developer](/agents/developer) | The idempotency guard skips quietly if any PR — open or merged — already claims the task. Otherwise it resumes on top of the existing task branch (including a preserved `WIP:` branch from a `max_turns` cutoff) rather than starting over. | Edit the task's acceptance criteria before re-running; for a failed run, prefer `/fix`. |
-| [Fix](/agents/utilities#fix) | Finds the newest existing task branch (either `feature/…` or `fix/…` prefix, including `WIP:`), reads the failure context, and repairs on top of what's there — reusing the open PR if one exists. | Comment what went wrong before running — the agent reads the last 10 comments as context. |
-| [Revert](/agents/utilities#revert) | Idempotent teardown of the *plan*: closing already-closed tasks and stripping already-absent labels are no-ops. Always restores the last human-authored body revision, never a previous bot revision. | Not steerable — it's a fixed undo, not a revision. |
-| [Close](/agents/utilities#close) | Idempotent teardown of *everything*: closing already-closed issues/PRs and deleting already-deleted branches are no-ops. | Not steerable — full teardown. |
+| [Architect](/agents/architect) | Judges the maturity of the current body: a raw/thin body is authored from scratch, a mature one is **revised** — structure, decisions, and wording are kept where sound; gaps are filled and loose prose is structured. If a tactical zone is present, it is **stripped** (with a warning comment) rather than preserved — the design changed, so the old plan is treated as stale and re-planning is left to the Engineer. Re-classifies `Feature`/`Bug` each time. Refused outright once delivery has started — see [Locked once delivery starts](#locked-once-delivery-starts). | Edit the issue body before re-running. |
+| [Engineer](/agents/engineer) | If `Tactics:done` is already set, this is **revision mode**: existing tasks referenced by their real issue number are preserved (number, comment history, assignees); tasks omitted from the revised plan are closed as "superseded by revised plan"; new tasks get fresh `Tn` placeholders. The design zone above the tactical zone is read-only and untouched. Refused outright once delivery has started — see [Locked once delivery starts](#locked-once-delivery-starts). | Leave a comment before re-running, or edit the design (see [How to steer a re-run](#how-to-steer-a-re-run)). |
+| [Maestro](/agents/maestro) | Fully idempotent: recomputes wave state from merged task PRs, **reuses** the existing pipeline branch and draft PR, and dispatches only the next eligible wave. Never re-dispatches a task that already has an open or merged PR (one of the [duplicate-dispatch guards](/agents/maestro#duplicate-dispatch-protection)). | Nothing to steer — it's pure bash. Re-issue `/quack execute`, or let the next task-PR merge re-trigger it automatically. |
+| [Developer](/agents/developer) | The idempotency guard skips quietly if any PR — open or merged — already claims the task. Otherwise it resumes on top of the existing task branch (including a preserved `WIP:` branch from a `max_turns` cutoff) rather than starting over. | Edit the task's acceptance criteria before re-running; for a failed run, prefer `/quack fix`. |
+| [Fix](/agents/utilities#quack-fix) | Finds the newest existing task branch (either `feature/…` or `fix/…` prefix, including `WIP:`), reads the failure context, and repairs on top of what's there — reusing the open PR if one exists. | Comment what went wrong before running — the agent reads the last 10 comments as context. |
+| [Revert](/agents/utilities#quack-revert) | Idempotent teardown of the *plan*: closing already-closed tasks and stripping already-absent labels are no-ops. Always restores the last human-authored body revision, never a previous bot revision. | Not steerable — it's a fixed undo, not a revision. |
+| [Close](/agents/utilities#quack-close) | Idempotent teardown of *everything*: closing already-closed issues/PRs and deleting already-deleted branches are no-ops. | Not steerable — full teardown. |
+
+## Locked once delivery starts
+
+Re-running the Architect or the Engineer stops being safe once tasks are actually being built — revising the design or the plan underneath in-flight work could silently orphan it. So both agents check, before doing anything else, whether **delivery has started**: a `Work:*` label is present, or the pipeline branch already exists. If either is true, the run is refused with a comment pointing at the escape hatch below, instead of touching the issue body.
+
+To get back to a re-runnable state, undo the plan first:
+
+- **`/quack revert`** — closes the task issues, strips pipeline labels, restores the last human-authored body, and leaves the issue open. This is the usual choice.
+- **`/quack close`** — full teardown (branches, PRs, the issue itself); use this if you're abandoning the work entirely.
+
+Either one returns the issue to the discovery phase, where `/quack architect` and `/quack engineer` are re-runnable again. See [`/quack revert`](/agents/utilities#quack-revert) and [`/quack close`](/agents/utilities#quack-close) for the full behavior.
 
 ## How to steer a re-run
 
@@ -45,7 +56,7 @@ For the Engineer specifically, Questions Mode is the same mechanism: it posts bl
 
 | Stage | Preserved | Rewritten |
 |---|---|---|
-| Architect | The tactical zone (byte-for-byte); explicit requirements, code blocks, and type definitions in the design zone | Loose prose restructured into the standard sections; gaps filled; the `Feature`/`Bug` classification |
+| Architect | Explicit requirements, code blocks, and type definitions in the design zone | Loose prose restructured into the standard sections; gaps filled; the `Feature`/`Bug` classification; the tactical zone — **stripped** (with a warning), not preserved |
 | Engineer | Existing task issue numbers, comment history, and assignees; the design zone (never touched) | The wave plan and `## Progress` checklist; tasks dropped from the revised plan are closed as superseded |
 | Maestro | The pipeline branch and its draft PR; any task with an open or merged PR is never re-dispatched | The wave-dispatch computation itself, every run |
 

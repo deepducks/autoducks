@@ -9,6 +9,7 @@ source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/build-revision-context.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/dispatch-chain.sh"
+source "$AUTODUCKS_ROOT/core/orchestration/delivery-phase.sh"
 
 rm -f /tmp/autoducks-pre-failed /tmp/autoducks-dor-delegated
 
@@ -18,6 +19,21 @@ trap '_rc=$?; touch /tmp/autoducks-pre-failed; \
       react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
       progress_labels::abort "$ISSUE_NUM" "Tactics:crafting" 2>/dev/null || true; \
       exit $_rc' ERR
+
+ISSUE_LABELS_EARLY=$(its::get_issue "$ISSUE_NUM" | jq -r '.labels[]?')
+if delivery_phase::started "$ISSUE_NUM" "$ISSUE_LABELS_EARLY"; then
+  its::comment_issue "$ISSUE_NUM" "🔒 **Planning is locked — execution has already started.**
+
+Re-running the Engineer now would reconcile the plan against tasks that are
+already being built, and could close a task out from under an in-flight
+Developer (orphaning its branch/PR) and desynchronise the Maestro's wave state.
+
+To change the plan, first unwind the delivery with \`${AUTODUCKS_COMMAND} revert\`
+(undo the plan, keep the issue), then re-run \`${AUTODUCKS_COMMAND} engineer\`."
+  react_to_comment "${COMMENT_ID:-}" "confused"
+  touch /tmp/autoducks-pre-failed
+  exit 0
+fi
 
 react_to_comment "${COMMENT_ID:-}" "eyes"
 status_comment::start "$ISSUE_NUM"
