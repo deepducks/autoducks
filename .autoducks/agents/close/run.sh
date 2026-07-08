@@ -83,12 +83,24 @@ for lbl in "Design:draft" "Design:done" "Tactics:crafting" "Tactics:done" \
   its::remove_label "$FEATURE" "$lbl" 2>/dev/null || true
 done
 
+# Already torn down: feature issue is closed and this run found no branches
+# or PRs left to clean up — skip the close call (a repeat close-with-comment
+# on an already-closed issue would post a misleading all-zero cleanup summary)
+# and report status instead.
+FEATURE_ALREADY_CLOSED=$(gh issue view "$FEATURE" --repo "$REPO" --json closed --jq '.closed' 2>/dev/null || echo "false")
+
+if [[ "$FEATURE_ALREADY_CLOSED" == "true" && "$PRS_CLOSED" -eq 0 && "$BRANCHES_DELETED" -eq 0 ]]; then
+  its::comment_issue "$FEATURE" "Already torn down — feature issue is closed and no branches or PRs remain." 2>/dev/null || true
+  react_to_comment "${COMMENT_ID:-}" "+1"
+  exit 0
+fi
+
 # Close the feature issue
 its::close_issue "$FEATURE" "Closed by @$COMMENTER via \`${AUTODUCKS_COMMAND} close\`.
 
 **Cleanup summary:**
 - Tasks closed: $TASKS_CLOSED
 - PRs closed: $PRS_CLOSED
-- Branches deleted: $BRANCHES_DELETED"
+- Branches deleted: $BRANCHES_DELETED" 2>/dev/null || echo "::debug::Feature issue #$FEATURE already closed; skipping close comment"
 
 react_to_comment "${COMMENT_ID:-}" "+1"
