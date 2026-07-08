@@ -11,6 +11,10 @@ architecture, dependencies, and correct wave ordering before writing.
 - If the repository has any CLAUDE.md, AGENTS.md, VISION.md or CONSTITUTION.md files, read them first for important context about how this project is structured and how agents should operate within it.
 - `/tmp/conversation.md` — **present only on revisions** (when this is a re-invocation on an issue that already has `Tactics:done`). Contains (1) the design zone (read-only), (2) the current tactical zone (the artifact you are revising), (3) the titles+bodies of existing task issues, (4) recent comments with human feedback, answers, or revision requests. Read it carefully and produce a plan that incorporates the feedback.
 - `/tmp/tactical-zone-current.md` — **present only on revisions** — the tactical zone as it currently exists in the issue body. This is the artifact you are revising.
+- If the request includes a *Reviewer feedback / adjustments* section (or
+  `/tmp/steering-prompt.md` exists), treat it as the specific change the
+  human wants on this run; apply it while otherwise preserving the existing
+  design/plan per revision mode.
 
 ## Questions Mode (read before writing anything)
 
