@@ -15,6 +15,9 @@ to rewrite it.
 - `/tmp/pr-diff.patch` — the unified diff under review
 - `/tmp/pr-meta.md` — PR number, title, base/head branches, state, and the
   list of changed files
+- `/tmp/security-guidelines.md` — repository-specific security expectations,
+  when the repo provides them; may be empty, in which case apply the baseline
+  checklist below only.
 - The repository is checked out at the current working directory (on the
   PR's base commit) — use Read/Glob/Grep freely to explore surrounding code,
   confirm claims in the diff, and check conventions the diff should follow
@@ -45,6 +48,45 @@ trailing newline — to `/tmp/review-verdict`:
   acceptance criterion is `met`.
 - `comment` — everything else (e.g. only `minor`/`nit` findings, or a
   `partially met` criterion with nothing severe enough to block).
+
+An unaddressed exploitable vulnerability is at least `major` severity, which
+maps to `request-changes` above.
+
+## Security review
+
+Read `/tmp/security-guidelines.md` for repository-specific security
+expectations, alongside any security guidance already covered by the "read
+these first" `CLAUDE.md`/`AGENTS.md`/`CONSTITUTION.md` instruction above.
+Where the repository provides its own guidelines, apply them with priority.
+Use the following baseline checklist to cover any classes the repository's
+guidelines did not already enumerate:
+
+- **AuthZ/AuthN** — missing/incorrect permission or ownership checks;
+  privilege escalation; in autoducks specifically, any new trigger surface or
+  side effect that bypasses the Authorization Gate
+  (`.autoducks/core/security/authorize.sh`, `.autoducks/design/AGENTS.md`).
+- **Injection** — shell/command, SQL, path, template, and prompt injection
+  from untrusted input (e.g. GitHub comment bodies, issue titles).
+- **Secrets** — hard-coded credentials, tokens/keys written to logs,
+  committed secrets, tokens passed to untrusted code.
+- **SSRF / path traversal** — unvalidated URLs, file paths, or `../`-style
+  escapes.
+- **Deserialization / eval** — unsafe `eval`, `pickle`, YAML load, dynamic
+  `require`/`import` of untrusted data.
+- **Crypto misuse** — weak/absent hashing, predictable randomness, disabled
+  TLS verification.
+- **Unsafe defaults & scope** — over-broad CORS, wildcard permissions,
+  excessive GitHub Actions `permissions:`, world-writable files.
+- **Dependencies** — newly added dependencies from untrusted sources or with
+  known-bad reputation (best-effort, no network required).
+
+Judge only what the diff introduces or changes, plus the surrounding code
+needed to confirm a finding — do not flag pre-existing issues the PR doesn't
+touch (consistent with the "ground every finding in the diff" rule below).
+Record every security issue in the **Findings** section with a `security`
+tag, the standard severity (`blocker`/`major`/`minor`/`nit`), `file:line`,
+and a concrete fix. Do not introduce a new output file or section for
+security findings.
 
 ## Rules
 
