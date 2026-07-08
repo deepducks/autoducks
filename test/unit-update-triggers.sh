@@ -58,15 +58,15 @@ cfg["triggers"]["fix"] = ["mend"]
 json.dump(cfg, open(p, "w"), indent=2)
 EOF
 run
-grep -q "'/quack blueprint'" "$SCRATCH/.github/workflows/autoducks-engineer.yml" \
+grep -q "'/blueprint'" "$SCRATCH/.github/workflows/autoducks-engineer.yml" \
   && pass "engineer custom alias in engineer guard" || fail "blueprint missing"
-grep -q "'/quack ship'" "$SCRATCH/.github/workflows/autoducks-engineer.yml" \
+grep -q "'/ship'" "$SCRATCH/.github/workflows/autoducks-engineer.yml" \
   && pass "execute custom alias in engineer routing branch" || fail "ship missing in engineer"
-grep -q "'/quack ship'" "$SCRATCH/.github/workflows/autoducks-maestro.yml" \
+grep -q "'/ship'" "$SCRATCH/.github/workflows/autoducks-maestro.yml" \
   && pass "execute custom alias in maestro guard" || fail "ship missing in maestro"
-grep -q "'/quack ship'" "$SCRATCH/.github/workflows/autoducks-developer.yml" \
+grep -q "'/ship'" "$SCRATCH/.github/workflows/autoducks-developer.yml" \
   && pass "execute custom alias in developer guard" || fail "ship missing in developer"
-grep -q "'/quack mend'" "$SCRATCH/.github/workflows/autoducks-fix.yml" \
+grep -q "'/mend'" "$SCRATCH/.github/workflows/autoducks-fix.yml" \
   && pass "fix custom alias in fix guard" || fail "mend missing"
 
 echo "── custom prefix is baked into guards ──"
@@ -85,6 +85,18 @@ if grep -q "'/quack " "$SCRATCH/.github/workflows/autoducks-developer.yml"; then
 else
   pass "old prefix fully replaced"
 fi
+
+echo "── bare-word namespace bakes two-token guards ──"
+python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+cfg["command"] = "quack"
+json.dump(cfg, open(p, "w"), indent=2)
+EOF
+run
+grep -q "'/quack execute'" "$SCRATCH/.github/workflows/autoducks-developer.yml" \
+  && pass "bare-word namespace baked as two-token /quack form" || fail "bare-word namespace not baked"
 
 echo "── invalid alias is rejected before baking ──"
 python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'

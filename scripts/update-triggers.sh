@@ -5,13 +5,14 @@
 # =============================================================================
 #
 # GitHub Actions evaluates `jobs.*.if` with a file-blind expression engine, so
-# the configurable slash-command prefix (`command` in .autoducks/autoducks.json,
-# default `/quack`) and per-team custom aliases (declared under
-# `triggers.<agent>[]`) cannot be resolved at run time — they must be baked
-# into the workflow YAML. This script regenerates the affected guards from a
-# deterministic template (built-in aliases + validated custom aliases) and
-# writes BOTH the canonical runtime template and its .github/workflows/ mirror,
-# so the setup runtime-sync check keeps passing.
+# the configurable command namespace (`command` in .autoducks/autoducks.json,
+# default `""` — bare short forms like `/architect`) and per-team custom
+# aliases (declared under `triggers.<agent>[]`) cannot be resolved at run
+# time — they must be baked into the workflow YAML. This script regenerates
+# the affected guards from a deterministic template (built-in aliases +
+# validated custom aliases) and writes BOTH the canonical runtime template
+# and its .github/workflows/ mirror, so the setup runtime-sync check keeps
+# passing.
 #
 # It is fully idempotent: each guard's `if: >-` block is regenerated wholesale
 # from config, so running it twice produces byte-identical output.
@@ -43,9 +44,21 @@ WORKFLOW_DIR=".github/workflows"
 # hard error — a bad alias must never be baked into a guard.
 AUTODUCKS_CONFIG="$CONFIG" bash .autoducks/core/config/generate-trigger-conditions.sh
 
-# Slash-command prefix (validated; falls back to /quack on garbage)
-CMD="$(jq -r '.command // "/quack"' "$CONFIG")"
-[[ "$CMD" =~ ^/[a-z0-9-]+$ ]] || CMD="/quack"
+# Command namespace (validated; falls back to empty — bare short forms — on
+# garbage). namespace = command with a single optional leading '/' stripped.
+NS="$(jq -r '.command // ""' "$CONFIG")"
+[[ "$NS" =~ ^$|^/?[a-z0-9-]+$ ]] || NS=""
+NS="${NS#/}"
+
+# cmd_for TRIGGER — bake the command string for a trigger word:
+#   namespace == "" ? "/<trigger>" : "/<namespace> <trigger>"
+cmd_for() {
+  if [[ -z "$NS" ]]; then
+    printf '/%s' "$1"
+  else
+    printf '/%s %s' "$NS" "$1"
+  fi
+}
 
 RENDER_FILE="$(mktemp)"
 trap 'rm -f "$RENDER_FILE"' EXIT
@@ -63,7 +76,7 @@ emit_group() {
   local fi="$1" fp="$2" ci="$3" ls="$4"; shift 4
   local a=("$@") n=$# i clause
   for ((i = 0; i < n; i++)); do
-    clause="startsWith(github.event.comment.body, '$CMD ${a[i]}')"
+    clause="startsWith(github.event.comment.body, '$(cmd_for "${a[i]}")')"
     if ((i == 0)); then
       printf '%s%s%s' "$fi" "$fp" "$clause"
     else
@@ -165,7 +178,7 @@ render_reviewer() {
        github.event.comment.author_association != 'MANNEQUIN' &&
 EOF
   if ((${#all[@]} == 1)); then
-    printf "       startsWith(github.event.comment.body, '%s review'))\n" "$CMD"
+    printf "       startsWith(github.event.comment.body, '%s'))\n" "$(cmd_for review)"
   else
     emit_group "       " "(" "        " "))" "${all[@]}"
   fi
@@ -183,7 +196,7 @@ render_simple() { # $1 = canonical verb / config key
       github.event.comment.author_association != 'MANNEQUIN' &&
 EOF
   if ((${#all[@]} == 1)); then
-    printf "      startsWith(github.event.comment.body, '%s %s')\n" "$CMD" "$verb"
+    printf "      startsWith(github.event.comment.body, '%s')\n" "$(cmd_for "$verb")"
   else
     emit_group "      " "(" "       " ")" "${all[@]}"
   fi

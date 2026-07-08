@@ -1,5 +1,5 @@
 {
-  "command": "/quack",
+  "command": "",
   "providers": {
     "its": "github",
     "git": "github",
