@@ -29,6 +29,14 @@ its::get_issue "$ISSUE_NUM" | jq -r '"# " + .title + "\n\n" + .body' > /tmp/issu
 # Fetch raw body (no title prefix) for zone splitting
 its::get_issue "$ISSUE_NUM" | jq -r '.body' > /tmp/issue-body-raw.md
 
+# Decode the steering prompt (free-text prose from the triggering comment,
+# base64-encoded by parse-directive.sh) to a stable file. Advisory only — it
+# is never written into the design body or interpolated into a shell command.
+rm -f /tmp/steering-prompt.md
+if [[ -n "${STEERING_PROMPT:-}" ]]; then
+  printf '%s' "$STEERING_PROMPT" | base64 -d > /tmp/steering-prompt.md
+fi
+
 # If the current body already has a tactical zone, stash it so post.sh can
 # re-emit it verbatim; the LLM re-authors the design zone from scratch.
 rm -f /tmp/tactical-zone-preserved.flag /tmp/tactical-zone-preserved.md
@@ -46,4 +54,27 @@ if body_has_markers /tmp/issue-body-raw.md; then
   # Explicit signal — do NOT use `[[ -s ]]`, an empty-but-present tactical zone
   # is legitimate and its markers must still be re-emitted.
   touch /tmp/tactical-zone-preserved.flag
+
+  # Revision run: append recent comments and the steering prompt below the
+  # request, under a labelled section. Advisory only — appended after the
+  # request, never mixed into the design zone split above.
+  {
+    echo ""
+    echo "## Reviewer feedback / adjustments (steer the revision)"
+    echo ""
+    its::list_comments "$ISSUE_NUM" 20 | jq -r '.[] | "### " + .author + "\n\n" + .body + "\n\n---\n"'
+    if [[ -s /tmp/steering-prompt.md ]]; then
+      cat /tmp/steering-prompt.md
+      echo ""
+    fi
+  } >> /tmp/issue-request.md
+elif [[ -s /tmp/steering-prompt.md ]]; then
+  # First-pass run: no comment history to append, only the steering prompt.
+  {
+    echo ""
+    echo "## Reviewer feedback / adjustments (steer the revision)"
+    echo ""
+    cat /tmp/steering-prompt.md
+    echo ""
+  } >> /tmp/issue-request.md
 fi
