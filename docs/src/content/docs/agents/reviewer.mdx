@@ -51,7 +51,7 @@ If no open PR is found, the diff is empty, or the PR is already closed/merged, t
 ## Behavior
 
 1. Reacts 👀, posts the status comment, applies `Review:reviewing`.
-2. Resolves the target PR and the feature/bug issue it implements, then gathers context: the design and full issue body (`/tmp/design-plan.md`), every linked task's title and acceptance criteria (`/tmp/task-criteria.md`), the unified diff (`/tmp/pr-diff.patch`), and PR metadata (`/tmp/pr-meta.md`).
+2. Resolves the target PR and the feature/bug issue it implements, then gathers context: the design and full issue body (`/tmp/design-plan.md`), every linked task's title and acceptance criteria (`/tmp/task-criteria.md`), the unified diff (`/tmp/pr-diff.patch`), PR metadata (`/tmp/pr-meta.md`), and the repository's optional security guidelines (`/tmp/security-guidelines.md`).
 3. **[LLM]** Explores the repository read-only (`Read`, `Grep`, `Glob`, read-only `Bash` — no write tools) and writes `/tmp/review.md`: a verdict line, a plan-conformance checklist against every acceptance criterion, scope/boundary notes, severity-ranked findings (`blocker`/`major`/`minor`/`nit`) with `file:line` citations, and a summary.
 4. Submits the review to the PR via the Git provider (`git::submit_pr_review`).
 5. `Review:reviewing` → `Review:done` (verdict `approve` or `comment`) or `Review:changes` (verdict `request-changes`). Edits the status comment to ✅ with the next step; continues the `#auto:` chain if one is queued.
@@ -71,6 +71,25 @@ A missing or malformed verdict file falls back to `comment`, the conservative mi
 <Aside type="caution">
 **`approve` is never published as a formal GitHub approval.** The bot review is always posted as `COMMENT` or `REQUEST_CHANGES` — never `APPROVE` — so it can never satisfy a required-reviewer check on its own. A human still has to approve and merge.
 </Aside>
+
+## Security review
+
+Security is a dedicated review dimension, not a separate pass or output file — findings surface as ordinary entries in **Findings** with a `security` tag, the standard severity, `file:line`, and a concrete fix.
+
+`pre.sh` stages the repository's optional guidelines file at `/tmp/security-guidelines.md` (empty if none exists). The LLM reads it alongside the diff and, where the repository provides its own guidelines, applies them with priority. It then falls back to a **built-in baseline checklist** to cover any classes the repository's guidelines didn't already enumerate:
+
+- AuthZ/AuthN (including bypassing the [Authorization Gate](/reference/security))
+- Injection (shell, SQL, path, template, prompt)
+- Secrets (hard-coded credentials, tokens leaked to logs or comments)
+- SSRF / path traversal
+- Deserialization / unsafe `eval`
+- Crypto misuse
+- Unsafe defaults & scope (over-broad CORS/permissions)
+- Dependencies from untrusted sources
+
+Only the diff (and the surrounding code needed to confirm a finding) is judged — pre-existing issues the PR doesn't touch are out of scope, same as every other finding category.
+
+The **verdict mapping is unchanged**: an unaddressed exploitable vulnerability is at least a `major` finding, which — like any other `blocker`/`major` finding — maps to `request-changes`. See [Configuration](/reference/configuration#review) for how to point the Reviewer at a non-default guidelines path, and [Security](/reference/security#security-review-vs-the-authorization-gate) for how this differs from the Authorization Gate.
 
 ## Read-only, never-merge
 
