@@ -28,7 +28,7 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/nu
 # pre.sh's own ERR trap already notified on failure — post.sh still runs
 # (its step condition is `if: always()`), so bail out quietly to avoid a
 # duplicate failure comment.
-if [[ -f /tmp/autoducks-pre-failed ]]; then
+if [[ -f "$AUTODUCKS_PRE_FAILED_MARKER" ]]; then
   exit 0
 fi
 
