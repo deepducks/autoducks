@@ -79,6 +79,22 @@ The Reviewer is constrained on both sides:
 - **Prompt-level:** the LLM's allowed tools are `Read,Grep,Glob,Write,Bash(read-only)` — no `Edit`, and `Bash` is restricted to read-only exploration. It may only `Write` to `/tmp/review.md` and `/tmp/review-verdict`.
 - **Script-level:** `pre.sh`/`post.sh` never check out a branch to modify, never commit, and never call a merge function — the only Git-provider write is posting the review itself.
 
+## Next: rework or defer
+
+The status comment's **Next** line depends on the verdict:
+
+| Verdict | Next line |
+|---------|-----------|
+| `approve` | Merge PR #`<n>` when you're ready — the bot review is informational only (posted as a comment, not a formal approval). |
+| `comment` / `request-changes` | Run `/rework` to address the findings on this PR now, or `/defer` to save them as a follow-up issue and merge as-is. |
+
+`/review` itself never changes code or blocks a merge — it only produces a verdict and findings. Turning those findings into action is a separate, explicit step:
+
+- [`/rework`](/agents/utilities#rework) distills the unresolved feedback into one follow-up task, reverts the PR to draft, and re-dispatches execution so the Maestro/Developer builds the fix.
+- [`/defer`](/agents/utilities#defer) captures the same feedback as a standalone follow-up issue instead, leaving the PR untouched so you can merge or close it immediately.
+
+Both read the PR's reviews and comments directly — neither requires `/review` to have run first.
+
 ## Where it sits
 
 The Reviewer runs **after** the pipeline (or a task) has already produced a PR — it's a post-execution gate you invoke explicitly with `/review`, not a stage the Maestro dispatches automatically. Like the [utility commands](/agents/utilities), it has no Definition-of-Ready cascade; unlike them, it does carry its own stage labels (`Review:reviewing` → `Review:done`/`Review:changes`) so review state is visible on the issue.
@@ -89,4 +105,4 @@ The Reviewer runs **after** the pipeline (or a task) has already produced a PR �
 /review model:opus effort:max turns:40
 ```
 
-`/review` can carry a `#auto:` chain forward, but only to the chainable verbs (`architect`, `engineer`, `execute`, `review`) — utility verbs (`fix`/`revert`/`close`) cannot be chained. See [Slash commands](/reference/slash-commands) for the full grammar.
+`/review` can carry a `#auto:` chain forward, but only to the chainable verbs (`architect`, `engineer`, `execute`, `review`) — utility verbs (`fix`/`revert`/`close`/`rework`/`defer`) cannot be chained. See [Slash commands](/reference/slash-commands) for the full grammar.
