@@ -37,6 +37,9 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
     "revert":    [],
     "close":     []
   },
+  "review": {
+    "security_guidelines": ".autoducks/security-guidelines.md"
+  },
   "security": {
     "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"],
     "allow": [],
@@ -193,6 +196,20 @@ Agent directories: `architect`, `engineer`, `maestro`, `developer`, `fix`, `reve
 2. Agent-level `defaults.json`
 3. Global `.autoducks/autoducks.json`
 4. Provider action default — applies only to `max_turns` (`50`)
+
+## `review`
+
+Settings for the [Reviewer](/agents/reviewer) (`/review`). Optional — the whole block, and every field in it, can be omitted.
+
+### `review.security_guidelines`
+
+Path to a repository-specific security guidelines file, relative to the repository root. The Reviewer reads this file (via `/tmp/security-guidelines.md`, staged by `pre.sh`) and applies it with priority over its built-in baseline security checklist.
+
+**Default:** `.autoducks/security-guidelines.md`
+
+The file is entirely optional: if it's absent at the configured path, the Reviewer degrades gracefully and falls back to the baseline checklist alone — this is not treated as an error. A copyable starter template ships at the default path; see the [Reviewer's security review](/agents/reviewer#security-review) section for what it covers.
+
+This field is unrelated to the `security` block below — that block controls *who* can trigger agents, this one supplies review context for judging *what the code does*. See [Security review vs. the Authorization Gate](/reference/security#security-review-vs-the-authorization-gate).
 
 ## `security`
 
