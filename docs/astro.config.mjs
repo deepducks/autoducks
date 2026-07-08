@@ -70,6 +70,7 @@ export default defineConfig({
             { label: 'Maestro', slug: 'agents/maestro' },
             { label: 'Developer', slug: 'agents/developer' },
             { label: 'Reviewer', slug: 'agents/reviewer' },
+            { label: 'Product Owner', slug: 'agents/product' },
             { label: 'Utility commands', slug: 'agents/utilities' },
           ],
         },
