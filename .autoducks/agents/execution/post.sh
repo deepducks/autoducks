@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 export AUTODUCKS_AGENT="execution"
+
+# pre.sh's ERR trap already notified on this run's failure — bail out
+# quietly so post.sh doesn't post a duplicate comment. (_AUTODUCKS_NOTIFIED
+# doesn't carry across GHA steps, so this file marker is required instead.)
+if [[ -f /tmp/autoducks-pre-failed ]]; then
+  exit 0
+fi
+
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
@@ -14,6 +22,29 @@ BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
 FEATURE_NUM=""
 if [[ "$BASE_BRANCH" =~ ^feature/([0-9]+) ]]; then
   FEATURE_NUM="${BASH_REMATCH[1]}"
+fi
+
+# Catch-all: any uncaught non-zero exit below here posts a categorized
+# failure comment on the task issue (and the parent feature, if any),
+# reacts confused, and aborts the progress label — never a silent red X.
+trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/null || true; \
+      react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
+      progress_labels::abort "$ISSUE_NUM" "Work:progress" 2>/dev/null || true; \
+      exit $_rc' ERR
+
+if [[ "${LLM_ERROR_SUBTYPE:-}" == "error_max_turns" ]]; then
+  export AUTODUCKS_FAIL_CATEGORY="max_turns" AUTODUCKS_FAIL_PHASE="llm"
+  git add -A
+  git commit -m "WIP: partial work from #${ISSUE_NUM} (max_turns cutoff)" || true
+  git::push_branch "$TASK_BRANCH" || true          # branch now discoverable by fix/pre.sh
+  export AUTODUCKS_FAIL_BRANCH="$TASK_BRANCH"
+  # /tmp/work-summary.md may be absent on a max_turns cut — fall back to a
+  # machine summary so the comment is never empty:
+  [[ -s /tmp/work-summary.md ]] || git diff --stat "origin/$BASE_BRANCH"...HEAD > /tmp/work-summary.md 2>/dev/null || true
+  notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}"   # emits max_turns guidance + branch
+  react_to_comment "${COMMENT_ID:-}" "confused"
+  progress_labels::abort "$ISSUE_NUM" "Work:progress"
+  exit 1
 fi
 
 # Check agent made changes
