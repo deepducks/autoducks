@@ -103,14 +103,30 @@ if [[ "$BASE_BRANCH" != "$AUTODUCKS_BASE_BRANCH" ]]; then
   wait_for_branch "$BASE_BRANCH"
 fi
 
-# Task branch name inherits the pipeline prefix (D10)
-TASK_BRANCH="${TASK_PREFIX}/${FEATURE_NUM:-0}-issue-${ISSUE_NUM}-$(date +%s)"
+# Resume an existing task branch (e.g. a max_turns cutoff pushed a `WIP:`
+# commit with no PR) instead of orphaning it — task branches carry either
+# pipeline prefix (feature/ or fix/, D10), so search both (mirrors
+# fix/pre.sh's discovery).
+EXISTING_BRANCH=$( { git::find_branches_matching "feature/${FEATURE_NUM:-0}-issue-${ISSUE_NUM}-" ; \
+                     git::find_branches_matching "fix/${FEATURE_NUM:-0}-issue-${ISSUE_NUM}-" ; } \
+                   | sort | tail -1 || true)
 
-# Configure git and create task branch from base
 git::configure_identity
-git fetch origin "$BASE_BRANCH" 2>/dev/null || true
-git checkout "$BASE_BRANCH" 2>/dev/null || true
-git checkout -b "$TASK_BRANCH"
+
+if [[ -n "$EXISTING_BRANCH" ]]; then
+  TASK_BRANCH="$EXISTING_BRANCH"
+  echo "::notice::Resuming preserved branch $TASK_BRANCH for task #$ISSUE_NUM instead of cutting a new one."
+  status_comment::note "$ISSUE_NUM" "Resuming preserved branch \`$TASK_BRANCH\` from a previous run instead of cutting a new one."
+  git checkout "$TASK_BRANCH" 2>/dev/null || git checkout -b "$TASK_BRANCH" "origin/$TASK_BRANCH"
+else
+  # Task branch name inherits the pipeline prefix (D10)
+  TASK_BRANCH="${TASK_PREFIX}/${FEATURE_NUM:-0}-issue-${ISSUE_NUM}-$(date +%s)"
+
+  # Create task branch from base
+  git fetch origin "$BASE_BRANCH" 2>/dev/null || true
+  git checkout "$BASE_BRANCH" 2>/dev/null || true
+  git checkout -b "$TASK_BRANCH"
+fi
 
 # Prepare task spec for the LLM
 its::get_issue "$ISSUE_NUM" | jq -r '"# " + .title + "\n\n" + .body' > /tmp/task-spec.md
