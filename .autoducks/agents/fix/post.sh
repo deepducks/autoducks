@@ -36,8 +36,14 @@ else
 fi
 
 if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
-  if ! git::merge_pr "$PR_NUM"; then
-    notify_failure "$ISSUE_NUM" "$RUN_ID" "$FEATURE_NUM"
+  merge_rc=0
+  git::merge_pr "$PR_NUM" || merge_rc=$?
+  if [[ "$merge_rc" -ne 0 ]]; then
+    if [[ "$merge_rc" -eq 2 ]]; then
+      notify_failure "$ISSUE_NUM" "$RUN_ID" "$FEATURE_NUM"
+    else
+      notify_conflict "$ISSUE_NUM" "$RUN_ID" "$TASK_BRANCH" "$PR_NUM" "$FEATURE_NUM"
+    fi
     react_to_comment "$COMMENT_ID" "confused"
     exit 1
   fi

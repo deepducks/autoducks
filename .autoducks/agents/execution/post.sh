@@ -51,6 +51,7 @@ fi
 if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
   # Scenario B: task with feature parent — auto-merge with rebase retry
   MERGE_OK=false
+  FAILURE_REASON="conflict"
   for attempt in 1 2 3; do
     merge_rc=0
     git::merge_pr "$PR_NUM" || merge_rc=$?
@@ -62,6 +63,7 @@ if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
       # Merge method not allowed — a config problem, not a stale branch.
       # Rebasing won't help, so stop retrying.
       echo "Merge method not allowed on $REPO — aborting retries (see merge_method config)."
+      FAILURE_REASON="config"
       break
     fi
     echo "Merge attempt $attempt failed — rebasing onto $PR_BASE_BRANCH..."
@@ -69,13 +71,18 @@ if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
     if ! git rebase "origin/$PR_BASE_BRANCH"; then
       echo "Rebase conflict on attempt $attempt — aborting"
       git rebase --abort 2>/dev/null || true
+      FAILURE_REASON="conflict"
       break
     fi
     git push --force-with-lease origin "$TASK_BRANCH"
   done
 
   if [[ "$MERGE_OK" != "true" ]]; then
-    notify_failure "$ISSUE_NUM" "$RUN_ID" "$FEATURE_NUM"
+    if [[ "$FAILURE_REASON" == "conflict" ]]; then
+      notify_conflict "$ISSUE_NUM" "$RUN_ID" "$TASK_BRANCH" "$PR_NUM" "$FEATURE_NUM"
+    else
+      notify_failure "$ISSUE_NUM" "$RUN_ID" "$FEATURE_NUM"
+    fi
     react_to_comment "${COMMENT_ID:-}" "confused"
     progress_labels::abort "$ISSUE_NUM" "Work:progress"
     exit 1
