@@ -1,0 +1,177 @@
+---
+title: Customizing workflows and prompts
+description: Extend autoducks with hooks and prompt overrides without editing managed files.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+autoducks ships two supported customization surfaces: **hooks**, which run your own steps around each agent, and **prompt overrides**, which extend or replace an agent's instructions. Both live outside the files autoducks manages, so they survive `install.sh` updates.
+
+## Why you can't edit the shipped files directly
+
+The workflow files under `.github/workflows/autoducks-*.yml` are generated mirrors of the canonical templates in `.autoducks/runtimes/github-actions/`. [`scripts/setup.sh`](/getting-started/installation#setup-checks) check 9 ("Runtime workflow sync") runs `diff -q` between every template and its mirror and fails if they've drifted apart. The same applies to the agent prompts and scripts under `.autoducks/agents/`: an [update](/getting-started/installation#updating) replaces the whole `.autoducks/` tree wholesale, so any hand edit inside it is silently discarded on the next update.
+
+That's why hooks and prompt overrides exist as separate, untouched directories instead of "just edit the mirror": `.github/actions/` and `.autoducks/custom/` are never written by `install.sh`, so your customizations survive every update.
+
+## Hooks
+
+A hook is a [composite GitHub Action](https://docs.github.com/en/actions/sharing-automations/creating-actions/creating-a-composite-action) that autoducks invokes immediately before and after each agent step. Place one at:
+
+```
+.github/actions/autoducks/<agent>-pre/action.yml
+.github/actions/autoducks/<agent>-post/action.yml
+```
+
+`install.sh` never touches `.github/actions/`, so anything you put there is untouched by updates.
+
+### Hook points
+
+There are 16 hook points: one pre and one post hook for each of the 8 agent workflows.
+
+| Agent | Pre hook | Post hook |
+|-------|----------|-----------|
+| architect | `.github/actions/autoducks/architect-pre` | `.github/actions/autoducks/architect-post` |
+| engineer | `.github/actions/autoducks/engineer-pre` | `.github/actions/autoducks/engineer-post` |
+| developer | `.github/actions/autoducks/developer-pre` | `.github/actions/autoducks/developer-post` |
+| reviewer | `.github/actions/autoducks/reviewer-pre` | `.github/actions/autoducks/reviewer-post` |
+| fix | `.github/actions/autoducks/fix-pre` | `.github/actions/autoducks/fix-post` |
+| close | `.github/actions/autoducks/close-pre` | `.github/actions/autoducks/close-post` |
+| revert | `.github/actions/autoducks/revert-pre` | `.github/actions/autoducks/revert-post` |
+| maestro | `.github/actions/autoducks/maestro-pre` | `.github/actions/autoducks/maestro-post` |
+
+### Example: installing Playwright before the Developer runs
+
+```yaml
+# .github/actions/autoducks/developer-pre/action.yml
+name: 'Install Playwright'
+description: 'Set up a browser toolchain before the Developer runs'
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    - name: Install Playwright
+      shell: bash
+      run: npx playwright install --with-deps chromium
+    - name: Log context
+      shell: bash
+      run: echo "Preparing developer run for issue $ISSUE_NUM on $REPO"
+```
+
+autoducks wires this in automatically — you don't edit the workflow YAML yourself. The relevant steps in `.github/workflows/autoducks-developer.yml` look like this:
+
+```yaml
+- name: User pre hook
+  if: >-
+    steps.authz.outcome == 'success' &&
+    steps.pre.outputs.duplicate_skip != 'true' &&
+    steps.pre.outputs.dor_skip != 'true' &&
+    hashFiles('.github/actions/autoducks/developer-pre/action.yml') != ''
+  uses: ./.github/actions/autoducks/developer-pre
+  env:
+    AUTODUCKS_AGENT: developer
+    AUTODUCKS_STAGE: pre
+    ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+    BASE_BRANCH: ${{ steps.ctx.outputs.base_branch }}
+    REPO: ${{ github.repository }}
+    COMMENT_ID: ${{ github.event.comment.id || '0' }}
+    RUN_ID: ${{ github.run_id }}
+    COMMENTER: ${{ steps.ctx.outputs.commenter }}
+    GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+- name: Run LLM agent
+  id: llm
+  # ...
+- name: User post hook
+  if: >-
+    always() && steps.authz.outcome == 'success' &&
+    steps.pre.outputs.duplicate_skip != 'true' &&
+    steps.pre.outputs.dor_skip != 'true' &&
+    hashFiles('.github/actions/autoducks/developer-post/action.yml') != ''
+  uses: ./.github/actions/autoducks/developer-post
+  env:
+    AUTODUCKS_AGENT: developer
+    AUTODUCKS_STAGE: post
+    ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+    BASE_BRANCH: ${{ steps.ctx.outputs.base_branch }}
+    REPO: ${{ github.repository }}
+    COMMENT_ID: ${{ github.event.comment.id || '0' }}
+    RUN_ID: ${{ github.run_id }}
+    COMMENTER: ${{ steps.ctx.outputs.commenter }}
+    AGENT_OUTCOME: ${{ steps.llm.outcome }}
+    GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+```
+
+### Environment contract
+
+Every hook receives a subset of these variables as environment variables:
+
+| Variable | Present on | Value |
+|----------|------------|-------|
+| `AUTODUCKS_AGENT` | all 16 hooks | the agent name, e.g. `developer` |
+| `AUTODUCKS_STAGE` | all 16 hooks | `pre` or `post` |
+| `ISSUE_NUM` | all 16 hooks | the triggering issue/feature number |
+| `REPO` | all 16 hooks | `owner/repo` |
+| `COMMENT_ID` | all 16 hooks | the triggering comment's ID, or `0` |
+| `RUN_ID` | all 16 hooks | the GitHub Actions run ID |
+| `COMMENTER` | all 16 hooks | the GitHub login that triggered the run |
+| `GH_TOKEN` | all 16 hooks | `AUTODUCKS_PAT` if set, else the default `GITHUB_TOKEN` |
+| `BASE_BRANCH` | developer only | the branch the Developer is building on |
+| `IS_PR` | reviewer only | `true` if the trigger was a PR event |
+| `AGENT_OUTCOME` | **post** hooks only | the agent step's outcome: `success`, `failure`, `cancelled`, or `skipped` |
+
+### Semantics
+
+- **Absent hook ⇒ skipped.** The `hashFiles(...) != ''` guard is empty when the `action.yml` doesn't exist, so the step is a no-op — no error, no warning.
+- **A failing pre hook blocks the agent.** Neither the pre hook nor the agent step uses `always()`, so GitHub Actions' default failure propagation stops the job before the agent runs. A broken pre hook means the agent never runs.
+- **Post hooks run on `always()`** (as long as authorization succeeded), so they fire whether the agent succeeded, failed, or was skipped — check `AGENT_OUTCOME` if your post hook needs to branch on that.
+- **Developer and Engineer share their skip guards with the LLM step.** Both agents can bail out early — a Definition-of-Ready delegation to the Maestro (`dor_skip`), or an idempotency guard when a PR already exists for the task (`duplicate_skip`, developer only). Their hooks reuse those same output checks, so a hook never fires on a run that's really just a hand-off or a duplicate-dispatch no-op.
+- **Maestro hooks are orchestrate-only.** The maestro workflow has two jobs, `resolve` and `orchestrate`. Hooks only exist in `orchestrate` — `resolve` doesn't check out the repo, so a local composite action can't be resolved there.
+
+<Aside type="caution">
+A hook receives `GH_TOKEN` and runs as part of the same Actions job as the agent — treat it like any other trusted repo automation. There's no additional sandboxing beyond what the workflow itself has.
+</Aside>
+
+## Prompt overrides
+
+Prompt overrides live under `.autoducks/custom/`, a directory `install.sh` preserves across updates:
+
+```
+.autoducks/custom/
+├── instructions.md              # appended to every LLM agent's prompt
+└── agents/
+    └── <agent>/
+        ├── instructions.md      # appended to this agent's prompt only
+        └── prompt.md            # replaces this agent's shipped prompt entirely
+```
+
+Only the 5 LLM-backed agents support prompt overrides: **architect**, **engineer**, **developer**, **reviewer**, and **fix**. Maestro, close, and revert are bash-only orchestration agents with no prompt to customize.
+
+### Append vs. replace
+
+- **`instructions.md` (append)** — added on top of the shipped prompt under a `# Repository-specific instructions` heading. This is the recommended path: your instructions layer on whatever the shipped prompt currently says, so you keep receiving upstream prompt improvements.
+- **`prompt.md` (full replace)** — used verbatim *instead of* the shipped prompt. The shipped prompt is never even read for that agent.
+
+<Aside type="caution">
+**Full replace forfeits upstream prompt updates.** Once `agents/<agent>/prompt.md` exists, that agent's shipped prompt is never read again — future improvements to it (via `install.sh` update) are silently ignored for that agent. Prefer `instructions.md` unless you specifically need to replace the whole prompt.
+</Aside>
+
+Both append files can be combined with a full replace: if `agents/<agent>/prompt.md` exists, it's used as the base, and `instructions.md` (global, then per-agent) is still appended on top of it.
+
+This resolution happens in [`.autoducks/core/config/resolve-prompt.sh`](https://github.com/deepducks/autoducks/blob/main/.autoducks/core/config/resolve-prompt.sh), called once per LLM invocation by the claude provider action. With no `.autoducks/custom/` tree at all, its output is byte-for-byte identical to the shipped prompt.
+
+## The update-survival guarantee
+
+An `install.sh` update replaces the entire `.autoducks/` tree, then restores three things from a stash: `.autoducks/autoducks.json`, `.autoducks/providers/llm/claude/settings.json`, and the whole `.autoducks/custom/` tree. `.github/actions/` is never touched by `install.sh` at all. In short:
+
+| Path | On update |
+|------|-----------|
+| `.autoducks/` (agents, prompts, core scripts) | Overwritten |
+| `.github/workflows/autoducks-*.yml` | Overwritten (re-copied from the new `.autoducks/runtimes/`) |
+| `.autoducks/autoducks.json` | Preserved |
+| `.autoducks/providers/llm/claude/settings.json` | Preserved |
+| `.autoducks/custom/` | Preserved |
+| `.github/actions/` (your hooks) | Preserved (never touched) |
+
+See the [Updating](/getting-started/installation#updating) section of the installation guide for the update command itself.

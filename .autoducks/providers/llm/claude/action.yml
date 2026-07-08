@@ -61,7 +61,7 @@ runs:
           max)    THINK_PHRASE="Ultrathink — take extensive time to reason before writing." ;;
           *)      THINK_PHRASE="Think very hard before writing." ;;
         esac
-        PROMPT=$(cat "${{ inputs.prompt_file }}")
+        PROMPT=$(PROMPT_FILE="${{ inputs.prompt_file }}" bash .autoducks/core/config/resolve-prompt.sh)
         PROMPT="${PROMPT//\{\{THINK_PHRASE\}\}/$THINK_PHRASE}"
         {
           echo "content<<PROMPT_EOF"

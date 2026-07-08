@@ -97,7 +97,22 @@ jobs:
         run: source .autoducks/core/config/parse-directive.sh >> "$GITHUB_OUTPUT"
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
+      - name: User pre hook
+        if: >-
+          steps.authz.outcome == 'success' &&
+          hashFiles('.github/actions/autoducks/maestro-pre/action.yml') != ''
+        uses: ./.github/actions/autoducks/maestro-pre
+        env:
+          AUTODUCKS_AGENT: maestro
+          AUTODUCKS_STAGE: pre
+          ISSUE_NUM: ${{ needs.resolve.outputs.feature_number }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ github.event.comment.user.login || inputs.actor || '' }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run orchestrator
+        id: run
         if: steps.authz.outcome == 'success'
         run: bash .autoducks/agents/maestro/run.sh
         env:
@@ -113,4 +128,19 @@ jobs:
           OVERRIDE_MODEL: ${{ steps.directive.outputs.model || inputs.model || '' }}
           OVERRIDE_EFFORT: ${{ steps.directive.outputs.effort || inputs.effort || '' }}
           OVERRIDE_MAX_TURNS: ${{ steps.directive.outputs.max_turns || inputs.max_turns || '' }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: User post hook
+        if: >-
+          always() && steps.authz.outcome == 'success' &&
+          hashFiles('.github/actions/autoducks/maestro-post/action.yml') != ''
+        uses: ./.github/actions/autoducks/maestro-post
+        env:
+          AUTODUCKS_AGENT: maestro
+          AUTODUCKS_STAGE: post
+          ISSUE_NUM: ${{ needs.resolve.outputs.feature_number }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ github.event.comment.user.login || inputs.actor || '' }}
+          AGENT_OUTCOME: ${{ steps.run.outcome }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}

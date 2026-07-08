@@ -29,7 +29,22 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: User pre hook
+        if: >-
+          steps.authz.outcome == 'success' &&
+          hashFiles('.github/actions/autoducks/revert-pre/action.yml') != ''
+        uses: ./.github/actions/autoducks/revert-pre
+        env:
+          AUTODUCKS_AGENT: revert
+          AUTODUCKS_STAGE: pre
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run revert
+        id: run
         if: steps.authz.outcome == 'success'
         run: bash .autoducks/agents/revert/run.sh
         env:
@@ -38,4 +53,19 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ github.event.comment.user.login }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: User post hook
+        if: >-
+          always() && steps.authz.outcome == 'success' &&
+          hashFiles('.github/actions/autoducks/revert-post/action.yml') != ''
+        uses: ./.github/actions/autoducks/revert-post
+        env:
+          AUTODUCKS_AGENT: revert
+          AUTODUCKS_STAGE: post
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          AGENT_OUTCOME: ${{ steps.run.outcome }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
