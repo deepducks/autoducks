@@ -36,6 +36,7 @@ status_comment::_label() {
     reviewer)  echo "Reviewer"  ;;
     rework)    echo "Rework"    ;;
     defer)     echo "Defer"     ;;
+    merge)     echo "Merge"     ;;
     *)         echo "${AUTODUCKS_AGENT:-agent}" ;;
   esac
 }
