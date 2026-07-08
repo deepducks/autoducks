@@ -2,11 +2,13 @@
 set -euo pipefail
 export AUTODUCKS_AGENT="developer"
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
+
 # Clear stale markers from a previous run on this runner before we could
 # leave fresh ones behind (see trap below / post.sh's guard).
-rm -f /tmp/autoducks-pre-failed /tmp/autoducks-dor-delegated
+rm -f "$AUTODUCKS_PRE_FAILED_MARKER" "$AUTODUCKS_DOR_DELEGATED_MARKER"
+mkdir -p "$AUTODUCKS_MARKER_DIR"
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
@@ -34,7 +36,7 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/nu
       status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
       react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
       progress_labels::abort "$ISSUE_NUM" "Work:coding" 2>/dev/null || true; \
-      touch /tmp/autoducks-pre-failed; \
+      touch "$AUTODUCKS_PRE_FAILED_MARKER"; \
       exit $_rc' ERR
 
 react_to_comment "${COMMENT_ID:-}" "eyes"
@@ -61,7 +63,7 @@ if [[ -z "$FEATURE_NUM" ]]; then
         -f "feature_issue=$PARENT_NUM" \
         ${COMMENTER:+-f "actor=$COMMENTER"} || true
       status_comment::delegate "$ISSUE_NUM" "The parent branch \`$PARENT_BRANCH\` does not exist yet, so the **Maestro** was dispatched on the parent issue #$PARENT_NUM. It creates the branch and dispatches this task back in wave order."
-      touch /tmp/autoducks-dor-delegated
+      touch "$AUTODUCKS_DOR_DELEGATED_MARKER"
       [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "dor_skip=true" >> "$GITHUB_OUTPUT"
       exit 0
     fi
@@ -71,7 +73,7 @@ if [[ -z "$FEATURE_NUM" ]]; then
     status_comment::delegate "$ISSUE_NUM" "This issue has no parent feature/bug and standalone execution was retired: every issue now goes through the pipeline so a reviewed design and plan exist before code is written.
 
 **Next:** comment \`$(autoducks_command_for execute)\` on the parent issue — or, if this issue *is* the whole work item, run \`$(autoducks_command_for architect) #auto:engineer+execute\` here to design, plan, and execute it."
-    touch /tmp/autoducks-dor-delegated
+    touch "$AUTODUCKS_DOR_DELEGATED_MARKER"
     [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "dor_skip=true" >> "$GITHUB_OUTPUT"
     exit 0
   fi

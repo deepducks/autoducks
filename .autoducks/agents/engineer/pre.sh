@@ -2,6 +2,10 @@
 set -euo pipefail
 export AUTODUCKS_AGENT="engineer"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
+
+rm -f "$AUTODUCKS_PRE_FAILED_MARKER" "$AUTODUCKS_DOR_DELEGATED_MARKER"
+mkdir -p "$AUTODUCKS_MARKER_DIR"
+
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
@@ -11,9 +15,7 @@ source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/dispatch-chain.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/delivery-phase.sh"
 
-rm -f /tmp/autoducks-pre-failed /tmp/autoducks-dor-delegated
-
-trap '_rc=$?; touch /tmp/autoducks-pre-failed; \
+trap '_rc=$?; touch "$AUTODUCKS_PRE_FAILED_MARKER"; \
       notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
       status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
       react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
@@ -31,7 +33,7 @@ Developer (orphaning its branch/PR) and desynchronise the Maestro's wave state.
 To change the plan, first unwind the delivery with \`${AUTODUCKS_COMMAND} revert\`
 (undo the plan, keep the issue), then re-run \`${AUTODUCKS_COMMAND} engineer\`."
   react_to_comment "${COMMENT_ID:-}" "confused"
-  touch /tmp/autoducks-pre-failed
+  touch "$AUTODUCKS_PRE_FAILED_MARKER"
   exit 0
 fi
 
@@ -59,7 +61,7 @@ fi
 if ! echo "$ISSUE_LABELS" | grep -qx 'Design:done'; then
   if chain::dispatch_prerequisite "architect" "engineer" "$DOR_CHAIN" "$ISSUE_NUM"; then
     status_comment::delegate "$ISSUE_NUM" "This issue has no \`Design:done\` label, so the **Architect** was dispatched first to create (or revise) the design. The Engineer will re-run automatically when it finishes."
-    touch /tmp/autoducks-dor-delegated
+    touch "$AUTODUCKS_DOR_DELEGATED_MARKER"
     [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "dor_skip=true" >> "$GITHUB_OUTPUT"
     exit 0
   fi
@@ -69,7 +71,7 @@ if ! echo "$ISSUE_LABELS" | grep -qx 'Design:done'; then
   _AUTODUCKS_NOTIFIED=1
   status_comment::fail "$ISSUE_NUM"
   react_to_comment "${COMMENT_ID:-}" "confused"
-  touch /tmp/autoducks-pre-failed
+  touch "$AUTODUCKS_PRE_FAILED_MARKER"
   exit 1
 fi
 
@@ -96,7 +98,7 @@ if body_has_markers /tmp/issue-body-raw.md; then
     status_comment::fail "$ISSUE_NUM"
     react_to_comment "$COMMENT_ID" "confused"
     progress_labels::abort "$ISSUE_NUM" "Tactics:crafting"
-    touch /tmp/autoducks-pre-failed
+    touch "$AUTODUCKS_PRE_FAILED_MARKER"
     exit 1
   fi
 else

@@ -23,7 +23,7 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
 # Cross-step guards: pre.sh already failed (and posted its own categorized
 # comment via the trap mirrored there) or delegated to a prerequisite agent.
 # Skip post-processing entirely in both cases.
-if [[ -f /tmp/autoducks-pre-failed || -f /tmp/autoducks-dor-delegated ]]; then
+if [[ -f "$AUTODUCKS_PRE_FAILED_MARKER" || -f "$AUTODUCKS_DOR_DELEGATED_MARKER" ]]; then
   exit 0
 fi
 
