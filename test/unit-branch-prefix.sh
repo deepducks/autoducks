@@ -55,6 +55,16 @@ check "task branch under fix" "57" "$(pipeline_branch_number 'fix/57-issue-58-17
 check "main yields empty" "" "$(pipeline_branch_number 'main')"
 check "non-pipeline branch yields empty" "" "$(pipeline_branch_number 'chore/cleanup')"
 
+echo "── resolve_feature_num_from_pr ──"
+check "pipeline feature head ignores PR body" "42" \
+  "$(resolve_feature_num_from_pr 'feature/42-foo' "$(printf 'Closes #7\nCloses #8\nCloses #42')")"
+check "pipeline fix head, tasks-first body" "13" \
+  "$(resolve_feature_num_from_pr 'fix/13-bar' "$(printf 'Closes #7\nCloses #8\nCloses #13')")"
+check "non-pipeline head takes last Closes ref" "42" \
+  "$(resolve_feature_num_from_pr 'patch-1' "$(printf 'Closes #7\nCloses #42')")"
+check "non-pipeline head with no Closes ref yields empty" "" \
+  "$(resolve_feature_num_from_pr 'patch-1' 'no refs here')"
+
 # ---------------------------------------------------------------------------
 echo ""
 echo "═══ branch-prefix: $PASS passed, $FAIL failed ═══"
