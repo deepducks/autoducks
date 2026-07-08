@@ -1,16 +1,18 @@
 ---
 title: Utility commands
-description: Fix, revert, and close — lifecycle and recovery commands.
+description: Fix, rework, defer, revert, and close — lifecycle, post-review, and recovery commands.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 import Mermaid from '../../../components/Mermaid.astro';
 
-Utility commands handle recovery, cleanup, and lifecycle operations. They sit **outside** the pipeline: no stage labels, no Definition-of-Ready cascade — but they go through the same [security gate](/reference/security) and give the same status-comment feedback.
+Utility commands handle recovery, cleanup, post-review follow-up, and lifecycle operations. They sit **outside** the pipeline: no stage labels, no Definition-of-Ready cascade — but they go through the same [security gate](/reference/security) and give the same status-comment feedback.
 
 | Command | Type | What it does | Default security |
 |---------|------|--------------|------------------|
 | `/fix` | LLM | Repairs a failed task run, resuming preserved partial work | trusted associations |
+| `/rework` | LLM | Distills unresolved PR review feedback into one follow-up task, reverts the PR to draft, and re-dispatches execution | trusted associations |
+| `/defer` | LLM | Captures unresolved PR review feedback as a follow-up issue so the PR can be merged/closed now | trusted associations (broader — includes `CONTRIBUTOR`) |
 | `/revert` | Bash | Undoes planning, restores the human-authored issue | `OWNER`, `MEMBER` |
 | `/close` | Bash | Full cleanup: closes issues, PRs, and deletes branches | `OWNER`, `MEMBER` |
 
@@ -51,6 +53,77 @@ Recovers a failed **task run**. It finds the newest existing task branch for the
 
 <Aside type="tip">
 Before running `/fix`, comment what went wrong — the agent reads the last 10 comments as context, so more detail leads to better repairs.
+</Aside>
+
+---
+
+## `/rework`
+
+<Mermaid chart={`
+flowchart LR
+    Triggers@{ shape: bolt, label: "Triggers" }
+    ReworkAgent["Rework agent"]
+
+    Triggers --triggers--> ReworkAgent
+
+    class Triggers triggersOrange
+    class ReworkAgent reworkIndigo
+
+    classDef triggersOrange fill:#ffe8d4,stroke:#d66a28,color:#d66a28
+    classDef reworkIndigo fill:#e0d4f8,stroke:#6a3fd6,color:#6a3fd6
+`} />
+
+Distills unresolved PR review feedback into a single follow-up task, then hands it back to the pipeline. Unlike `/review`, it needs no prior `/review` run — it reads raw PR reviews, inline review-thread comments, PR conversation comments, and feature-issue comments directly.
+
+**Scripts:** `.autoducks/agents/rework/{pre,post}.sh` · **Trigger:** `/rework` on the feature/bug issue or directly on its pull request
+
+### Behavior
+
+1. Reacts 👀, posts the status comment.
+2. Resolves the target PR (same resolution the Reviewer uses) and the feature/bug issue it implements. If no open PR is found, or the PR is already closed/merged, posts **"Nothing to rework"** and exits green.
+3. Checks for an already-open rework sub-issue for this feature (an idempotency marker in the body) — reuses it instead of minting a duplicate.
+4. **[LLM]** Reads every PR review, comment, and feature-issue comment and judges each distinct concern resolved or unresolved. If everything is resolved, or the feedback was purely informational, writes only a "nothing to rework" explanation — no task is created.
+5. Otherwise, folds every unresolved concern into **exactly one** follow-up task, citing the reviewer/comment behind each item.
+6. `post.sh` parses that task with the same parser the Engineer uses, appends it as a new task on the feature issue (a new wave, or promoting a single-task issue into a two-wave plan), and reverts the PR to draft.
+7. Dispatches `execute` on the feature issue so the Maestro/Developer builds the fix; the PR flips back to ready once it merges.
+
+<Aside type="note">
+`/rework` produces **at most one** task per run — several distinct concerns are folded into that task's checklists, not split into separate tasks.
+</Aside>
+
+---
+
+## `/defer`
+
+<Mermaid chart={`
+flowchart LR
+    Triggers@{ shape: bolt, label: "Triggers" }
+    DeferAgent["Defer agent"]
+
+    Triggers --triggers--> DeferAgent
+
+    class Triggers triggersOrange
+    class DeferAgent deferBlue
+
+    classDef triggersOrange fill:#ffe8d4,stroke:#d66a28,color:#d66a28
+    classDef deferBlue fill:#d4e4f8,stroke:#2861c9,color:#2861c9
+`} />
+
+Captures outstanding PR review feedback as a self-contained follow-up issue, so you can merge or close the PR now without losing the discussion. It never touches the PR itself — no draft flip, no branch changes.
+
+**Scripts:** `.autoducks/agents/defer/{pre,post}.sh` · **Trigger:** `/defer` on the feature/bug issue or directly on its pull request
+
+### Behavior
+
+1. Reacts 👀, posts the status comment.
+2. Resolves the target PR — deliberately allowed on **closed or merged** PRs too (unlike `/review`, which skips outright), since the point is to unblock a merge/close that's already happened or is about to.
+3. If the PR has no reviewer or human feedback at all, posts **"Nothing to defer"** and exits green.
+4. Checks for an already-open deferral issue for this (PR, feature) pair (a marker string search) — updates it in place instead of creating a duplicate.
+5. **[LLM]** Synthesizes the unresolved, substantive feedback into an Architect-ready issue body: a problem statement plus a bulleted list of concrete asks, each grounded in a cited comment. Nits, praise, and already-resolved points are dropped. If nothing substantive remains, writes only a "nothing to defer" explanation and no issue is created.
+6. `post.sh` creates (or updates) the follow-up issue with an idempotency marker and a back-link to the feature issue, and reports how many review comments were deferred.
+
+<Aside type="tip">
+Run `/architect` on the new follow-up issue whenever you're ready to act on the deferred feedback — it's a plain issue, not yet designed or planned.
 </Aside>
 
 ---

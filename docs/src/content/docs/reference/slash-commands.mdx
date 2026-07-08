@@ -22,6 +22,8 @@ The bare `/<trigger>` form (e.g. `/execute`) is the default — no prefix word b
 | Plan (or revise the plan) only | `/engineer` |
 | Design + plan, then stop for review | `/architect #auto:engineer` |
 | Review a finished PR before merging | `/review` |
+| Turn unresolved review feedback into a follow-up task | `/rework` |
+| Save unresolved review feedback for later, merge/close now | `/defer` |
 | Re-run a failed task | `/fix` (on the task issue) |
 | Undo the plan, keep the issue | `/revert` |
 | Tear everything down | `/close` |
@@ -38,6 +40,8 @@ The bare `/<trigger>` form (e.g. `/execute`) is the default — no prefix word b
 | `/execute` | has `Tactics:done` | [Maestro](/agents/maestro) |
 | `/execute` | anything else | [Engineer](/agents/engineer) → cascade |
 | `/review` | feature/bug issue with an open pipeline PR, or the PR itself | [Reviewer](/agents/reviewer) |
+| `/rework` | feature/bug issue with an open pipeline PR, or the PR itself | [Rework agent](/agents/utilities#rework) |
+| `/defer` | feature/bug issue with a pipeline PR (any state), or the PR itself | [Defer agent](/agents/utilities#defer) |
 | `/fix` | any task | [Fix agent](/agents/utilities#fix) |
 | `/revert` | planned issue | [Revert agent](/agents/utilities#revert) |
 | `/close` | planned issue | [Close agent](/agents/utilities#close) |
@@ -51,7 +55,7 @@ The bare `/<trigger>` form (e.g. `/execute`) is the default — no prefix word b
 | `architect` | `design` |
 | `engineer` | `tactics` |
 | `execute` | `run`, `work` |
-| `fix` / `revert` / `close` / `review` | *(none)* |
+| `fix` / `revert` / `close` / `review` / `rework` / `defer` | *(none)* |
 
 Aliases behave identically to the canonical verb, including routing and cascade.
 
@@ -116,7 +120,7 @@ Queue agents to run after this one finishes, separated by `+`:
 
 Semantics:
 
-- **Only `architect`, `engineer`, `execute`, and `review` are chainable.** Utility verbs (`fix`/`revert`/`close`) never carry or continue a chain — they always run standalone, even if you write `#auto:fix`, `#auto:revert`, or `#auto:close`.
+- **Only `architect`, `engineer`, `execute`, and `review` are chainable.** Utility verbs (`fix`/`revert`/`close`/`rework`/`defer`) never carry or continue a chain — they always run standalone, even if you write `#auto:fix`, `#auto:revert`, `#auto:close`, `#auto:rework`, or `#auto:defer`.
 - Verbs are alias-normalized (`#auto:tactics+run` ≡ `#auto:engineer+execute`), deduplicated, and capped at 5.
 - A verb can appear at most once in a chain (loop protection); Definition-of-Ready delegations re-queue the current agent into the same chain.
 - A chained `execute` targets the Maestro.

@@ -64,6 +64,38 @@ else
   fail "architect guard unexpectedly missing pull_request == null"
 fi
 
+echo "── rework/defer guards fire on both issue and PR comments ──"
+if grep -q "startsWith(github.event.comment.body, '/rework')" "$SCRATCH/.github/workflows/autoducks-rework.yml"; then
+  pass "rework guard matches /rework"
+else
+  fail "rework guard missing /rework match"
+fi
+if grep -q "github.event.issue.pull_request == null" "$SCRATCH/.github/workflows/autoducks-rework.yml"; then
+  fail "rework guard incorrectly restricted to issues only (pull_request == null)"
+else
+  pass "rework guard omits pull_request == null (fires on issues and PRs)"
+fi
+if grep -q "startsWith(github.event.comment.body, '/defer')" "$SCRATCH/.github/workflows/autoducks-defer.yml"; then
+  pass "defer guard matches /defer"
+else
+  fail "defer guard missing /defer match"
+fi
+if grep -q "github.event.issue.pull_request == null" "$SCRATCH/.github/workflows/autoducks-defer.yml"; then
+  fail "defer guard incorrectly restricted to issues only (pull_request == null)"
+else
+  pass "defer guard omits pull_request == null (fires on issues and PRs)"
+fi
+if grep -q "^  contents: write$" "$SCRATCH/.github/workflows/autoducks-rework.yml"; then
+  pass "rework has contents: write"
+else
+  fail "rework missing contents: write"
+fi
+if grep -q "^  contents: read$" "$SCRATCH/.github/workflows/autoducks-defer.yml"; then
+  pass "defer has contents: read"
+else
+  fail "defer missing contents: read"
+fi
+
 echo "── custom aliases are baked into guards ──"
 python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
 import json, sys

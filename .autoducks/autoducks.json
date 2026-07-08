@@ -18,7 +18,9 @@
     "fix":       [],
     "revert":    [],
     "close":     [],
-    "review":    []
+    "review":    [],
+    "rework":    [],
+    "defer":     []
   },
   "security": {
     "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"],
@@ -32,7 +34,9 @@
       "fix":       { },
       "revert":    { "trusted_associations": ["OWNER", "MEMBER"] },
       "close":     { "trusted_associations": ["OWNER", "MEMBER"] },
-      "review":    { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] }
+      "review":    { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
+      "rework":    { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
+      "defer":     { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR"] }
     }
   }
 }
