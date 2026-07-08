@@ -31,6 +31,13 @@ source "$REPO_ROOT/.autoducks/core/orchestration/tactical-zone.sh"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
+# Coordination markers live under an isolated, per-run directory (see
+# .autoducks/core/config/load-config.sh) so this test's marker files never
+# collide with another test file's run — RUNNER_TEMP/GITHUB_RUN_ID below pin
+# every agent invocation in this file to the same scratch marker dir.
+MARKER_RUN_ID="idempotency"
+MARKER_DIR="$SCRATCH/autoducks-$MARKER_RUN_ID"
+
 REPO_NAME="acme/widgets"
 GH_LOG="$SCRATCH/gh.log"
 : > "$GH_LOG"
@@ -134,6 +141,8 @@ run_step() {
   local rc=0
   env "$@" \
     PATH="$SCRATCH/bin:$PATH" \
+    RUNNER_TEMP="$SCRATCH" \
+    GITHUB_RUN_ID="$MARKER_RUN_ID" \
     GH_LOG="$GH_LOG" \
     MOCK_ISSUE_DIR="$MOCK_ISSUE_DIR" \
     GH_CAPTURE_DIR="$GH_CAPTURE_DIR" \
@@ -167,7 +176,8 @@ jq -n --rawfile body "$SCRATCH/a_body.md" \
 run_architect_round() {
   # run_architect_round <fake_llm_design_text> <out_body_file>
   local llm_design="$1" out="$2"
-  rm -f /tmp/autoducks-pre-failed /tmp/architect-strip-tactical.flag /tmp/architect-dropped-tasks.txt /tmp/design-spec.md
+  rm -f "$MARKER_DIR/pre-failed"
+  rm -f /tmp/architect-strip-tactical.flag /tmp/architect-dropped-tasks.txt /tmp/design-spec.md
   : > "$GH_LOG"
 
   run_step "$ARCHITECT_PRE" ISSUE_NUM="$FEATURE_A" RUN_ID=1 COMMENT_ID=1 COMMENTER=alice \
@@ -230,7 +240,8 @@ jq -n --arg body $'Just a plain issue description, no tactical zone yet.\n' \
   '{title: "Add filters", body: $body, labels: ["Draft"], author: "alice"}' \
   > "$MOCK_ISSUE_DIR/$FEATURE_B.json"
 
-rm -f /tmp/autoducks-pre-failed /tmp/architect-strip-tactical.flag /tmp/architect-dropped-tasks.txt /tmp/design-spec.md
+rm -f "$MARKER_DIR/pre-failed"
+rm -f /tmp/architect-strip-tactical.flag /tmp/architect-dropped-tasks.txt /tmp/design-spec.md
 : > "$GH_LOG"
 
 run_step "$ARCHITECT_PRE" ISSUE_NUM="$FEATURE_B" RUN_ID=1 COMMENT_ID=1 COMMENTER=alice \
