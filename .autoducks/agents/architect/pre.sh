@@ -17,6 +17,23 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
       touch /tmp/autoducks-pre-failed; \
       exit $_rc' ERR
 
+source "$AUTODUCKS_ROOT/core/orchestration/delivery-phase.sh"
+
+ISSUE_LABELS=$(its::get_issue "$ISSUE_NUM" | jq -r '.labels[]?')
+if delivery_phase::started "$ISSUE_NUM" "$ISSUE_LABELS"; then
+  its::comment_issue "$ISSUE_NUM" "🔒 **Design is locked — execution has already started.**
+
+Re-running the Architect now could invalidate work that is already in flight
+(open task branches/PRs, the pipeline branch, and the Maestro's wave state).
+
+To change the design, first unwind the delivery with \`${AUTODUCKS_COMMAND} revert\`
+(undo the plan, keep the issue) or \`${AUTODUCKS_COMMAND} close\` (full teardown),
+then re-run \`${AUTODUCKS_COMMAND} architect\`."
+  react_to_comment "${COMMENT_ID:-}" "confused"
+  touch /tmp/autoducks-pre-failed   # tells post.sh to no-op
+  exit 0
+fi
+
 react_to_comment "${COMMENT_ID:-}" "eyes"
 status_comment::start "$ISSUE_NUM"
 
@@ -37,12 +54,13 @@ if [[ -n "${STEERING_PROMPT:-}" ]]; then
   printf '%s' "$STEERING_PROMPT" | base64 -d > /tmp/steering-prompt.md
 fi
 
-# If the current body already has a tactical zone, stash it so post.sh can
-# re-emit it verbatim; the LLM re-authors the design zone from scratch.
-rm -f /tmp/tactical-zone-preserved.flag /tmp/tactical-zone-preserved.md
+# If the current body already has a tactical zone, strip it: the design is
+# changing, so the old plan (and its task issues) would go stale. post.sh
+# publishes a design-only body and tears the old plan down.
+rm -f /tmp/architect-strip-tactical.flag /tmp/architect-dropped-tasks.txt
 if body_has_markers /tmp/issue-body-raw.md; then
   SPLIT_RC=0
-  split_body /tmp/issue-body-raw.md /tmp/design-zone-discard.md /tmp/tactical-zone-preserved.md || SPLIT_RC=$?
+  split_body /tmp/issue-body-raw.md /tmp/design-zone-discard.md /tmp/tactical-zone-discard.md || SPLIT_RC=$?
   if [[ "$SPLIT_RC" -eq 2 ]]; then
     its::comment_issue "$ISSUE_NUM" "❌ Tactical zone markers are malformed (mismatched or out of order). Please restore the \`<!-- autoducks:tactical:begin -->\` and \`<!-- autoducks:tactical:end -->\` markers in the issue body and re-run \`${AUTODUCKS_COMMAND} architect\`."
     _AUTODUCKS_NOTIFIED=1
@@ -51,9 +69,15 @@ if body_has_markers /tmp/issue-body-raw.md; then
     touch /tmp/autoducks-pre-failed
     exit 1
   fi
-  # Explicit signal — do NOT use `[[ -s ]]`, an empty-but-present tactical zone
-  # is legitimate and its markers must still be re-emitted.
-  touch /tmp/tactical-zone-preserved.flag
+
+  # Get the old task numbers out of the discarded tactical zone's YAML
+  # block (same extraction pattern as engineer/pre.sh) so post.sh can
+  # close the superseded task issues.
+  YAML_BLOCK=$(awk '/^```yaml[[:space:]]*$/{flag=1;next}/^```[[:space:]]*$/{flag=0}flag' /tmp/tactical-zone-discard.md)
+  if [[ -n "$YAML_BLOCK" ]]; then
+    echo "$YAML_BLOCK" | yq '.waves[].tasks[]' 2>/dev/null | grep -E '^[0-9]+$' > /tmp/architect-dropped-tasks.txt || true
+  fi
+  touch /tmp/architect-strip-tactical.flag
 
   # Revision run: append recent comments and the steering prompt below the
   # request, under a labelled section. Advisory only — appended after the
