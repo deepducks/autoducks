@@ -25,3 +25,25 @@ prevent_duplicate_dispatch() {
 
   return 0
 }
+
+# Classify a task's already-open PR (the one that made prevent_duplicate_dispatch
+# skip it) as blocked vs healthy/in-flight. A PR is blocked when GitHub reports it
+# as unmergeable — the same signal developer/post.sh's merge-retry loop treats as a
+# real conflict (notify_conflict). Echoes the blocked PR's number and returns 0 if
+# blocked; returns 1 (no output) if the task has no open PR or that PR is healthy.
+# Usage: task_blocked_pr_number <task_number> <feature_branch>
+task_blocked_pr_number() {
+  local task_number="$1"
+  local feature_branch="$2"
+
+  local open_prs blocked_pr
+  open_prs=$(git::list_open_prs "$feature_branch")
+  blocked_pr=$(echo "$open_prs" | jq -r --arg t "$task_number" \
+    '[.[] | select(.body | test("(?i)(fixes|closes|resolves)\\s+#" + $t + "\\b"))
+          | select(.mergeable == "CONFLICTING" or .mergeStateStatus == "DIRTY")]
+     | .[0].number // empty')
+
+  [[ -z "$blocked_pr" ]] && return 1
+  echo "$blocked_pr"
+  return 0
+}

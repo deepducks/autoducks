@@ -296,13 +296,18 @@ else
   progress_labels::start "$FEATURE" "Work:orchestrating" "Work:done"
   ASSIGNED=()
   SKIPPED=()
+  BLOCKED=()
 
   for t in ${WAVE_TASKS[$NEXT_WAVE]:-}; do
     [[ -z "$t" ]] && continue
     is_done "$t" && { SKIPPED+=("$t"); continue; }
 
     if ! prevent_duplicate_dispatch "$t" "$FEATURE_BRANCH" 2>/dev/null; then
-      SKIPPED+=("$t")
+      if task_blocked_pr_number "$t" "$FEATURE_BRANCH" &>/dev/null; then
+        BLOCKED+=("$t")
+      else
+        SKIPPED+=("$t")
+      fi
       continue
     fi
 
@@ -321,6 +326,7 @@ else
   SUMMARY="🌊 **Wave $((NEXT_WAVE+1)) of $TOTAL_WAVES dispatched: ${WAVE_NAMES[$NEXT_WAVE]}**\n\n"
   [[ ${#ASSIGNED[@]} -gt 0 ]] && SUMMARY+="**Dispatched:** ${ASSIGNED[*]}\n"
   [[ ${#SKIPPED[@]} -gt 0 ]] && SUMMARY+="**Skipped (already done or in flight):** ${SKIPPED[*]}\n"
+  [[ ${#BLOCKED[@]} -gt 0 ]] && SUMMARY+="**Blocked — needs \`$(autoducks_command_for fix)\`:** ${BLOCKED[*]}\n"
   SUMMARY+="\nThe orchestrator advances automatically as each task PR merges.\n"
 
   report "$(echo -e "$SUMMARY")"
