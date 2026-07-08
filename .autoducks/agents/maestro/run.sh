@@ -123,10 +123,14 @@ if [[ "$IS_SINGLE" == "true" ]]; then
       report "**Single-task plan** — dispatched the Developer on the issue itself (no sub-tasks). The orchestrator finishes up when its PR merges."
     fi
   else
-    create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "$FEATURE"
+    FINAL_PR_NUM=$(create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "$FEATURE")
     progress_labels::finish "$FEATURE" "Work:orchestrating" "Work:done"
     its::assign_issue "$FEATURE" "${COMMENTER:-}" 2>/dev/null || true
-    report "🎉 **Single-task plan complete!** The PR is ready for review."
+    if [[ -n "$FINAL_PR_NUM" ]]; then
+      report "🎉 **Single-task plan complete!** PR #$FINAL_PR_NUM is ready for review."
+    else
+      report "🎉 **Single-task plan complete!** The PR is ready for review."
+    fi
   fi
 
   react_to_comment "${COMMENT_ID:-}" "+1" 2>/dev/null || true
@@ -276,13 +280,23 @@ $(echo -e "$WORKLOG")"
 
     progress_labels::finish "$FEATURE" "Work:orchestrating" "Work:done"
     its::assign_issue "$FEATURE" "${COMMENTER:-}" 2>/dev/null || true
-    report "🎉 **All waves complete!**
+    if [[ -n "$FINAL_PR_NUM" ]]; then
+      report "🎉 **All waves complete!**
+
+Every task across all $TOTAL_WAVES waves has merged into the feature branch and
+the PR is ready: **#$FINAL_PR_NUM**.
+
+**Next:** review and merge PR #$FINAL_PR_NUM to ship, or comment \`${AUTODUCKS_COMMAND} close\`
+to tear the pipeline artifacts down."
+    else
+      report "🎉 **All waves complete!**
 
 Every task across all $TOTAL_WAVES waves has merged into the feature branch and
 the PR is ready.
 
 **Next:** review and merge the PR to ship, or comment \`${AUTODUCKS_COMMAND} close\`
 to tear the pipeline artifacts down."
+    fi
   else
     # Blocked — not all previous waves done
     report "⏳ **Orchestrator waiting.**
