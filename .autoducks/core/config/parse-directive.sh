@@ -103,6 +103,16 @@ is_canonical_verb() {
   esac
 }
 
+# Verbs that can appear in a #auto: chain: they MUST have a workflow_dispatch
+# entry point and a chain::_workflow_for mapping. Utilities (fix/revert/close)
+# are comment-only (no workflow_dispatch) and are intentionally excluded.
+is_chainable_verb() {
+  case "$1" in
+    architect|engineer|execute|review) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # ── Steering-prompt token classifier ─────────────────────────────────
 # Mirrors the recognized-token forms matched by the directive-token loop
 # below, without mutating any state. Used only to decide which leading
@@ -155,7 +165,7 @@ if [[ -n "$DIRECTIVE" ]]; then
         _v=$(echo "$_v" | tr -d ',.!?;')
         [[ -z "$_v" ]] && continue
         _v=$(normalize_verb "$_v")
-        is_canonical_verb "$_v" || continue
+        is_chainable_verb "$_v" || continue
         # dedupe (loop protection: a verb may appear at most once in a chain)
         case "+${_chain_out}+" in *"+${_v}+"*) continue ;; esac
         (( _count >= 5 )) && break
