@@ -46,14 +46,49 @@ else
 fi
 echo ""
 
-# Download the full .autoducks/ tree via GitHub API (tarball)
+# Download the full .autoducks/ tree via GitHub API (tarball), unless a
+# local source dir is provided (e.g. for offline testing).
 echo "Downloading .autoducks/ tree..."
-TMP_DIR=$(mktemp -d)
-curl -sL "https://api.github.com/repos/${SOURCE_REPO}/tarball/${BRANCH}" \
-  | tar xz -C "$TMP_DIR" --strip-components=1
+CLEANUP_TMP=true
+if [[ -n "${AUTODUCKS_SOURCE_DIR:-}" ]]; then
+  TMP_DIR="$AUTODUCKS_SOURCE_DIR"
+  CLEANUP_TMP=false
+  echo "  Using local source dir: $TMP_DIR"
+else
+  TMP_DIR=$(mktemp -d)
+  curl -sL "https://api.github.com/repos/${SOURCE_REPO}/tarball/${BRANCH}" \
+    | tar xz -C "$TMP_DIR" --strip-components=1
+fi
 
-# Copy .autoducks/ directory
-cp -r "$TMP_DIR/.autoducks" .autoducks
+# Copy .autoducks/ directory, preserving consumer-owned files across updates.
+STASH_DIR=$(mktemp -d)
+if [[ -f ".autoducks/autoducks.json" ]]; then
+  cp ".autoducks/autoducks.json" "$STASH_DIR/autoducks.json"
+fi
+if [[ -f ".autoducks/providers/llm/claude/settings.json" ]]; then
+  mkdir -p "$STASH_DIR/providers/llm/claude"
+  cp ".autoducks/providers/llm/claude/settings.json" "$STASH_DIR/providers/llm/claude/settings.json"
+fi
+if [[ -d ".autoducks/custom" ]]; then
+  cp -R ".autoducks/custom" "$STASH_DIR/custom"
+fi
+
+rm -rf .autoducks
+cp -R "$TMP_DIR/.autoducks" .autoducks
+
+if [[ -f "$STASH_DIR/autoducks.json" ]]; then
+  cp "$STASH_DIR/autoducks.json" ".autoducks/autoducks.json"
+fi
+if [[ -f "$STASH_DIR/providers/llm/claude/settings.json" ]]; then
+  mkdir -p ".autoducks/providers/llm/claude"
+  cp "$STASH_DIR/providers/llm/claude/settings.json" ".autoducks/providers/llm/claude/settings.json"
+fi
+if [[ -d "$STASH_DIR/custom" ]]; then
+  rm -rf ".autoducks/custom"
+  cp -R "$STASH_DIR/custom" ".autoducks/custom"
+fi
+
+rm -rf "$STASH_DIR"
 echo "  .autoducks/ installed"
 
 # Copy runtime workflows to .github/workflows/
@@ -81,7 +116,9 @@ echo "  Scripts copied"
 # Make all .sh files executable
 find .autoducks -name '*.sh' -exec chmod +x {} +
 
-rm -rf "$TMP_DIR"
+if [[ "$CLEANUP_TMP" == "true" ]]; then
+  rm -rf "$TMP_DIR"
+fi
 
 # Bake per-team custom trigger aliases (triggers.<agent>[] in autoducks.json)
 # into the workflow guards. GitHub's file-blind if: engine cannot read config at
