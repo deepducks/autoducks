@@ -184,6 +184,39 @@ EOF
   fi
 }
 
+# Rework and Defer fire on comments on both issues and PRs, just like the
+# Reviewer, so their guards also omit the `pull_request == null` clause — do
+# NOT reuse render_simple for this reason.
+render_rework() {
+  local -a all=(rework); mapfile -t c < <(read_custom rework); all+=("${c[@]}")
+  cat <<'EOF'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.comment.author_association != 'MANNEQUIN' &&
+EOF
+  if ((${#all[@]} == 1)); then
+    printf "       startsWith(github.event.comment.body, '%s'))\n" "$(cmd_for rework)"
+  else
+    emit_group "       " "(" "        " "))" "${all[@]}"
+  fi
+}
+
+render_defer() {
+  local -a all=(defer); mapfile -t c < <(read_custom defer); all+=("${c[@]}")
+  cat <<'EOF'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.comment.author_association != 'MANNEQUIN' &&
+EOF
+  if ((${#all[@]} == 1)); then
+    printf "       startsWith(github.event.comment.body, '%s'))\n" "$(cmd_for defer)"
+  else
+    emit_group "       " "(" "        " "))" "${all[@]}"
+  fi
+}
+
 # fix / revert / close have no built-in aliases: bare single-clause guard
 # when no custom aliases exist (byte-identical to the shipped template),
 # parenthesized OR-group when custom aliases are present.
@@ -230,6 +263,8 @@ apply_file autoducks-engineer.yml  render_engineer
 apply_file autoducks-maestro.yml   render_maestro
 apply_file autoducks-developer.yml render_developer
 apply_file autoducks-reviewer.yml  render_reviewer
+apply_file autoducks-rework.yml    render_rework
+apply_file autoducks-defer.yml     render_defer
 apply_file autoducks-fix.yml       render_simple fix
 apply_file autoducks-revert.yml    render_simple revert
 apply_file autoducks-close.yml     render_simple close
