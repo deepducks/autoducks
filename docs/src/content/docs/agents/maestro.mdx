@@ -59,14 +59,14 @@ Both are idempotent — re-runs reuse what exists.
 
 ## Behavior
 
-1. Reacts 👀; posts a status comment for human-triggered runs (event-driven re-runs narrate through 🌊/⏳/🎉 milestone comments instead).
+1. Reacts 👀; posts a status comment for human-triggered runs. Event-driven re-runs maintain a **single, in-place-edited orchestration status comment** reflecting current wave state instead of stacking new comments — dispatched, skipped, and blocked tasks appear in it as clickable `#N` references.
 2. Checks the Definition of Ready; ensures branch + draft PR.
 3. Parses the wave plan from the tactical zone. **No waves block? Single-task plan** — dispatches the Developer on the issue itself and finishes when its PR merges.
 4. Detects completed tasks by scanning merged PRs into the pipeline branch for `fixes/closes/resolves #N`; ticks the `## Progress` checkboxes.
 5. Computes wave states; finds the first pending wave whose predecessors are all done.
-6. **Next wave found** → applies `Work:orchestrating` and dispatches one Developer per unfinished task (in parallel), forwarding any `model:`/`effort:`/`turns:` overrides and the original command author. Posts the 🌊 wave summary.
-7. **All waves done** → assembles the final PR: `Closes #…` for every task and the issue, plus a **Work Log** harvested from each task PR's Implementation Summary. Marks the PR ready, requests review from the issue assignees, `Work:orchestrating` → `Work:done`, assigns the command author, posts 🎉.
-8. **Blocked** (earlier wave still open) → posts ⏳ and waits for the next merge event.
+6. **Next wave found** → applies `Work:orchestrating` and dispatches one Developer per unfinished task (in parallel), forwarding any `model:`/`effort:`/`turns:` overrides and the original command author. Updates the orchestration comment in place with the 🌊 wave summary, linking each dispatched task as `#N`.
+7. **All waves done** → assembles the final PR: `Closes #…` for every task and the issue, plus a **Work Log** harvested from each task PR's Implementation Summary. Marks the PR ready, requests review from the issue assignees, `Work:orchestrating` → `Work:done`, assigns the command author, updates the orchestration comment in place with 🎉.
+8. **Blocked** (earlier wave still open) → updates the orchestration comment in place with ⏳, listing the still-blocked `#N` tasks, and waits for the next merge event.
 
 ## Duplicate-dispatch protection
 
