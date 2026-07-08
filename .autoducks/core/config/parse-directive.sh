@@ -6,7 +6,7 @@ set -euo pipefail
 #
 # Input:  COMMENT_BODY env var (or stdin)
 # Output: key=value lines to stdout
-#   command          — canonical verb: architect, engineer, execute, fix, revert, close
+#   command          — canonical verb: architect, engineer, execute, fix, revert, close, review
 #   original_command — the raw verb the user typed, before alias normalization
 #   model            — claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5, or empty
 #   effort           — off, low, medium, high, max, or empty
@@ -61,7 +61,7 @@ normalize_verb() {
   esac
   if [[ -f "$_CONFIG_FILE" ]] && command -v jq &>/dev/null; then
     local _agent _alias
-    for _agent in architect engineer execute fix revert close; do
+    for _agent in architect engineer execute fix revert close review; do
       while IFS= read -r _alias; do
         if [[ -n "$_alias" && "$v" == "$_alias" ]]; then
           v="$_agent"
@@ -76,7 +76,7 @@ normalize_verb() {
 
 is_canonical_verb() {
   case "$1" in
-    architect|engineer|execute|fix|revert|close) return 0 ;;
+    architect|engineer|execute|fix|revert|close|review) return 0 ;;
     *) return 1 ;;
   esac
 }

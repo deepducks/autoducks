@@ -11,6 +11,9 @@ AUTODUCKS_PROGRESS_LABELS=(
   "Work:orchestrating|BFE5BF|Maestro is orchestrating execution waves"
   "Work:coding|C2E0C6|Developer is implementing the task"
   "Work:done|0E8A16|Work complete"
+  "Review:reviewing|FBCA04|Review agent is reviewing the pull request"
+  "Review:done|0E8A16|Review complete"
+  "Review:changes|D93F0B|Review requested changes"
 )
 
 # Ensure all six labels exist on $REPO. Idempotent; ignores "already exists".

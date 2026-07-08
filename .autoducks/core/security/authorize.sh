@@ -56,6 +56,7 @@ authz::load_config() {
   # share its per_agent security policy.
   case "$agent" in
     maestro|developer) agent="execute" ;;
+    reviewer)          agent="review"  ;;
   esac
   local config="$AUTODUCKS_ROOT/autoducks.json"
 

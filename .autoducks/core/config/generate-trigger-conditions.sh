@@ -26,8 +26,8 @@ if [[ ! -f "$CONFIG" ]]; then
   exit 1
 fi
 
-AGENTS=(architect engineer execute fix revert close)
-BUILTINS="architect design engineer tactics execute run work fix revert close"
+AGENTS=(architect engineer execute fix revert close review)
+BUILTINS="architect design engineer tactics execute run work fix revert close review"
 
 # Slash-command prefix (validated; falls back to /quack on garbage)
 COMMAND_PREFIX="$(jq -r '.command // "/quack"' "$CONFIG")"

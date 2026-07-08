@@ -17,7 +17,8 @@
     "execute":   [],
     "fix":       [],
     "revert":    [],
-    "close":     []
+    "close":     [],
+    "review":    []
   },
   "security": {
     "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"],
@@ -30,7 +31,8 @@
       "engineer":  { },
       "fix":       { },
       "revert":    { "trusted_associations": ["OWNER", "MEMBER"] },
-      "close":     { "trusted_associations": ["OWNER", "MEMBER"] }
+      "close":     { "trusted_associations": ["OWNER", "MEMBER"] },
+      "review":    { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] }
     }
   }
 }
