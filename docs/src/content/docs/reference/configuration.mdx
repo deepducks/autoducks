@@ -25,6 +25,10 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
     "integration_branch": "main",
     "merge_method": "auto"
   },
+  "reviewer": {
+    "required_check": false,
+    "check_name": "Autoducks: Reviewer"
+  },
   "triggers": {
     "architect": [],
     "engineer":  [],
@@ -135,6 +139,18 @@ Method for auto-merging task/fix PRs into the pipeline branch. **Default:** `aut
 | `merge` / `squash` / `rebase` | Force one method |
 
 `auto` keeps autoducks working on squash-only or rebase-only repos without configuration.
+
+## `reviewer`
+
+Controls the Reviewer's GitHub Check-run and whether it gates merges. See [Reviewer → Required check](/agents/reviewer/).
+
+### `reviewer.required_check`
+
+When `true`, `scripts/setup.sh` (run with repo-admin `gh` credentials) creates a branch ruleset requiring the reviewer's check on the integration/base branch, so a `request-changes` verdict blocks the merge. **Default:** `false` (the Reviewer still emits the check on final PRs, but nothing is enforced).
+
+### `reviewer.check_name`
+
+The Check-run name emitted on final PRs and required by the ruleset — kept in one place so the two never drift. **Default:** `Autoducks: Reviewer`.
 
 ## `triggers` — custom trigger aliases
 

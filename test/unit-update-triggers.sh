@@ -96,6 +96,23 @@ else
   fail "defer missing contents: read"
 fi
 
+echo "── reviewer auto-fires on ready-for-review of final PRs only ──"
+if grep -q "github.event.action == 'ready_for_review'" "$SCRATCH/.github/workflows/autoducks-reviewer.yml"; then
+  pass "reviewer guard includes the ready_for_review auto-trigger"
+else
+  fail "reviewer guard missing ready_for_review auto-trigger"
+fi
+if grep -q "startsWith(github.event.pull_request.head.ref, 'feature/')" "$SCRATCH/.github/workflows/autoducks-reviewer.yml"; then
+  pass "reviewer guard targets feature/ head branches"
+else
+  fail "reviewer guard missing feature/ head match"
+fi
+if grep -q "!startsWith(github.event.pull_request.base.ref, 'feature/')" "$SCRATCH/.github/workflows/autoducks-reviewer.yml"; then
+  pass "reviewer guard excludes task PRs (base not a feature/ branch)"
+else
+  fail "reviewer guard missing task-PR (base) exclusion"
+fi
+
 echo "── custom aliases are baked into guards ──"
 python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
 import json, sys

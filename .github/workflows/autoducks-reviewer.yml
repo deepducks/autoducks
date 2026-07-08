@@ -3,6 +3,8 @@ name: 'Autoducks: Reviewer Agent'
 on:
   issue_comment:
     types: [created]
+  pull_request:
+    types: [ready_for_review]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -39,12 +41,28 @@ permissions:
   issues: write
   pull-requests: write
   actions: write
+  checks: write
   id-token: write
+
+# Serialize the reviewer per PR: the automatic (ready_for_review) and manual
+# (/review) entry points collide on the same group, so a PR is never reviewed
+# by two concurrent runs. Queue rather than cancel — cancelling mid-run would
+# strand the Check-run in `in_progress` (traps don't fire on cancellation) and
+# deadlock the required check.
+concurrency:
+  group: autoducks-reviewer-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number || inputs.issue_number }}
+  cancel-in-progress: false
 
 jobs:
   reviewer:
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.action == 'ready_for_review' &&
+       (startsWith(github.event.pull_request.head.ref, 'feature/') ||
+        startsWith(github.event.pull_request.head.ref, 'fix/')) &&
+       !startsWith(github.event.pull_request.base.ref, 'feature/') &&
+       !startsWith(github.event.pull_request.base.ref, 'fix/')) ||
       (github.event_name == 'issue_comment' &&
        github.event.comment.author_association != 'MANNEQUIN' &&
        startsWith(github.event.comment.body, '/review'))
@@ -56,6 +74,7 @@ jobs:
           ref: >-
             ${{
               github.event_name == 'workflow_dispatch' && inputs.pr_number != '' && format('refs/pull/{0}/head', inputs.pr_number) ||
+              github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) ||
               github.event.issue.pull_request != null && format('refs/pull/{0}/head', github.event.issue.number) ||
               ''
             }}
@@ -65,9 +84,9 @@ jobs:
         env:
           AUTODUCKS_AGENT: reviewer
           ACTOR: ${{ github.event.comment.user.login || github.event.sender.login }}
-          AUTHOR_ASSOC: ${{ github.event.comment.author_association || github.event.issue.author_association }}
+          AUTHOR_ASSOC: ${{ github.event.comment.author_association || github.event.issue.author_association || github.event.pull_request.author_association }}
           EVENT_NAME: ${{ github.event_name }}
-          ISSUE_NUM: ${{ github.event.issue.number || inputs.pr_number || inputs.issue_number }}
+          ISSUE_NUM: ${{ github.event.issue.number || github.event.pull_request.number || inputs.pr_number || inputs.issue_number }}
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -92,6 +111,15 @@ jobs:
             echo "max_turns=${{ inputs.max_turns }}" >> "$GITHUB_OUTPUT"
             echo "auto_chain=${{ inputs.auto_chain }}" >> "$GITHUB_OUTPUT"
             echo "commenter=${{ inputs.actor }}" >> "$GITHUB_OUTPUT"
+            echo "command=" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "issue_num=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+            echo "is_pr=true" >> "$GITHUB_OUTPUT"
+            echo "model=" >> "$GITHUB_OUTPUT"
+            echo "effort=" >> "$GITHUB_OUTPUT"
+            echo "max_turns=" >> "$GITHUB_OUTPUT"
+            echo "auto_chain=" >> "$GITHUB_OUTPUT"
+            echo "commenter=${{ github.event.sender.login }}" >> "$GITHUB_OUTPUT"
             echo "command=" >> "$GITHUB_OUTPUT"
           else
             echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"

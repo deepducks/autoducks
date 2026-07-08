@@ -35,9 +35,10 @@ flowchart LR
 | Event | Condition |
 |-------|-----------|
 | Issue comment | `/review` on the feature/bug issue, or directly on its pull request |
+| Pull request | `ready_for_review` — fires automatically when a **final** `feature/`/`fix/` PR (base = integration branch) is marked ready. Task PRs, which target a pipeline branch, are excluded. |
 | Workflow dispatch | `pr_number` or `issue_number` |
 
-There is **no** automatic trigger and **no** Definition-of-Ready cascade — the Reviewer sits outside the four-agent pipeline, run on demand once there's something to review.
+The Reviewer still sits outside the four-agent pipeline (no Definition-of-Ready cascade), but on a final PR it now runs **automatically** the moment the Maestro marks it ready-for-review — the same run you can also trigger manually with `/review`. The two entry points are serialized per PR (workflow `concurrency`), so a PR is never reviewed by two concurrent runs.
 
 ## Definition of Ready
 
@@ -60,16 +61,22 @@ If no open PR is found, the diff is empty, or the PR is already closed/merged, t
 
 The LLM writes exactly one word to `/tmp/review-verdict`, which `post.sh` maps to a GitHub review event:
 
-| Verdict | Meaning | Label applied | GitHub review event |
-|---------|---------|----------------|----------------------|
-| `approve` | No findings above `nit`, every acceptance criterion `met` | `Review:done` | `COMMENT` |
-| `comment` | Only `minor`/`nit` findings, or a `partially met` criterion with nothing blocking | `Review:done` | `COMMENT` |
-| `request-changes` | At least one `blocker`/`major` finding, or any criterion `missing` | `Review:changes` | `REQUEST_CHANGES` |
+| Verdict | Meaning | Label applied | GitHub review event | Check-run |
+|---------|---------|----------------|----------------------|-----------|
+| `approve` | No findings above `nit`, every acceptance criterion `met` | `Review:done` | `COMMENT` | `success` |
+| `comment` | Only `minor`/`nit` findings, or a `partially met` criterion with nothing blocking | `Review:done` | `COMMENT` | `success` |
+| `request-changes` | At least one `blocker`/`major` finding, or any criterion `missing` | `Review:changes` | `REQUEST_CHANGES` | `failure` |
 
 A missing or malformed verdict file falls back to `comment`, the conservative middle ground.
 
+## Required check (gating merges)
+
+On a **final** PR the Reviewer also emits a GitHub **Check-run** (default name `Autoducks: Reviewer`) whose conclusion mirrors the verdict — see the last column above. Only `request-changes` concludes `failure`; `approve`/`comment`, an empty diff ("nothing to review"), all conclude `success`, so the gate stays advisory and never deadlocks a PR. A run that errors concludes `failure`.
+
+To make it block merges, set `reviewer.required_check: true` in [`autoducks.json`](/reference/configuration/) and run `scripts/setup.sh` (with repo-admin `gh` credentials): it creates a branch ruleset requiring that check on the integration/base branch. Because the check is pinned to the head commit it ran against, pushing new commits after a review leaves it pending on the new SHA — re-run `/review` to revalidate.
+
 <Aside type="caution">
-**`approve` is never published as a formal GitHub approval.** The bot review is always posted as `COMMENT` or `REQUEST_CHANGES` — never `APPROVE` — so it can never satisfy a required-reviewer check on its own. A human still has to approve and merge.
+**`approve` is never published as a formal GitHub approval.** The bot review is always posted as `COMMENT` or `REQUEST_CHANGES` — never `APPROVE`, so it cannot satisfy a *required-reviewer* rule. The **required-check** path above is the supported way to gate merges on the Reviewer; a human still merges.
 </Aside>
 
 ## Read-only, never-merge

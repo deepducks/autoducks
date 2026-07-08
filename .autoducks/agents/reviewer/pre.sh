@@ -15,6 +15,7 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
       status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
       react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
       progress_labels::abort "$ISSUE_NUM" "Review:reviewing" 2>/dev/null || true; \
+      { [[ -n "${CHECK_RUN_ID:-}" ]] && git::conclude_check_run "$CHECK_RUN_ID" failure "Review failed" "The reviewer agent errored during preparation." 2>/dev/null; } || true; \
       touch /tmp/autoducks-pre-failed; \
       exit $_rc' ERR
 
@@ -32,6 +33,7 @@ skip_review() {
   status_comment::finish "$ISSUE_NUM" "**Nothing to review.** $reason"
   react_to_comment "${COMMENT_ID:-}" "+1"
   progress_labels::abort "$ISSUE_NUM" "Review:reviewing"
+  { [[ -n "${CHECK_RUN_ID:-}" ]] && git::conclude_check_run "$CHECK_RUN_ID" success "Nothing to review" "$reason" 2>/dev/null; } || true
   touch /tmp/autoducks-pre-failed
   [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "skip=true" >> "$GITHUB_OUTPUT"
   exit 0
@@ -57,6 +59,21 @@ PR_HEAD=$(echo "$PR_META_JSON" | jq -r '.headRefName')
 PR_TITLE=$(echo "$PR_META_JSON" | jq -r '.title')
 PR_BODY=$(echo "$PR_META_JSON" | jq -r '.body')
 PR_STATE=$(echo "$PR_META_JSON" | jq -r '.state')
+
+# ── Emit a GitHub Check-run on the final feature/fix PR ────────────────
+# Task PRs reuse the feature/|fix/ head prefix, so the *base* is the reliable
+# discriminator: only the final pipeline PR targets the integration branch.
+# The check is created in-progress here so every downstream exit — skip,
+# failure (ERR trap), or the verdict in post.sh — resolves it; a required
+# check that never appeared would otherwise deadlock the PR forever.
+CHECK_RUN_ID=""
+if [[ "$PR_BASE" == "$AUTODUCKS_INTEGRATION_BRANCH" ]] \
+   && { [[ "$PR_HEAD" == feature/* ]] || [[ "$PR_HEAD" == fix/* ]]; }; then
+  PR_HEAD_SHA=$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null || true)
+  if [[ -n "$PR_HEAD_SHA" ]]; then
+    CHECK_RUN_ID=$(git::start_check_run "$AUTODUCKS_REVIEW_CHECK_NAME" "$PR_HEAD_SHA" 2>/dev/null || true)
+  fi
+fi
 
 # ── Resolve the feature/bug issue this PR implements ───────────────────
 if [[ "${IS_PR:-false}" == "true" ]]; then
@@ -105,10 +122,11 @@ if [[ "$PR_STATE" != "OPEN" ]]; then
 fi
 
 # Share PR state with post.sh (separate GHA step — a fresh process).
-export PR_NUM PR_BASE PR_HEAD FEATURE_NUM
+export PR_NUM PR_BASE PR_HEAD FEATURE_NUM CHECK_RUN_ID
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   echo "PR_NUM=$PR_NUM" >> "$GITHUB_ENV"
   echo "PR_BASE=$PR_BASE" >> "$GITHUB_ENV"
   echo "PR_HEAD=$PR_HEAD" >> "$GITHUB_ENV"
   echo "FEATURE_NUM=${FEATURE_NUM:-}" >> "$GITHUB_ENV"
+  echo "CHECK_RUN_ID=${CHECK_RUN_ID:-}" >> "$GITHUB_ENV"
 fi
