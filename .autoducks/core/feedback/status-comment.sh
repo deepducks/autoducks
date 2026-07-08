@@ -107,3 +107,63 @@ status_comment::delegate() {
   link=$(status_comment::_run_link)
   status_comment::_edit "$issue_id" "🔁 **\`${label}\`**: not ready — delegated on ${link}" "$details"
 }
+
+# ── Persistent orchestrator status comment (survives fresh runners) ─
+# The maestro orchestrator dispatches each wave as its own GHA run, so
+# there's no shared /tmp across waves the way pre.sh/post.sh share one
+# runner above. orchestrator_comment::upsert instead anchors on a hidden
+# marker embedded in the comment body itself: any run, on any runner,
+# can re-find "the" status comment for a feature by scanning comments
+# for that marker. The /tmp cache below is just a same-run optimization
+# to skip the re-scan when this run already knows the id.
+
+_MAESTRO_COMMENT_ID_FILE="/tmp/autoducks-maestro-comment-id"
+
+# orchestrator_comment::upsert ISSUE_NUM BODY
+#   1. If /tmp cache already holds this run's id, PATCH it.
+#   2. Else scan its::list_comments for a bot-authored comment containing the
+#      per-feature marker; if found, cache its id and PATCH it.
+#   3. Else its::comment_issue a new comment whose body ENDS with the marker;
+#      capture the returned comment id into the /tmp cache.
+#   All steps best-effort: a failed status update must never fail the run.
+orchestrator_comment::upsert() {
+  local issue_id="$1" body="$2"
+  # Hidden marker embedded in the comment body so future runs (on fresh
+  # runners) can find and edit the same comment. Scoped per feature to
+  # avoid cross-feature collisions when one issue is reused.
+  local marker="<!-- autoducks:maestro-status:${FEATURE:-$issue_id} -->"
+  local full_body="${body}"$'\n'"${marker}"
+  local cid=""
+
+  if [[ -s "$_MAESTRO_COMMENT_ID_FILE" ]]; then
+    cid=$(cat "$_MAESTRO_COMMENT_ID_FILE" 2>/dev/null || true)
+    its::update_comment "$cid" "$full_body" 2>/dev/null || true
+    return 0
+  fi
+
+  local comments=""
+  comments=$(its::list_comments "$issue_id" 2>/dev/null) || comments=""
+
+  if [[ -n "$comments" ]]; then
+    cid=$(echo "$comments" | jq -r --arg marker "$marker" '
+      [.[] | select((.author == "github-actions[bot]" or .author == "github-actions")
+                    and ((.body // "") | contains($marker)))]
+      | sort_by(.updated_at // .created_at // "")
+      | last
+      | .id // empty
+    ' 2>/dev/null) || cid=""
+  fi
+
+  if [[ -n "$cid" && "$cid" != "null" ]]; then
+    echo "$cid" > "$_MAESTRO_COMMENT_ID_FILE"
+    its::update_comment "$cid" "$full_body" 2>/dev/null || true
+    return 0
+  fi
+
+  local out="" new_id=""
+  out=$(its::comment_issue "$issue_id" "$full_body" 2>/dev/null) || return 0
+  # its::comment_issue prints the comment URL: …/issues/N#issuecomment-<id>
+  new_id=$(echo "$out" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+' | head -1 || true)
+  [[ -n "$new_id" ]] && echo "$new_id" > "$_MAESTRO_COMMENT_ID_FILE"
+  return 0
+}
