@@ -372,6 +372,16 @@ run_authz "$D" \
   REPO=x/y GH_TOKEN=t
 if [[ "$LAST_EXIT" -eq 0 ]]; then pass "pull_request bypasses"; else fail "expected 0, got $LAST_EXIT"; fi
 
+echo "[4c] schedule bypass (no ACTOR/AUTHOR_ASSOC required)"
+D=$(new_test_dir "t4c")
+write_config "$D" null
+run_authz "$D" \
+  AUTODUCKS_AGENT=maestro \
+  ACTOR="" AUTHOR_ASSOC="" \
+  EVENT_NAME=schedule \
+  REPO=x/y GH_TOKEN=t
+if [[ "$LAST_EXIT" -eq 0 ]]; then pass "schedule bypasses"; else fail "expected 0, got $LAST_EXIT"; fi
+
 # ---------------------------------------------------------------------------
 # Test 5: Fail-closed cases
 # ---------------------------------------------------------------------------
@@ -441,6 +451,40 @@ run_authz "$D" \
   EVENT_NAME=issue_comment \
   REPO=x/y GH_TOKEN=t
 if [[ "$LAST_EXIT" -eq 0 ]]; then pass "maestro inherits execute policy (OWNER allowed)"; else fail "expected 0, got $LAST_EXIT"; fi
+
+echo "[6c] per_agent key mapping: triage resolves to the product policy (baseline defaults)"
+D=$(new_test_dir "t6c")
+write_config "$D" null
+run_authz "$D" \
+  AUTODUCKS_AGENT=triage \
+  ACTOR=alice AUTHOR_ASSOC=COLLABORATOR \
+  EVENT_NAME=issue_comment \
+  REPO=x/y GH_TOKEN=t
+if [[ "$LAST_EXIT" -eq 0 ]]; then pass "triage (→product) allows COLLABORATOR"; else fail "expected 0, got $LAST_EXIT"; fi
+
+run_authz "$D" \
+  AUTODUCKS_AGENT=product \
+  ACTOR=alice AUTHOR_ASSOC=COLLABORATOR \
+  EVENT_NAME=issue_comment \
+  REPO=x/y GH_TOKEN=t
+if [[ "$LAST_EXIT" -eq 0 ]]; then pass "product allows COLLABORATOR"; else fail "expected 0, got $LAST_EXIT"; fi
+
+echo "[6d] merge stays on its own destructive policy (COLLABORATOR denied)"
+D=$(new_test_dir "t6d")
+write_config "$D" null
+run_authz "$D" \
+  AUTODUCKS_AGENT=merge \
+  ACTOR=alice AUTHOR_ASSOC=COLLABORATOR \
+  EVENT_NAME=issue_comment \
+  REPO=x/y GH_TOKEN=t
+if [[ "$LAST_EXIT" -eq 77 ]]; then pass "merge denies COLLABORATOR"; else fail "expected 77, got $LAST_EXIT"; fi
+
+run_authz "$D" \
+  AUTODUCKS_AGENT=merge \
+  ACTOR=alice AUTHOR_ASSOC=MEMBER \
+  EVENT_NAME=issue_comment \
+  REPO=x/y GH_TOKEN=t
+if [[ "$LAST_EXIT" -eq 0 ]]; then pass "merge allows MEMBER"; else fail "expected 0, got $LAST_EXIT"; fi
 
 # ---------------------------------------------------------------------------
 # Test 7: Audit trail (denials, allowlist, CODEOWNERS)
