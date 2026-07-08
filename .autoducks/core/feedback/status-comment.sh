@@ -27,6 +27,7 @@ status_comment::_label() {
     fix)       echo "Fix"       ;;
     revert)    echo "Revert"    ;;
     close)     echo "Close"     ;;
+    merge)     echo "Merge"     ;;
     *)         echo "${AUTODUCKS_AGENT:-agent}" ;;
   esac
 }
