@@ -2,14 +2,15 @@
 set -euo pipefail
 export AUTODUCKS_AGENT="fix"
 
-rm -f /tmp/autoducks-pre-failed
-
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/branch-prefix.sh"
+
+rm -f "$AUTODUCKS_PRE_FAILED_MARKER"
+mkdir -p "$AUTODUCKS_MARKER_DIR"
 
 react_to_comment "$COMMENT_ID" "eyes"
 status_comment::start "$ISSUE_NUM"
@@ -24,7 +25,7 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/nu
       status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
       react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
       progress_labels::abort "$ISSUE_NUM" "Work:coding" 2>/dev/null || true; \
-      touch /tmp/autoducks-pre-failed; \
+      touch "$AUTODUCKS_PRE_FAILED_MARKER"; \
       exit $_rc' ERR
 
 # Find the newest existing task branch for this issue — task branches carry

@@ -16,8 +16,8 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
 # pre.sh has already posted its own comment (failure, or a benign "nothing
 # to resolve" skip), reacted, and cleared the progress label — skip all
 # checks below so we don't double-notify.
-if [[ -f /tmp/autoducks-pre-failed ]]; then
-  rm -f /tmp/autoducks-pre-failed
+if [[ -f "$AUTODUCKS_PRE_FAILED_MARKER" ]]; then
+  rm -f "$AUTODUCKS_PRE_FAILED_MARKER"
   exit 0
 fi
 
