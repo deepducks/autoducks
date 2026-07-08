@@ -93,6 +93,7 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          STEERING_PROMPT: ${{ steps.ctx.outputs.steering_prompt }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
         if: steps.authz.outcome == 'success'
