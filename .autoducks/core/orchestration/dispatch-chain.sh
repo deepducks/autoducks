@@ -28,6 +28,7 @@ chain::_workflow_for() {
     # it targets the Maestro (orchestration); the Maestro dispatches Developer
     # workers itself.
     execute)   echo "autoducks-maestro.yml feature_issue" ;;
+    review)    echo "autoducks-reviewer.yml issue_number" ;;
     *) return 1 ;;
   esac
 }

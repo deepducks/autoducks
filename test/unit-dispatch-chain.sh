@@ -57,6 +57,18 @@ chain::dispatch_next "architect" "7"
   || fail "got: $(last_dispatch)"
 
 reset_log
+chain::dispatch_next "review" "42"
+[[ "$(last_dispatch)" == "autoducks-reviewer.yml -f issue_number=42" ]] \
+  && pass "chained review targets the Reviewer" \
+  || fail "got: $(last_dispatch)"
+
+reset_log
+chain::dispatch_next "execute+review" "42"
+[[ "$(last_dispatch)" == "autoducks-maestro.yml -f feature_issue=42 -f auto_chain=review" ]] \
+  && pass "execute+review forwards the review remainder to the Maestro hop" \
+  || fail "got: $(last_dispatch)"
+
+reset_log
 COMMENTER="alice" OVERRIDE_MODEL="claude-opus-4-8" OVERRIDE_EFFORT="high" OVERRIDE_MAX_TURNS="30" \
   chain::dispatch_next "engineer" "42"
 [[ "$(last_dispatch)" == "autoducks-engineer.yml -f issue_number=42 -f actor=alice -f model=claude-opus-4-8 -f effort=high -f max_turns=30" ]] \
@@ -68,6 +80,20 @@ chain::dispatch_next "banana" "42" 2>/dev/null || true
 [[ "$(dispatch_count)" == "0" ]] \
   && pass "unknown verb is dropped without dispatch" \
   || fail "unknown verb dispatched: $(last_dispatch)"
+
+echo "── chain::_workflow_for contract ──"
+
+# Guards the invariant that every chainable verb (as recognized by
+# parse-directive.sh) has a chain::_workflow_for mapping. Enumerated
+# literally — parse-directive.sh cannot be sourced without executing the
+# parser.
+CHAINABLE_VERBS=(architect engineer execute review)
+for verb in "${CHAINABLE_VERBS[@]}"; do
+  mapping=$(chain::_workflow_for "$verb") || mapping=""
+  [[ -n "$mapping" ]] \
+    && pass "chain::_workflow_for maps '$verb'" \
+    || fail "chain::_workflow_for has no mapping for '$verb'"
+done
 
 echo "── chain::dispatch_prerequisite ──"
 

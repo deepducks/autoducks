@@ -87,7 +87,6 @@ The Reviewer runs **after** the pipeline (or a task) has already produced a PR â
 
 ```
 /review model:opus effort:max turns:40
-/review #auto:close
 ```
 
-See [Slash commands](/reference/slash-commands) for the full grammar.
+`/review` can carry a `#auto:` chain forward, but only to the chainable verbs (`architect`, `engineer`, `execute`, `review`) â€” utility verbs (`fix`/`revert`/`close`) cannot be chained. See [Slash commands](/reference/slash-commands) for the full grammar.
