@@ -39,7 +39,9 @@ pass() { echo "  ✅ $1"; PASS=$((PASS + 1)); }
 fail() { echo "  ❌ $1"; FAIL=$((FAIL + 1)); }
 
 SCRATCH="$(mktemp -d)"
-trap 'rm -rf "$SCRATCH"' EXIT
+MAESTRO_CID_FILE="/tmp/autoducks-maestro-comment-id"
+trap 'rm -rf "$SCRATCH"; rm -f "$MAESTRO_CID_FILE"' EXIT
+rm -f "$MAESTRO_CID_FILE"
 
 REPO_NAME="acme/widgets"
 FEATURE=500
@@ -58,6 +60,13 @@ mkdir -p "$MOCK_ISSUE_DIR" "$GH_CAPTURE_DIR"
 
 MOCK_MERGED_PRS_FILE="$SCRATCH/merged_prs.json"
 MOCK_OPEN_PRS_FILE="$SCRATCH/open_prs.json"
+
+# Persistent-comment store (shared across the two run_maestro invocations
+# below, just like a real GitHub issue's comments persist across separate
+# workflow runs) — backs the its::list_comments / its::update_comment /
+# its::comment_issue trio the gh shim serves further down.
+MOCK_COMMENTS_FILE="$SCRATCH/comments.json"
+echo "[]" > "$MOCK_COMMENTS_FILE"
 
 jq -n --arg t "$TASK_A" \
   '[{number: 900, title: "Task A done", body: ("Implements task A.\n\nFixes #" + $t)}]' \
@@ -127,7 +136,13 @@ case "$1 $2" in
       echo "$body"
       echo "=== end ==="
     } >> "$COMMENT_LOG"
-    echo "https://github.com/x/y/issues/$id#issuecomment-777"
+    # its::comment_issue — append a new bot comment to the persistent store
+    # (backs its::list_comments for the marker rediscovery a later run does).
+    new_id=$(( $(jq 'length' "$MOCK_COMMENTS_FILE" 2>/dev/null || echo 0) + 1000 ))
+    jq --arg body "$body" --argjson id "$new_id" \
+      '. + [{id: $id, author: "github-actions[bot]", body: $body}]' \
+      "$MOCK_COMMENTS_FILE" > "$MOCK_COMMENTS_FILE.tmp" && mv "$MOCK_COMMENTS_FILE.tmp" "$MOCK_COMMENTS_FILE"
+    echo "https://github.com/x/y/issues/$id#issuecomment-$new_id"
     ;;
   "issue edit")
     id="$3"
@@ -155,6 +170,28 @@ case "$1 $2" in
   "workflow run")
     echo "=== gh $* ===" >> "$DISPATCH_LOG"
     ;;
+  "api "*"/issues/"*"/comments")
+    # its::list_comments ISSUE_ID — GET repos/<repo>/issues/<n>/comments
+    cat "${MOCK_COMMENTS_FILE:-/dev/null}" 2>/dev/null || echo "[]"
+    ;;
+  "api "*"/issues/comments/"*)
+    # its::update_comment COMMENT_ID BODY — PATCH repos/<repo>/issues/comments/<id>
+    cid="${2##*/}"
+    prev=""
+    body=""
+    for arg in "$@"; do
+      [[ "$prev" == "-f" ]] && body="${arg#body=}"
+      prev="$arg"
+    done
+    jq --arg id "$cid" --arg body "$body" \
+      'map(if (.id | tostring) == $id then .body = $body else . end)' \
+      "$MOCK_COMMENTS_FILE" > "$MOCK_COMMENTS_FILE.tmp" && mv "$MOCK_COMMENTS_FILE.tmp" "$MOCK_COMMENTS_FILE"
+    {
+      echo "=== update comment #$cid ==="
+      echo "$body"
+      echo "=== end ==="
+    } >> "$COMMENT_LOG"
+    ;;
   *) : ;;
 esac
 exit 0
@@ -163,9 +200,13 @@ chmod +x "$SCRATCH/bin/gh"
 
 # run_maestro — invokes the real run.sh as a subprocess with the shim first
 # on PATH; stdout/stderr land in scratch files so callers can assert on
-# both the exit code and the [maestro] log lines.
+# both the exit code and the [maestro] log lines. Each call simulates a
+# fresh GHA runner: the /tmp same-run cache orchestrator_comment::upsert
+# relies on is cleared first, forcing rediscovery of a prior run's comment
+# via its::list_comments + the embedded marker rather than a lucky /tmp hit.
 run_maestro() {
   local rc=0
+  rm -f "$MAESTRO_CID_FILE"
   env \
     PATH="$SCRATCH/bin:$PATH" \
     MOCK_ISSUE_DIR="$MOCK_ISSUE_DIR" \
@@ -174,6 +215,7 @@ run_maestro() {
     COMMENT_LOG="$COMMENT_LOG" \
     MOCK_MERGED_PRS_FILE="$MOCK_MERGED_PRS_FILE" \
     MOCK_OPEN_PRS_FILE="$MOCK_OPEN_PRS_FILE" \
+    MOCK_COMMENTS_FILE="$MOCK_COMMENTS_FILE" \
     GITHUB_ACTIONS=true \
     GH_TOKEN=t \
     REPO="$REPO_NAME" \
@@ -243,13 +285,29 @@ fi
   && pass "dispatch log: D (#$TASK_D, Wave 2) untouched" \
   || fail "D (#$TASK_D) was dispatched even though Wave 2 must wait: $(cat "$DISPATCH_LOG")"
 
-# --- 🌊 summary partitions Dispatched vs Skipped consistently ---
+# --- 🌊 summary partitions Dispatched vs Skipped consistently, #-prefixed ---
 if grep -q '🌊 \*\*Wave 1 of 2 dispatched: Wave 1\*\*' "$COMMENT_LOG" \
-  && grep -q '\*\*Dispatched:\*\* 502' "$COMMENT_LOG" \
-  && grep -q '\*\*Skipped (already done or in flight):\*\* 501 503' "$COMMENT_LOG"; then
-  pass "🌊 summary partitions Dispatched (502) vs Skipped (501, 503) consistently with the dispatch log"
+  && grep -q '\*\*Dispatched:\*\* #502' "$COMMENT_LOG" \
+  && grep -q '\*\*Skipped (already done or in flight):\*\* #501 #503' "$COMMENT_LOG"; then
+  pass "🌊 summary partitions Dispatched (#502) vs Skipped (#501, #503) consistently with the dispatch log"
 else
   fail "🌊 summary did not match the expected partition: $(cat "$COMMENT_LOG")"
+fi
+
+# --- Single marker-anchored comment created (not the event-driven fallback) ---
+COMMENTS_AFTER_RUN1=$(jq 'length' "$MOCK_COMMENTS_FILE")
+if [[ "$COMMENTS_AFTER_RUN1" -eq 1 ]]; then
+  pass "run 1: exactly one persistent orchestration comment exists"
+else
+  fail "run 1: expected exactly 1 comment, found $COMMENTS_AFTER_RUN1: $(cat "$MOCK_COMMENTS_FILE")"
+fi
+
+COMMENT_ID_AFTER_RUN1=$(jq -r '.[0].id' "$MOCK_COMMENTS_FILE")
+if jq -e --arg marker "<!-- autoducks:maestro-status:$FEATURE -->" \
+  '.[0].body | contains($marker)' "$MOCK_COMMENTS_FILE" >/dev/null; then
+  pass "the persistent comment carries the per-feature marker"
+else
+  fail "marker missing from the persistent comment: $(jq -r '.[0].body' "$MOCK_COMMENTS_FILE")"
 fi
 
 echo ""
@@ -279,10 +337,39 @@ run_maestro || RC2=$?
   && pass "G5: #$TASK_B was dispatched exactly once across both runs — never twice while its PR is open" \
   || fail "G5 violated: #$TASK_B dispatch count across both runs is $(count_of "issue_number=$TASK_B" "$DISPATCH_LOG"), expected 1: $(cat "$DISPATCH_LOG")"
 
-if grep -q '\*\*Skipped (already done or in flight):\*\* 501 502 503' "$COMMENT_LOG"; then
-  pass "run 2: all of Wave 1 (501, 502, 503) now reports skipped/in-flight — guard and is_done converge"
+if grep -q '\*\*Skipped (already done or in flight):\*\* #501 #502 #503' "$COMMENT_LOG"; then
+  pass "run 2: all of Wave 1 (#501, #502, #503) now reports skipped/in-flight — guard and is_done converge"
 else
   fail "run 2: expected all of Wave 1 skipped, comment log: $(tail -20 "$COMMENT_LOG")"
+fi
+
+# --- Single-comment convergence: run 2 must rediscover and EDIT run 1's
+# comment (via its::list_comments + the marker), never post a second one. ---
+COMMENTS_AFTER_RUN2=$(jq 'length' "$MOCK_COMMENTS_FILE")
+if [[ "$COMMENTS_AFTER_RUN2" -eq 1 ]]; then
+  pass "run 2: still exactly one persistent orchestration comment — no growing stack"
+else
+  fail "run 2: expected exactly 1 comment, found $COMMENTS_AFTER_RUN2: $(cat "$MOCK_COMMENTS_FILE")"
+fi
+
+COMMENT_ID_AFTER_RUN2=$(jq -r '.[0].id' "$MOCK_COMMENTS_FILE")
+if [[ "$COMMENT_ID_AFTER_RUN2" == "$COMMENT_ID_AFTER_RUN1" ]]; then
+  pass "run 2 edited the SAME comment (#$COMMENT_ID_AFTER_RUN1) run 1 created, not a new one"
+else
+  fail "comment id changed across runs (run1=$COMMENT_ID_AFTER_RUN1, run2=$COMMENT_ID_AFTER_RUN2) — a second comment was posted instead of edited"
+fi
+
+if grep -q "update comment #$COMMENT_ID_AFTER_RUN1" "$COMMENT_LOG"; then
+  pass "run 2 went through the PATCH edit path (rediscovered via its::list_comments), not a fresh post"
+else
+  fail "run 2 did not PATCH the existing comment: $(cat "$COMMENT_LOG")"
+fi
+
+if jq -e '.[0].body | contains("Wave 1 of 2 dispatched")' "$MOCK_COMMENTS_FILE" >/dev/null \
+  && jq -e '.[0].body | contains("#501 #502 #503")' "$MOCK_COMMENTS_FILE" >/dev/null; then
+  pass "the single persistent comment reflects run 2's updated narration"
+else
+  fail "persistent comment body not updated as expected: $(jq -r '.[0].body' "$MOCK_COMMENTS_FILE")"
 fi
 
 # ---------------------------------------------------------------------------

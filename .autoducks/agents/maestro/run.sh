@@ -34,14 +34,25 @@ else
   rm -f /tmp/autoducks-status-comment-id
 fi
 
-# report MESSAGE — edit the status comment if this run owns one, otherwise
-# post a plain milestone comment (event-driven runs).
+# hashify NUM... — "#"-prefix a list of issue/task numbers for rendering as
+# clickable references (e.g. "#502 #503"). A stray empty element never
+# yields a bare "#".
+hashify() {
+  local out= n
+  for n in "$@"; do
+    [[ -n "$n" ]] && out+="#$n "
+  done
+  echo "${out% }"
+}
+
+# report MESSAGE — milestone narration always flows into the persistent,
+# marker-anchored orchestration comment (one comment per feature, edited in
+# place across runs). For human-initiated runs the transient per-run status
+# comment stays reserved for the running → ✅ lifecycle headline only.
 report() {
-  if [[ -s /tmp/autoducks-status-comment-id ]]; then
-    status_comment::finish "$FEATURE" "$1"
-  else
-    its::comment_issue "$FEATURE" "$1"
-  fi
+  orchestrator_comment::upsert "$FEATURE" "$1"
+  [[ -s /tmp/autoducks-status-comment-id ]] && status_comment::finish "$FEATURE"
+  return 0
 }
 
 # --- Phase 2: Load and parse issue ---
@@ -57,11 +68,8 @@ ISSUE_LABELS=$(echo "$ISSUE_DATA" | jq -r '.labels[]')
 if ! echo "$ISSUE_LABELS" | grep -qx 'Tactics:done'; then
   if chain::dispatch_prerequisite "engineer" "execute" "${AUTO_CHAIN:-}" "$FEATURE"; then
     DELEGATE_MSG="This issue has no \`Tactics:done\` label, so the **Engineer** was dispatched first to produce the tactical plan. Execution resumes automatically when planning finishes."
-    if [[ -s /tmp/autoducks-status-comment-id ]]; then
-      status_comment::delegate "$FEATURE" "$DELEGATE_MSG"
-    else
-      its::comment_issue "$FEATURE" "🔁 **Not ready to execute** — $DELEGATE_MSG"
-    fi
+    orchestrator_comment::upsert "$FEATURE" "🔁 **Not ready to execute** — $DELEGATE_MSG"
+    [[ -s /tmp/autoducks-status-comment-id ]] && status_comment::delegate "$FEATURE"
     react_to_comment "${COMMENT_ID:-}" "+1" 2>/dev/null || true
     exit 0
   fi
@@ -324,9 +332,9 @@ else
 
   # Post summary
   SUMMARY="🌊 **Wave $((NEXT_WAVE+1)) of $TOTAL_WAVES dispatched: ${WAVE_NAMES[$NEXT_WAVE]}**\n\n"
-  [[ ${#ASSIGNED[@]} -gt 0 ]] && SUMMARY+="**Dispatched:** ${ASSIGNED[*]}\n"
-  [[ ${#SKIPPED[@]} -gt 0 ]] && SUMMARY+="**Skipped (already done or in flight):** ${SKIPPED[*]}\n"
-  [[ ${#BLOCKED[@]} -gt 0 ]] && SUMMARY+="**Blocked — needs \`$(autoducks_command_for fix)\`:** ${BLOCKED[*]}\n"
+  [[ ${#ASSIGNED[@]} -gt 0 ]] && SUMMARY+="**Dispatched:** $(hashify "${ASSIGNED[@]}")\n"
+  [[ ${#SKIPPED[@]} -gt 0 ]] && SUMMARY+="**Skipped (already done or in flight):** $(hashify "${SKIPPED[@]}")\n"
+  [[ ${#BLOCKED[@]} -gt 0 ]] && SUMMARY+="**Blocked — needs \`$(autoducks_command_for fix)\`:** $(hashify "${BLOCKED[@]}")\n"
   SUMMARY+="\nThe orchestrator advances automatically as each task PR merges.\n"
 
   report "$(echo -e "$SUMMARY")"
