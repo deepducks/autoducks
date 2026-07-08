@@ -10,13 +10,13 @@ Utility commands handle recovery, cleanup, and lifecycle operations. They sit **
 
 | Command | Type | What it does | Default security |
 |---------|------|--------------|------------------|
-| `/quack fix` | LLM | Repairs a failed task run, resuming preserved partial work | trusted associations |
-| `/quack revert` | Bash | Undoes planning, restores the human-authored issue | `OWNER`, `MEMBER` |
-| `/quack close` | Bash | Full cleanup: closes issues, PRs, and deletes branches | `OWNER`, `MEMBER` |
+| `/fix` | LLM | Repairs a failed task run, resuming preserved partial work | trusted associations |
+| `/revert` | Bash | Undoes planning, restores the human-authored issue | `OWNER`, `MEMBER` |
+| `/close` | Bash | Full cleanup: closes issues, PRs, and deletes branches | `OWNER`, `MEMBER` |
 
 ---
 
-## `/quack fix`
+## `/fix`
 
 <Mermaid chart={`
 flowchart LR
@@ -34,7 +34,7 @@ flowchart LR
 
 Recovers a failed **task run**. It finds the newest existing task branch for the issue (searching both `feature/…` and `fix/…` prefixes — including `WIP:` branches preserved after a `max_turns` cutoff), reads the failure context from the last 10 comments, and fixes or completes the implementation on top of what's there.
 
-**Scripts:** `.autoducks/agents/fix/{pre,post}.sh` · **Trigger:** `/quack fix` on a task issue
+**Scripts:** `.autoducks/agents/fix/{pre,post}.sh` · **Trigger:** `/fix` on a task issue
 
 ### Behavior
 
@@ -46,16 +46,16 @@ Recovers a failed **task run**. It finds the newest existing task branch for the
 6. Assigns the command author; status comment flips to ✅.
 
 <Aside type="note">
-**Fix ≠ the Bug flow.** `/quack fix` repairs a *failed agent run*. A product **bug** goes through the full pipeline — `/quack execute` on the bug issue — and gets a `fix/…` pipeline branch via the [Architect's classification](/agents/architect#bug-classification).
+**Fix ≠ the Bug flow.** `/fix` repairs a *failed agent run*. A product **bug** goes through the full pipeline — `/execute` on the bug issue — and gets a `fix/…` pipeline branch via the [Architect's classification](/agents/architect#bug-classification).
 </Aside>
 
 <Aside type="tip">
-Before running `/quack fix`, comment what went wrong — the agent reads the last 10 comments as context, so more detail leads to better repairs.
+Before running `/fix`, comment what went wrong — the agent reads the last 10 comments as context, so more detail leads to better repairs.
 </Aside>
 
 ---
 
-## `/quack revert`
+## `/revert`
 
 <Mermaid chart={`
 flowchart LR
@@ -73,7 +73,7 @@ flowchart LR
 
 Undoes the Engineer's work: closes all task issues and restores the issue to how it looked before planning.
 
-**Script:** `.autoducks/agents/revert/run.sh` · **Type:** Bash — no LLM · **Trigger:** `/quack revert`
+**Script:** `.autoducks/agents/revert/run.sh` · **Type:** Bash — no LLM · **Trigger:** `/revert`
 
 ### Behavior
 
@@ -82,11 +82,11 @@ Undoes the Engineer's work: closes all task issues and restores the issue to how
 3. Restores the original issue body from the edit history — the last edit made by a **human** (bot edits are ignored).
 4. Deletes all **bot** comments; every human comment survives. This works because agents only ever post and edit their own comments — they never touch yours.
 
-**Does not** delete branches or close PRs — use `/quack close` for that. After reverting, run `/quack engineer` (or the full pipeline) again.
+**Does not** delete branches or close PRs — use `/close` for that. After reverting, run `/engineer` (or the full pipeline) again.
 
 ---
 
-## `/quack close`
+## `/close`
 
 <Mermaid chart={`
 flowchart LR
@@ -104,7 +104,7 @@ flowchart LR
 
 Full teardown of a pipeline and all associated work.
 
-**Script:** `.autoducks/agents/close/run.sh` · **Type:** Bash — no LLM · **Trigger:** `/quack close`
+**Script:** `.autoducks/agents/close/run.sh` · **Type:** Bash — no LLM · **Trigger:** `/close`
 
 ### Behavior
 
@@ -124,5 +124,5 @@ Full teardown of a pipeline and all associated work.
 | The issue itself | Closed |
 
 <Aside type="caution">
-`/quack close` is destructive — deleted branches cannot be easily recovered. Use `/quack revert` if you only want to undo the plan while keeping the issue open.
+`/close` is destructive — deleted branches cannot be easily recovered. Use `/revert` if you only want to undo the plan while keeping the issue open.
 </Aside>

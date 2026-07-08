@@ -24,7 +24,7 @@ Make sure you've completed [Installation](/getting-started/installation) and the
 2. **Comment on it:**
 
    ```
-   /quack execute
+   /execute
    ```
 
 3. **Watch the status comment.** The bot posts one status comment per agent run and edits it in place. First you'll see the Engineer delegate:
@@ -61,16 +61,16 @@ Same pipeline, with you reviewing between stages:
 
 <Steps>
 
-1. `/quack architect` — review the design in the issue body; edit anything you want to steer. Re-running the Architect **revises** rather than rewrites, and never touches the plan zone.
+1. `/architect` — review the design in the issue body; edit anything you want to steer. Re-running the Architect **revises** rather than rewrites, and never touches the plan zone.
 
-2. `/quack engineer` — review the tasks and waves. Re-running enters [revision mode](/agents/engineer#revision-mode) (existing tasks preserved by number). If the design was insufficient, the Engineer posts blocking questions instead of guessing — answer them and re-run.
+2. `/engineer` — review the tasks and waves. Re-running enters [revision mode](/agents/engineer#revision-mode) (existing tasks preserved by number). If the design was insufficient, the Engineer posts blocking questions instead of guessing — answer them and re-run.
 
-3. `/quack execute` — the Maestro takes it from here, exactly as in Path A.
+3. `/execute` — the Maestro takes it from here, exactly as in Path A.
 
 </Steps>
 
 <Aside type="tip">
-You can also chain stages with explicit stops: `/quack architect #auto:engineer` designs and plans, then waits for you before any code is written. See [Chaining & overrides](/guides/chaining-and-overrides).
+You can also chain stages with explicit stops: `/architect #auto:engineer` designs and plans, then waits for you before any code is written. See [Chaining & overrides](/guides/chaining-and-overrides).
 </Aside>
 
 ## If something fails
@@ -78,12 +78,12 @@ You can also chain stages with explicit stops: `/quack architect #auto:engineer`
 Failures never end as a silent red X: the status comment flips to ⚠️ and a categorized failure report is posted with a link to the run logs and the exact retry command. The usual fix is:
 
 ```
-/quack fix
+/fix
 ```
 
 on the failed **task** issue — it resumes from any preserved partial work. Full details in [When things fail](/guides/when-things-fail).
 
 ## Cleaning up
 
-- `/quack revert` — undo the planning: closes task issues, restores your original issue body, deletes bot comments.
-- `/quack close` — full teardown: closes tasks and PRs, deletes branches, closes the issue.
+- `/revert` — undo the planning: closes task issues, restores your original issue body, deletes bot comments.
+- `/close` — full teardown: closes tasks and PRs, deletes branches, closes the issue.

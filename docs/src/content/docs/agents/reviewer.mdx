@@ -7,7 +7,7 @@ import { Aside } from '@astrojs/starlight/components';
 import Mermaid from '../../../components/Mermaid.astro';
 
 ```
-/quack review
+/review
 ```
 
 The Reviewer judges whether an **already-implemented** pull request actually satisfies the design and task it was built for. It posts a real GitHub PR review with a verdict and file-level findings — but it is strictly **read-only**: it never edits code, never runs `git`/`gh` write commands, and never merges anything.
@@ -34,7 +34,7 @@ flowchart LR
 
 | Event | Condition |
 |-------|-----------|
-| Issue comment | `/quack review` on the feature/bug issue, or directly on its pull request |
+| Issue comment | `/review` on the feature/bug issue, or directly on its pull request |
 | Workflow dispatch | `pr_number` or `issue_number` |
 
 There is **no** automatic trigger and **no** Definition-of-Ready cascade — the Reviewer sits outside the four-agent pipeline, run on demand once there's something to review.
@@ -81,13 +81,13 @@ The Reviewer is constrained on both sides:
 
 ## Where it sits
 
-The Reviewer runs **after** the pipeline (or a task) has already produced a PR — it's a post-execution gate you invoke explicitly with `/quack review`, not a stage the Maestro dispatches automatically. Like the [utility commands](/agents/utilities), it has no Definition-of-Ready cascade; unlike them, it does carry its own stage labels (`Review:reviewing` → `Review:done`/`Review:changes`) so review state is visible on the issue.
+The Reviewer runs **after** the pipeline (or a task) has already produced a PR — it's a post-execution gate you invoke explicitly with `/review`, not a stage the Maestro dispatches automatically. Like the [utility commands](/agents/utilities), it has no Definition-of-Ready cascade; unlike them, it does carry its own stage labels (`Review:reviewing` → `Review:done`/`Review:changes`) so review state is visible on the issue.
 
 ## Overrides
 
 ```
-/quack review model:opus effort:max turns:40
-/quack review #auto:close
+/review model:opus effort:max turns:40
+/review #auto:close
 ```
 
 See [Slash commands](/reference/slash-commands) for the full grammar.

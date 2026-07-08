@@ -31,7 +31,7 @@ flowchart LR
 | Event | Condition |
 |-------|-----------|
 | Workflow dispatch | `issue_number` + `base_branch` — dispatched by the Maestro |
-| Issue comment | `/quack execute` (or `run`/`work`) on a **Task** issue |
+| Issue comment | `/execute` (or `run`/`work`) on a **Task** issue |
 
 ## Definition of Ready
 
@@ -39,7 +39,7 @@ A task needs its **pipeline context** — the parent issue's branch to cut from 
 
 - Parent found, branch exists → proceeds against it.
 - Parent found, branch missing → posts 🔁 and **delegates to the Maestro on the parent**, which creates the branch and dispatches this task back in wave order.
-- No parent at all → standalone execution was retired: the pipeline guarantees a reviewed design and plan before code. The status comment tells you exactly what to run instead (`/quack architect #auto:engineer+execute` if this issue *is* the whole work item).
+- No parent at all → standalone execution was retired: the pipeline guarantees a reviewed design and plan before code. The status comment tells you exactly what to run instead (`/architect #auto:engineer+execute` if this issue *is* the whole work item).
 
 ## Behavior
 
@@ -53,7 +53,7 @@ A task needs its **pipeline context** — the parent issue's branch to cut from 
 
 ## When the turn limit hits
 
-If the LLM runs out of turns (`max_turns`), the Developer **preserves the work**: it commits `WIP:`, pushes the branch, and posts a `max_turns` failure report pointing at the preserved branch. `/quack fix` on the task resumes exactly from there. See [When things fail](/guides/when-things-fail).
+If the LLM runs out of turns (`max_turns`), the Developer **preserves the work**: it commits `WIP:`, pushes the branch, and posts a `max_turns` failure report pointing at the preserved branch. `/fix` on the task resumes exactly from there. See [When things fail](/guides/when-things-fail).
 
 ## Auto-merge policy
 
@@ -64,7 +64,7 @@ Task PRs merge into a pipeline branch that itself undergoes **human review** bef
 Overrides ride along from the triggering comment — on the wave path, the Maestro forwards them to every worker:
 
 ```
-/quack execute model:haiku effort:low turns:30
+/execute model:haiku effort:low turns:30
 ```
 
 <Aside type="tip">
