@@ -15,6 +15,9 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
       status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
       react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
       progress_labels::abort "$ISSUE_NUM" "Review:reviewing" 2>/dev/null || true; \
+      for _t in "${REVIEW_TARGETS[@]-}"; do \
+        [[ -n "$_t" && "$_t" != "$ISSUE_NUM" ]] && progress_labels::abort "$_t" "Review:reviewing" 2>/dev/null || true; \
+      done; \
       { [[ -n "${CHECK_RUN_ID:-}" ]] && git::conclude_check_run "$CHECK_RUN_ID" failure "Review failed" "The reviewer agent errored during preparation." 2>/dev/null; } || true; \
       touch /tmp/autoducks-pre-failed; \
       exit $_rc' ERR
@@ -83,6 +86,24 @@ else
   FEATURE_NUM="$ISSUE_NUM"
 fi
 
+# Mirror set: the feature/bug issue AND its PR both carry the Review label and a
+# status comment, so review state is visible from either surface (a user on the
+# PR must not re-trigger a review already running from the issue, and vice-versa).
+# De-duplicated, empties dropped. ISSUE_NUM is already painted above; add the
+# remaining distinct target(s).
+REVIEW_TARGETS=()
+for _t in "$FEATURE_NUM" "$PR_NUM"; do
+  [[ -n "$_t" ]] || continue
+  [[ " ${REVIEW_TARGETS[*]-} " == *" $_t "* ]] && continue
+  REVIEW_TARGETS+=("$_t")
+done
+
+for _t in "${REVIEW_TARGETS[@]}"; do
+  [[ "$_t" == "$ISSUE_NUM" ]] && continue   # already painted at the top
+  status_comment::start "$_t" 2>/dev/null || true
+  progress_labels::start "$_t" "Review:reviewing" "Review:done" 2>/dev/null || true
+done
+
 # ── Gather context for the LLM ──────────────────────────────────────────
 its::get_issue "$FEATURE_NUM" | jq -r '.title,.body' > /tmp/design-plan.md
 
@@ -123,10 +144,13 @@ fi
 
 # Share PR state with post.sh (separate GHA step — a fresh process).
 export PR_NUM PR_BASE PR_HEAD FEATURE_NUM CHECK_RUN_ID
+REVIEW_TARGETS_CSV=$(IFS=,; echo "${REVIEW_TARGETS[*]}")
+export REVIEW_TARGETS_CSV
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   echo "PR_NUM=$PR_NUM" >> "$GITHUB_ENV"
   echo "PR_BASE=$PR_BASE" >> "$GITHUB_ENV"
   echo "PR_HEAD=$PR_HEAD" >> "$GITHUB_ENV"
   echo "FEATURE_NUM=${FEATURE_NUM:-}" >> "$GITHUB_ENV"
   echo "CHECK_RUN_ID=${CHECK_RUN_ID:-}" >> "$GITHUB_ENV"
+  echo "REVIEW_TARGETS_CSV=$REVIEW_TARGETS_CSV" >> "$GITHUB_ENV"
 fi
