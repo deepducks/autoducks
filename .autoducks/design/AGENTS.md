@@ -7,15 +7,15 @@ This document is the canonical reference for the autoducks agent architecture: t
 ## Command surface
 
 ```shell
-/quack $trigger [model:$model] [effort:$effort] [turns:$turns] [#auto:$chain]
+/$trigger [model:$model] [effort:$effort] [turns:$turns] [#auto:$chain]
 ```
 
-- **`/quack`** — the slash-command prefix, configurable via `command` in `.autoducks/autoducks.json` (default `/quack`). Changing it requires re-baking the workflow guards with `scripts/update-triggers.sh`.
+- **`/`** — the slash-command namespace, configurable via `command` in `.autoducks/autoducks.json` (default `/quack`). Changing it requires re-baking the workflow guards with `scripts/update-triggers.sh`.
 - **`$trigger`** — a canonical verb (`architect`, `engineer`, `execute`, `fix`, `revert`, `close`), a built-in alias (`design`→architect, `tactics`→engineer, `run`/`work`→execute), or a per-team custom alias from `triggers.<agent>[]` in the config.
 - **`model:`** — model override (`opus`, `sonnet`, `haiku`, or a full `claude-*` id). Bare aliases (`opus`) also work positionally.
 - **`effort:`** — LLM effort override (`off`, `low`, `medium`, `high`, `max`). Bare aliases also work positionally. ("effort" follows the cross-provider convention — OpenAI `reasoning_effort`, Anthropic `output_config.effort`.)
 - **`turns:`** — `max_turns` override (1–1000). `turns=N`, `max-turns=N`, and `max_turns=N` are also accepted.
-- **`#auto:`** — agent chaining: `+`-separated verbs queued to run after this agent finishes, e.g. `/quack architect #auto:engineer+execute`. Verbs are deduplicated and capped at 5; a verb can appear at most once in a chain (loop protection).
+- **`#auto:`** — agent chaining: `+`-separated verbs queued to run after this agent finishes, e.g. `/architect #auto:engineer+execute`. Verbs are deduplicated and capped at 5; a verb can appear at most once in a chain (loop protection).
 
 All parsing lives in [`core/config/parse-directive.sh`](../core/config/parse-directive.sh); every downstream consumer sees canonical verbs.
 
@@ -25,7 +25,7 @@ All parsing lives in [`core/config/parse-directive.sh`](../core/config/parse-dir
 
 **Every trigger-based workflow — every agent listed below, and every future agent added to the pipeline — MUST call the Authorization Gate as its first step, before any LLM invocation, comment, reaction, branch, or PR.**
 
-The gate is the single choke point between an untrusted GitHub event (a `/quack …` comment on a public repo, a workflow dispatch) and a trusted action that spends the maintainer's LLM budget and mutates the repository.
+The gate is the single choke point between an untrusted GitHub event (a `/$trigger …` comment on a public repo, a workflow dispatch) and a trusted action that spends the maintainer's LLM budget and mutates the repository.
 
 - **Interface:** [`.autoducks/core/security/authorize.sh`](../core/security/authorize.sh) — run as the first workflow step. Non-zero exit (77) stops the workflow immediately.
 - **Inputs:** the actor's login and `authorAssociation`, the agent key (`architect`, `engineer`, `execute`, `fix`, `revert`, `close`, …), and the `security` block from `.autoducks/autoducks.json`.
@@ -81,7 +81,7 @@ flowchart TB
 | **Stage labels** | `Design:draft` → `Design:done` | `Tactics:crafting` → `Tactics:done` | `Work:orchestrating` → `Work:done` | `Work:coding` → `Work:done` |
 | **Definition of Done** | structured design in the body; type/label `Feature` or `Bug` | plan + subtasks created/linked | all subtasks closed, final PR ready | task PR merged into the pipeline branch; task closed |
 
-The same `execute` comment is claimed by exactly **one** workflow via label/type routing (the user never has to know which): Task issue → Developer; `Tactics:done` → Maestro; anything else → Engineer (whose DoR guard cascades to the Architect when the design is missing). A raw `/quack execute` on a fresh issue therefore runs the whole pipeline: Architect → Engineer → Maestro → Developers.
+The same `execute` comment is claimed by exactly **one** workflow via label/type routing (the user never has to know which): Task issue → Developer; `Tactics:done` → Maestro; anything else → Engineer (whose DoR guard cascades to the Architect when the design is missing). A raw `/execute` on a fresh issue therefore runs the whole pipeline: Architect → Engineer → Maestro → Developers.
 
 ### Architect (design layer)
 
@@ -120,7 +120,7 @@ The Engineer is **pure ITS** — it never touches git (D7).
 3. **[AGENT]** Implements the task spec (never runs git/gh itself); writes `/tmp/work-summary.md`.
 4. Opens the task PR into the pipeline branch (`fixes #N` + Implementation Summary) and **auto-merges** it (adaptive method: `auto` probes merge/squash/rebase; 3 attempts with rebase in between; conflicts → `notify_conflict`).
 5. Closes the task explicitly (sub-PR merges don't fire GitHub's auto-close), `Work:coding` → `Work:done`, assigns the command author.
-6. On `max_turns` exhaustion: commits `WIP:`, pushes the branch, and reports it — `/quack fix` resumes from the preserved branch.
+6. On `max_turns` exhaustion: commits `WIP:`, pushes the branch, and reports it — `/fix` resumes from the preserved branch.
 
 > **Auto-merge policy:** task PRs merge into a pipeline branch that itself undergoes human review before reaching `integration_branch`. Manually-dispatched tasks against the default branch are **not** auto-merged.
 
