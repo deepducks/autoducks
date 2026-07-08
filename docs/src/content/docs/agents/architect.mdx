@@ -51,11 +51,16 @@ This is why the pipeline can require a design for every issue without punishing 
 ## Behavior
 
 1. Reacts 👀, posts the status comment, applies `Design:draft`.
-2. If the body already has a **tactical zone** (`<!-- autoducks:tactical:begin/end -->`), it is preserved byte-for-byte; malformed markers abort loudly with restore instructions.
-3. **[LLM]** Explores the repository (read-only) and writes the design with sections: *Problem Statement, Proposed Solution, Technical Design, Dependencies, Constraints, Out of Scope*. Classifies the issue as `Feature` or `Bug`.
-4. Publishes the design zone (+ preserved tactical zone) to the issue body.
-5. Sets the native issue type and the label to `Feature` or `Bug` (the label is route-critical everywhere; the native type is best-effort, org-only). Removes `Draft` if present.
-6. `Design:draft` → `Design:done`; assigns the command author (who owns the next action); edits the status comment to ✅ with the next step; continues the `#auto:` chain if one is queued.
+2. **Delivery-phase lock**: if delivery has already started — a `Work:*` label is present, or the pipeline branch already exists — the run is refused with a comment pointing at `/quack revert` (or `/quack close`) as the way back to the discovery phase. Nothing else runs.
+3. If the body already has a **tactical zone** (`<!-- autoducks:tactical:begin/end -->`), it is **stripped** — not preserved — with a warning comment explaining that the plan is stale now that the design is being revised; malformed markers abort loudly with restore instructions instead.
+4. **[LLM]** Explores the repository (read-only) and writes the design with sections: *Problem Statement, Proposed Solution, Technical Design, Dependencies, Constraints, Out of Scope*. Classifies the issue as `Feature` or `Bug`.
+5. Publishes the design zone to the issue body.
+6. Sets the native issue type and the label to `Feature` or `Bug` (the label is route-critical everywhere; the native type is best-effort, org-only). Removes `Draft` if present.
+7. `Design:draft` → `Design:done`; assigns the command author (who owns the next action); edits the status comment to ✅ with the next step; continues the `#auto:` chain if one is queued.
+
+<Aside type="caution">
+The Architect only runs while the issue is still in the discovery phase. Once the Engineer has planned it and delivery has started (`Work:*` label, or the pipeline branch exists), re-running the Architect is refused — run `/quack revert` (keep the issue, undo the plan) or `/quack close` (full teardown) first, then re-run.
+</Aside>
 
 ## Bug classification
 
@@ -63,7 +68,7 @@ This is why the pipeline can require a design for every issue without punishing 
 
 ## Output
 
-- **Issue body** holds the full design (tactical zone preserved if present)
+- **Issue body** holds the full design (tactical zone stripped, with a warning, if one was present)
 - **Type + label** set to `Feature` or `Bug`; `Draft` removed
 - **`Design:done`** applied — the Engineer's Definition of Ready
 - **Assignee** = whoever ran the command
