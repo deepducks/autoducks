@@ -1,14 +1,14 @@
 # Security Guidelines
 
 This file is a **copyable template**. It lives at `.autoducks/security-guidelines.md`
-and is read by autoducks agents (Architect, Engineer, Developer, Fix, Reviewer)
-as project-specific security context in addition to their built-in behavior.
+and is read by the autoducks **Reviewer** agent (currently the sole consumer)
+as project-specific security context in addition to its built-in behavior.
 
-If your repo's config points `security_guidelines_path` (or equivalent) at a
-different file, these rules travel with that path instead — copy this file
-there, adapt the specifics, and delete what doesn't apply. Nothing else in the
-repo needs to change for these rules to take effect: each rule below is
-self-contained and states the requirement, the reason, and how to check it.
+If your repo's config points `review.security_guidelines` at a different
+file, these rules travel with that path instead — copy this file there, adapt
+the specifics, and delete what doesn't apply. Nothing else in the repo needs
+to change for these rules to take effect: each rule below is self-contained
+and states the requirement, the reason, and how to check it.
 
 Every rule in this document is a **hard requirement** for code proposed or
 merged by an autoducks agent. A change that violates one of these rules should
