@@ -96,6 +96,13 @@ git::get_pr_diff "$PR_NUM" > /tmp/pr-diff.patch
   gh pr view "$PR_NUM" --repo "$REPO" --json files --jq '.files[].path' | sed 's/^/- /'
 } > /tmp/pr-meta.md
 
+# ── Optional repository security guidelines ────────────────────────────
+: > /tmp/security-guidelines.md
+_guidelines="${AUTODUCKS_REVIEW_SECURITY_GUIDELINES:-.autoducks/security-guidelines.md}"
+if [[ -n "$_guidelines" && -f "$_guidelines" ]]; then
+  cat "$_guidelines" > /tmp/security-guidelines.md
+fi
+
 # ── Nothing to review: empty diff or the PR is no longer open ──────────
 if [[ ! -s /tmp/pr-diff.patch ]]; then
   skip_review "PR #$PR_NUM has an empty diff."
