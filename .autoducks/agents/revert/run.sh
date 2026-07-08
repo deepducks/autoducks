@@ -9,8 +9,10 @@ FEATURE="${FEATURE_ISSUE:?FEATURE_ISSUE env var required}"
 
 react_to_comment "${COMMENT_ID:-}" "eyes"
 
-# Get issue body and extract task numbers
-ISSUE_BODY=$(its::get_issue "$FEATURE" | jq -r '.body')
+# Get issue body/labels and extract task numbers
+ISSUE_DATA=$(its::get_issue "$FEATURE")
+ISSUE_BODY=$(echo "$ISSUE_DATA" | jq -r '.body')
+ISSUE_LABELS=$(echo "$ISSUE_DATA" | jq -r '.labels[]')
 YAML_BLOCK=$(echo "$ISSUE_BODY" | awk '/^```yaml[[:space:]]*$/{flag=1;next}/^```[[:space:]]*$/{flag=0}flag')
 
 TASK_NUMBERS=()
@@ -20,18 +22,41 @@ if [[ -n "$YAML_BLOCK" ]]; then
   done < <(echo "$YAML_BLOCK" | yq '.waves[].tasks[]' 2>/dev/null | grep -E '^[0-9]+$')
 fi
 
-# Close task issues
-for t in "${TASK_NUMBERS[@]:-}"; do
-  its::close_issue "$t" "Reverted by \`${AUTODUCKS_COMMAND} revert\` on #$FEATURE" "not_planned" 2>/dev/null || echo "::warning::Could not close #$t"
+# Labels applied by the pipeline (current taxonomy + legacy pre-rename names,
+# so revert also cleans up issues created by older installs).
+PROGRESS_LABELS=(draft "Design:draft" "Design:done" "Tactics:crafting" "Tactics:done" \
+                  "Work:orchestrating" "Work:coding" "Work:done" \
+                  "Spec:draft" "Spec:plan" "Tactics:ready" "Work:progress" \
+                  "Ready" "Tactics:single")
+
+HAS_PROGRESS_LABEL=0
+for lbl in "${PROGRESS_LABELS[@]}"; do
+  if echo "$ISSUE_LABELS" | grep -qxF "$lbl"; then
+    HAS_PROGRESS_LABEL=1
+    break
+  fi
 done
 
-# Remove labels (current taxonomy + legacy pre-rename labels, so revert
-# cleans up issues created by older installs too)
-its::remove_label "$FEATURE" "draft" 2>/dev/null || true
-for lbl in "Design:draft" "Design:done" "Tactics:crafting" "Tactics:done" \
-           "Work:orchestrating" "Work:coding" "Work:done" \
-           "Spec:draft" "Spec:plan" "Tactics:ready" "Work:progress" \
-           "Ready" "Tactics:single"; do
+BOT_COMMENT_IDS=$(its::list_comments "$FEATURE" | jq -r '.[] | select(.author == "github-actions[bot]" or .author == "github-actions") | .id')
+
+# Already reverted (or never automated): bail here, before the body-restore
+# step below picks the *last* non-bot edit as "the original" body. If a
+# human edits the issue after a revert already ran, that edit becomes the
+# new "last" one, and re-running restore would wrongly treat that
+# post-revert edit as the pre-automation body.
+if [[ "$HAS_PROGRESS_LABEL" -eq 0 && -z "$BOT_COMMENT_IDS" ]]; then
+  its::comment_issue "$FEATURE" "Nothing to revert — no progress labels or bot comments remain." 2>/dev/null || true
+  react_to_comment "${COMMENT_ID:-}" "+1"
+  exit 0
+fi
+
+# Close task issues
+for t in "${TASK_NUMBERS[@]:-}"; do
+  its::close_issue "$t" "Reverted by \`${AUTODUCKS_COMMAND} revert\` on #$FEATURE" "not_planned" 2>/dev/null || echo "::debug::Could not close #$t (likely already closed)"
+done
+
+# Remove labels
+for lbl in "${PROGRESS_LABELS[@]}"; do
   its::remove_label "$FEATURE" "$lbl" 2>/dev/null || true
 done
 
@@ -53,9 +78,8 @@ if [[ -n "$ORIGINAL_BODY" ]]; then
 fi
 
 # Delete bot comments
-COMMENT_IDS=$(its::list_comments "$FEATURE" | jq -r '.[] | select(.author == "github-actions[bot]" or .author == "github-actions") | .id')
 while IFS= read -r cid; do
   [[ -n "$cid" ]] && its::delete_comment "$cid" 2>/dev/null || true
-done <<< "$COMMENT_IDS"
+done <<< "$BOT_COMMENT_IDS"
 
 react_to_comment "${COMMENT_ID:-}" "+1"
