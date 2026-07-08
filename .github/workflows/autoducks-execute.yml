@@ -20,6 +20,10 @@ on:
         required: false
         type: string
         default: ''
+      max_turns:
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -81,6 +85,7 @@ jobs:
             echo "base_branch=${{ inputs.base_branch }}" >> "$GITHUB_OUTPUT"
             echo "model=${{ inputs.model }}" >> "$GITHUB_OUTPUT"
             echo "reasoning=${{ inputs.reasoning }}" >> "$GITHUB_OUTPUT"
+            echo "max_turns=${{ inputs.max_turns }}" >> "$GITHUB_OUTPUT"
           else
             echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
             echo "base_branch=main" >> "$GITHUB_OUTPUT"
@@ -107,6 +112,7 @@ jobs:
           allowed_tools: "Read,Write,Edit,Bash"
           model: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
           reasoning: ${{ steps.ctx.outputs.reasoning || steps.agent.outputs.reasoning }}
+          max_turns: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       - name: Post-execution
@@ -120,4 +126,5 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           MODEL: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
           REASONING: ${{ steps.ctx.outputs.reasoning || steps.agent.outputs.reasoning }}
+          MAX_TURNS: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}

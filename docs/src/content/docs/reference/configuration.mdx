@@ -19,6 +19,7 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
   "defaults": {
     "model": "claude-sonnet-4-6",
     "reasoning": "high",
+    "max_turns": 50,
     "base_branch": "main",
     "merge_method": "auto"
   }
@@ -81,6 +82,14 @@ Reasoning effort level for LLM agents.
 | `medium` | Balanced |
 | `high` | Slower, more thorough (default) |
 
+### `defaults.max_turns`
+
+Maximum number of agentic turns an LLM agent may take before its run is stopped.
+
+**Default:** `50`
+
+Unlike `model` and `reasoning`, this key has no baked-in value in `defaults` — it's optional at every config layer. If it's omitted from the global config, the per-agent `defaults.json`, *and* the inline directive, the Claude provider action itself falls back to `50`.
+
 ### `defaults.base_branch`
 
 The branch that feature branches and orphan task branches are created from, and the branch that the final feature PR targets.
@@ -115,16 +124,20 @@ Each agent can also have its own `defaults.json` in `.autoducks/agents/{agent}/d
 ```json
 {
   "model": "claude-sonnet-4-6",
-  "reasoning": "high"
+  "reasoning": "high",
+  "max_turns": 50
 }
 ```
 
 Agent-level defaults override the global defaults. Directive arguments in slash commands override agent-level defaults.
 
 **Priority (highest to lowest):**
-1. Directive argument in comment (`--model`, `--reasoning`)
+1. Directive argument in comment (`--model`, `--reasoning`, `turns=<n>`)
 2. Agent-level `defaults.json`
 3. Global `.autoducks/autoducks.json`
+4. Provider action default — applies only to `max_turns` (`50`), since `model` and `reasoning` always have a value by the time they reach step 3
+
+Omitting `max_turns` from every layer above still yields a working run: it just resolves to the provider action's default of `50`.
 
 ## Security
 
