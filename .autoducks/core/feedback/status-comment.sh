@@ -51,6 +51,17 @@ status_comment::start() {
   return 0
 }
 
+# status_comment::note ISSUE_NUM DETAILS
+# Appends a note to the still-running status comment without changing its
+# headline (e.g. resuming a preserved branch instead of cutting a new one).
+status_comment::note() {
+  local issue_id="$1" details="$2"
+  local label link
+  label=$(status_comment::_label)
+  link=$(status_comment::_run_link)
+  status_comment::_edit "$issue_id" "<img src=\"${AUTODUCKS_STATUS_GIF}\" width=\"24\" alt=\"Running...\" /> **\`${label}\`**: running on ${link}" "$details"
+}
+
 # status_comment::_edit ISSUE_NUM HEADLINE [DETAILS]
 status_comment::_edit() {
   local issue_id="$1" headline="$2" details="${3:-}"
