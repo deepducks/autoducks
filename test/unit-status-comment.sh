@@ -40,6 +40,7 @@ grep -q 'Architect' "$LOG" && pass "friendly agent label used" || fail "label mi
 grep -q 'running on' "$LOG" && pass "running headline present" || fail "headline missing"
 grep -q 'actions/runs/999' "$LOG" && pass "workflow run link present" || fail "run link missing"
 grep -q 'loading.gif' "$LOG" && pass "spinner gif referenced" || fail "gif missing"
+grep -q 'width="24"' "$LOG" && pass "spinner width is 24" || fail "spinner width missing/wrong"
 
 echo "── finish edits in place ──"
 reset
