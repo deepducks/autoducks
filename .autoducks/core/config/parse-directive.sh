@@ -18,6 +18,13 @@ set -euo pipefail
 #   auto_chain       — `+`-separated canonical verbs to run after this agent
 #                       finishes, from a `#auto:<verb>[+<verb>...]` token.
 #                       Verbs are alias-normalized, deduplicated, capped at 5.
+#   steering_prompt  — base64-encoded free-text remainder of the comment:
+#                       everything on the first directive line after the
+#                       verb and any leading recognized directive tokens
+#                       (model:/effort:/turns:/positional aliases/#auto:),
+#                       plus every subsequent line of the comment body,
+#                       verbatim. Empty (empty string, still base64 of
+#                       nothing) when the comment is directive-only.
 #
 # The slash-command prefix is configurable via `command` in autoducks.json
 # (default `/quack`). Command normalization: built-in synonyms
@@ -48,6 +55,8 @@ MODEL=""
 EFFORT=""
 MAX_TURNS=""
 AUTO_CHAIN=""
+STEERING_LEFTOVER=()
+TRAILING_BODY=""
 
 # ── Verb normalization helpers ───────────────────────────────────────
 # Built-in synonyms → canonical verb. Custom aliases (config `triggers.<agent>[]`)
@@ -77,6 +86,27 @@ normalize_verb() {
 is_canonical_verb() {
   case "$1" in
     architect|engineer|execute|fix|revert|close|review) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# ── Steering-prompt token classifier ─────────────────────────────────
+# Mirrors the recognized-token forms matched by the directive-token loop
+# below, without mutating any state. Used only to decide which leading
+# tokens on the directive line are directive syntax (and so stripped from
+# the steering prompt) versus free-text prose (kept verbatim).
+is_directive_token() {
+  local tok="$1" _lc _t
+  _lc=$(echo "$tok" | tr '[:upper:]' '[:lower:]')
+  [[ "$_lc" =~ ^#auto:(.+)$ ]] && return 0
+  [[ "$_lc" =~ ^model:(.+)$ ]] && return 0
+  [[ "$_lc" =~ ^effort:(.+)$ ]] && return 0
+  [[ "$_lc" =~ ^turns:([0-9]+)$ ]] && return 0
+  _t=$(echo "$_lc" | tr -d ',.!?:;#')
+  case "$_t" in
+    opus|sonnet|haiku) return 0 ;;
+    off|none|no-think|low|med|medium|high|max|ultra|ultrathink) return 0 ;;
+    turns=*|max-turns=*|max_turns=*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -164,6 +194,24 @@ if [[ -n "$DIRECTIVE" ]]; then
         [[ "$_v" =~ ^[0-9]+$ ]] && (( _v > 0 && _v <= 1000 )) && MAX_TURNS="$_v" ;;
     esac
   done
+
+  # ── Steering prompt: capture the free-text remainder ────────────────
+  # Strip a *leading run* of recognized directive tokens (verb already
+  # removed via TOKENS[1]); the first unrecognized token flips into
+  # "prose" mode, after which every token — even one that looks like a
+  # model:/effort:/turns: token — is kept verbatim, untouched.
+  _in_directive_zone=1
+  for tok in "${TOKENS[@]:2}"; do
+    if [[ "$_in_directive_zone" -eq 1 ]] && is_directive_token "$tok"; then
+      continue
+    fi
+    _in_directive_zone=0
+    STEERING_LEFTOVER+=("$tok")
+  done
+
+  _DIRECTIVE_LINE_NUM=$(printf '%s\n' "$BODY" \
+    | grep -nE "^${COMMAND_PREFIX}[[:space:]]+[^[:space:]]+.*" | head -1 | cut -d: -f1)
+  TRAILING_BODY=$(printf '%s\n' "$BODY" | tail -n +"$((_DIRECTIVE_LINE_NUM + 1))")
 fi
 
 # ── Map effort level → think phrase ──────────────────────────────────
@@ -177,6 +225,27 @@ case "$EFFORT" in
   max)    THINK_PHRASE="Ultrathink — take extensive time to reason before writing." ;;
 esac
 
+# ── Assemble steering prompt: leftover directive-line tokens + trailing
+# body lines, verbatim, trimmed of surrounding whitespace, then
+# base64-encoded to a single line so it survives the $GITHUB_OUTPUT
+# step-output channel unmangled.
+STEERING_LINE=""
+[[ ${#STEERING_LEFTOVER[@]} -gt 0 ]] && STEERING_LINE="${STEERING_LEFTOVER[*]}"
+
+STEERING_PROMPT=""
+if [[ -n "$STEERING_LINE" && -n "$TRAILING_BODY" ]]; then
+  STEERING_PROMPT="${STEERING_LINE}"$'\n'"${TRAILING_BODY}"
+elif [[ -n "$STEERING_LINE" ]]; then
+  STEERING_PROMPT="$STEERING_LINE"
+elif [[ -n "$TRAILING_BODY" ]]; then
+  STEERING_PROMPT="$TRAILING_BODY"
+fi
+
+STEERING_PROMPT="${STEERING_PROMPT#"${STEERING_PROMPT%%[![:space:]]*}"}"
+STEERING_PROMPT="${STEERING_PROMPT%"${STEERING_PROMPT##*[![:space:]]}"}"
+
+STEERING_PROMPT_B64=$(printf '%s' "$STEERING_PROMPT" | base64 | tr -d '\n')
+
 echo "command=$COMMAND"
 echo "original_command=$ORIGINAL_COMMAND"
 echo "model=$MODEL"
@@ -184,3 +253,4 @@ echo "effort=$EFFORT"
 echo "think_phrase=$THINK_PHRASE"
 echo "max_turns=$MAX_TURNS"
 echo "auto_chain=$AUTO_CHAIN"
+echo "steering_prompt=$STEERING_PROMPT_B64"
