@@ -131,7 +131,7 @@ jobs:
         uses: ./.autoducks/providers/llm/claude
         with:
           prompt_file: .autoducks/agents/product/prompt.md
-          allowed_tools: "Read,Grep,Glob,Bash(read-only)"
+          allowed_tools: "Read,Grep,Glob,Write,Bash(read-only)"
           model: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
           effort: ${{ steps.ctx.outputs.effort || steps.agent.outputs.effort }}
           max_turns: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
