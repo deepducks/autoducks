@@ -65,7 +65,7 @@ if ! echo "$ISSUE_LABELS" | grep -qx 'Tactics:done'; then
     react_to_comment "${COMMENT_ID:-}" "+1" 2>/dev/null || true
     exit 0
   fi
-  its::comment_issue "$FEATURE" "❌ \`${AUTODUCKS_COMMAND} execute\`: issue is not ready (missing \`Tactics:done\`) and the Engineer could not be auto-dispatched (chain loop or depth limit). Run \`${AUTODUCKS_COMMAND} engineer\` manually, then retry."
+  its::comment_issue "$FEATURE" "❌ \`$(autoducks_command_for execute)\`: issue is not ready (missing \`Tactics:done\`) and the Engineer could not be auto-dispatched (chain loop or depth limit). Run \`$(autoducks_command_for engineer)\` manually, then retry."
   _AUTODUCKS_NOTIFIED=1
   status_comment::fail "$FEATURE" 2>/dev/null || true
   react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true
@@ -281,7 +281,7 @@ $(echo -e "$WORKLOG")"
 Every task across all $TOTAL_WAVES waves has merged into the feature branch and
 the PR is ready.
 
-**Next:** review and merge the PR to ship, or comment \`${AUTODUCKS_COMMAND} close\`
+**Next:** review and merge the PR to ship, or comment \`$(autoducks_command_for close)\`
 to tear the pipeline artifacts down."
   else
     # Blocked — not all previous waves done

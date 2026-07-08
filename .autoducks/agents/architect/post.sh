@@ -39,7 +39,7 @@ if [[ -f /tmp/tactical-zone-preserved.flag ]]; then
   # Guard: flag set but content file vanished => lost state between steps.
   # An empty-but-present file is valid and must NOT trip this.
   if [[ ! -f /tmp/tactical-zone-preserved.md ]]; then
-    its::comment_issue "$ISSUE_NUM" "❌ Aborting \`${AUTODUCKS_COMMAND} architect\`: the preserved tactical zone went missing between steps. Publishing would wipe the tactical plan, so no changes were made. Re-run \`${AUTODUCKS_COMMAND} architect\`."
+    its::comment_issue "$ISSUE_NUM" "❌ Aborting \`$(autoducks_command_for architect)\`: the preserved tactical zone went missing between steps. Publishing would wipe the tactical plan, so no changes were made. Re-run \`$(autoducks_command_for architect)\`."
     status_comment::fail "$ISSUE_NUM"
     react_to_comment "$COMMENT_ID" "confused"
     progress_labels::abort "$ISSUE_NUM" "Design:draft"
@@ -89,7 +89,7 @@ The issue body now holds the full design — problem statement, proposed
 solution, technical design, dependencies, constraints, and out-of-scope notes.
 Review and edit anything you'd like to steer before planning.
 
-**Next:** run \`${AUTODUCKS_COMMAND} engineer\` to break the design into a tactical plan and task issues.
+**Next:** run \`$(autoducks_command_for engineer)\` to break the design into a tactical plan and task issues.
 
 _Ran with \`${MODEL:-unknown}\` at effort \`${EFFORT:-unknown}\`._"
 
