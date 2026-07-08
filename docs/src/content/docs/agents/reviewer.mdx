@@ -51,7 +51,7 @@ If no open PR is found, the diff is empty, or the PR is already closed/merged, t
 
 ## Behavior
 
-1. Reacts 👀, posts the status comment, applies `Review:reviewing`.
+1. Reacts 👀, posts the status comment, applies `Review:reviewing` — the label and status comment are mirrored to both the feature/bug issue and its PR.
 2. Resolves the target PR and the feature/bug issue it implements, then gathers context: the design and full issue body (`/tmp/design-plan.md`), every linked task's title and acceptance criteria (`/tmp/task-criteria.md`), the unified diff (`/tmp/pr-diff.patch`), and PR metadata (`/tmp/pr-meta.md`).
 3. **[LLM]** Explores the repository read-only (`Read`, `Grep`, `Glob`, read-only `Bash` — no write tools) and writes `/tmp/review.md`: a verdict line, a plan-conformance checklist against every acceptance criterion, scope/boundary notes, severity-ranked findings (`blocker`/`major`/`minor`/`nit`) with `file:line` citations, and a summary.
 4. Submits the review to the PR via the Git provider (`git::submit_pr_review`).
@@ -104,7 +104,7 @@ Both read the PR's reviews and comments directly — neither requires `/review` 
 
 ## Where it sits
 
-The Reviewer runs **after** the pipeline (or a task) has already produced a PR — it's a post-execution gate you invoke explicitly with `/review`, not a stage the Maestro dispatches automatically. Like the [utility commands](/agents/utilities), it has no Definition-of-Ready cascade; unlike them, it does carry its own stage labels (`Review:reviewing` → `Review:done`/`Review:changes`) so review state is visible on the issue.
+The Reviewer runs **after** the pipeline (or a task) has already produced a PR — it's a post-execution gate you invoke explicitly with `/review`, not a stage the Maestro dispatches automatically. Like the [utility commands](/agents/utilities), it has no Definition-of-Ready cascade; unlike them, it does carry its own stage labels (`Review:reviewing` → `Review:done`/`Review:changes`); the label and status comment are mirrored to both the feature/bug issue and its PR, so review state is visible on either.
 
 ## Overrides
 
