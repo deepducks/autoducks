@@ -18,6 +18,7 @@ source "$AUTODUCKS_ROOT/core/robustness/assert-changes.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/trigger-loop-closure.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/branch-prefix.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
+source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 
 # Reconstruct state from git (pre.sh exports don't persist across GHA steps)
 TASK_BRANCH=$(git rev-parse --abbrev-ref HEAD)
@@ -33,6 +34,8 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/nu
       react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
       progress_labels::abort "$ISSUE_NUM" "Work:coding" 2>/dev/null || true; \
       exit $_rc' ERR
+
+cancellation::handle "$ISSUE_NUM" "Work:coding"
 
 if [[ "${LLM_ERROR_SUBTYPE:-}" == "error_max_turns" ]]; then
   export AUTODUCKS_FAIL_CATEGORY="max_turns" AUTODUCKS_FAIL_PHASE="llm"

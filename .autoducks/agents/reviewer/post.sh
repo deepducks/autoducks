@@ -6,6 +6,7 @@ source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
+source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/dispatch-chain.sh"
 
 trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
@@ -22,6 +23,8 @@ if [[ -f /tmp/autoducks-pre-failed ]]; then
   rm -f /tmp/autoducks-pre-failed
   exit 0
 fi
+
+cancellation::handle "$ISSUE_NUM" "Review:reviewing" "${CHECK_RUN_ID:-}"
 
 # Check the review was produced
 if [[ ! -f /tmp/review.md ]]; then
@@ -44,13 +47,11 @@ if [[ -s /tmp/review-verdict ]]; then
   esac
 fi
 
-# `approve` is never published as a GitHub APPROVE event — the bot review is
-# informational, never a formal (required-check-counting) approval.
-if [[ "$VERDICT" == "request-changes" ]]; then
-  VERDICT_EVENT="REQUEST_CHANGES"
-else
-  VERDICT_EVENT="COMMENT"
-fi
+# Neither `approve` nor `request-changes` is published as its native GitHub
+# review event: agent-created PRs are authored by the same PAT identity, and
+# GitHub forbids APPROVE/REQUEST_CHANGES on your own PR. The blocking decision
+# lives in the Check-run below, which is the actual merge gate.
+VERDICT_EVENT="COMMENT"
 
 git::submit_pr_review "$PR_NUM" "$VERDICT_EVENT" /tmp/review.md
 

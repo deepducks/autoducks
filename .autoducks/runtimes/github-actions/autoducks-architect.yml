@@ -121,4 +121,5 @@ jobs:
           OVERRIDE_MODEL: ${{ steps.ctx.outputs.model }}
           OVERRIDE_EFFORT: ${{ steps.ctx.outputs.effort }}
           OVERRIDE_MAX_TURNS: ${{ steps.ctx.outputs.max_turns }}
+          JOB_STATUS: ${{ job.status }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}

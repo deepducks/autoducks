@@ -34,8 +34,32 @@ notify_failure() {
       retry="\`$(autoducks_command_for fix)\` (or refine the issue spec and re-run)"
       ;;
     scope-missing)
-      diagnosis="The agent did not produce the expected output file (spec / tactical plan)."
-      retry="re-run \`$(autoducks_command_for architect)\` or \`$(autoducks_command_for engineer)\`"
+      case "$agent" in
+        architect)
+          diagnosis="The agent did not produce the expected design spec."
+          retry="re-run \`$(autoducks_command_for architect)\`"
+          ;;
+        engineer)
+          diagnosis="The agent did not produce the expected tactical plan."
+          retry="re-run \`$(autoducks_command_for engineer)\`"
+          ;;
+        reviewer)
+          diagnosis="The agent did not produce the expected review."
+          retry="re-run \`$(autoducks_command_for review)\`"
+          ;;
+        defer)
+          diagnosis="The agent did not produce the expected follow-up issue."
+          retry="re-run \`$(autoducks_command_for defer)\`"
+          ;;
+        rework)
+          diagnosis="The agent did not produce the expected rework task."
+          retry="re-run \`$(autoducks_command_for rework)\`"
+          ;;
+        *)
+          diagnosis="The agent did not produce the expected output file."
+          retry="re-run \`$(autoducks_command_for fix)\`"
+          ;;
+      esac
       ;;
     parse)
       diagnosis="The tactical plan could not be parsed into tasks."

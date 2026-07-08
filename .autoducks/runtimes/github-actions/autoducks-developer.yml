@@ -141,4 +141,5 @@ jobs:
           MODEL: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
           EFFORT: ${{ steps.ctx.outputs.effort || steps.agent.outputs.effort }}
           MAX_TURNS: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
+          JOB_STATUS: ${{ job.status }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}

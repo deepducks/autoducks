@@ -6,6 +6,7 @@ source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
+source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/reconcile-tasks.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/parse-waves.sh"
@@ -24,6 +25,16 @@ if [[ -f /tmp/autoducks-pre-failed ]]; then
   rm -f /tmp/autoducks-pre-failed
   exit 0
 fi
+
+# The in-progress label lives on FEATURE_NUM (rework tracks progress on the
+# feature, not on the rework command's own issue), so clear it directly
+# before handing off to the shared helper, which posts the neutral status
+# comment on ISSUE_NUM (the rework issue) and exits — pass an empty label so
+# it doesn't also try (and fail) to abort a label on ISSUE_NUM.
+if [[ "${JOB_STATUS:-}" == "cancelled" ]]; then
+  progress_labels::abort "$FEATURE_NUM" "Work:orchestrating" 2>/dev/null || true
+fi
+cancellation::handle "$ISSUE_NUM" ""
 
 # Nothing actionable — the LLM judged the feedback already resolved or
 # purely informational. Green finish: no sub-issue, no draft flip, no

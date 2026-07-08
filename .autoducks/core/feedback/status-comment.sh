@@ -97,6 +97,17 @@ status_comment::fail() {
   status_comment::_edit "$issue_id" "⚠️ **\`${label}\`**: failed on ${link}" "$details"
 }
 
+# status_comment::cancel ISSUE_NUM [DETAILS]
+# Neutral terminal state for a run cancelled mid-flight — no ⚠️/😕, since
+# cancellation isn't a failure of the agent's work.
+status_comment::cancel() {
+  local issue_id="$1" details="${2:-The run was cancelled before it finished.}"
+  local label link
+  label=$(status_comment::_label)
+  link=$(status_comment::_run_link)
+  status_comment::_edit "$issue_id" "🚫 **\`${label}\`**: cancelled on ${link}" "$details"
+}
+
 # status_comment::delegate ISSUE_NUM [DETAILS]
 # Used when a Definition-of-Ready guard hands the run off to a prerequisite
 # agent (auto-dispatch cascade) — the run itself did no agent work.
