@@ -10,6 +10,7 @@ source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
 # Reconstruct state from git (pre.sh exports don't persist across GHA steps)
 TASK_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+PR_BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_INTEGRATION_BRANCH}"
 BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
 FEATURE_NUM=""
 if [[ "$BASE_BRANCH" =~ ^feature/([0-9]+) ]]; then
@@ -34,7 +35,7 @@ ISSUE_TITLE=$(its::get_issue "$ISSUE_NUM" | jq -r '.title')
 PR_TITLE="Task #$ISSUE_NUM: $ISSUE_TITLE"
 
 # Create PR
-PR_NUM=$(git::create_pr "$TASK_BRANCH" "$BASE_BRANCH" "$PR_TITLE" "fixes #${ISSUE_NUM}")
+PR_NUM=$(git::create_pr "$TASK_BRANCH" "$PR_BASE_BRANCH" "$PR_TITLE" "fixes #${ISSUE_NUM}")
 
 # Append implementation summary to PR body, if the agent produced one
 if [[ -f /tmp/work-summary.md && -s /tmp/work-summary.md ]]; then
@@ -63,9 +64,9 @@ if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
       echo "Merge method not allowed on $REPO — aborting retries (see merge_method config)."
       break
     fi
-    echo "Merge attempt $attempt failed — rebasing onto $BASE_BRANCH..."
-    git fetch origin "$BASE_BRANCH"
-    if ! git rebase "origin/$BASE_BRANCH"; then
+    echo "Merge attempt $attempt failed — rebasing onto $PR_BASE_BRANCH..."
+    git fetch origin "$PR_BASE_BRANCH"
+    if ! git rebase "origin/$PR_BASE_BRANCH"; then
       echo "Rebase conflict on attempt $attempt — aborting"
       git rebase --abort 2>/dev/null || true
       break
@@ -109,7 +110,7 @@ else
   # Scenario A: orphan task, PR targets the base branch, awaits human review
   EXEC_MSG="✅ **Implementation complete.**
 
-PR #$PR_NUM is open against \`$BASE_BRANCH\` and is waiting for your review — it
+PR #$PR_NUM is open against \`$PR_BASE_BRANCH\` and is waiting for your review — it
 is **not** auto-merged.
 
 **Next:** review and merge PR #$PR_NUM, or comment \`/agents fix\` on this issue

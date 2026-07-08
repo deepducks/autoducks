@@ -9,6 +9,11 @@ react_to_comment "${COMMENT_ID:-}" "eyes"
 
 # Determine base branch and issue number
 # These come from the runtime as env vars: ISSUE_NUM, BASE_BRANCH
+# PR target — where the resulting PR will merge into (orphan tasks → integration branch)
+PR_BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_INTEGRATION_BRANCH}"
+# Cut-point — where the task branch is branched from. An explicitly-passed
+# BASE_BRANCH (wave dispatch) names a feature branch and IS the cut-point;
+# absent (orphan task) we cut from the clean upstream base, not integration.
 BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
 
 # If base branch is a feature branch, extract feature number
@@ -63,4 +68,4 @@ git checkout -b "$TASK_BRANCH"
 its::get_issue "$ISSUE_NUM" | jq -r '"# " + .title + "\n\n" + .body' > /tmp/task-spec.md
 
 # Export for post.sh
-export TASK_BRANCH BASE_BRANCH FEATURE_NUM
+export TASK_BRANCH BASE_BRANCH PR_BASE_BRANCH FEATURE_NUM
