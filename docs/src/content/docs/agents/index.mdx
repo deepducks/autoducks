@@ -58,9 +58,12 @@ So `/quack execute` on a fresh issue runs the whole pipeline: Architect → Engi
 
 | Command | Type | What it does |
 |---------|------|--------------|
+| [`/quack review`](/agents/reviewer) | LLM | Reviews a PR against its design and acceptance criteria — read-only, never merges |
 | [`/quack fix`](/agents/utilities#quack-fix) | LLM | Repairs a failed task run, resuming preserved partial work |
 | [`/quack revert`](/agents/utilities#quack-revert) | Bash | Undoes planning, restores the human-authored issue |
 | [`/quack close`](/agents/utilities#quack-close) | Bash | Full cleanup: closes issues, PRs, and deletes branches |
+
+The [Reviewer](/agents/reviewer) is a **post-execution gate**, not a pipeline stage: run it once a feature/bug PR exists to get a verdict (`approve`/`comment`/`request-changes`) and severity-ranked findings before you merge.
 
 ## LLM vs. bash
 
@@ -68,7 +71,7 @@ A deliberate design choice: **only agents that need reasoning use an LLM**. Orch
 
 | Needs LLM | Pure bash |
 |-----------|-----------|
-| Architect, Engineer, Developer, Fix | Maestro, Revert, Close |
+| Architect, Engineer, Developer, Reviewer, Fix | Maestro, Revert, Close |
 
 This makes wave progression fast, cheap (no API calls), and auditable.
 

@@ -1,0 +1,93 @@
+---
+title: Reviewer
+description: Reviews a pull request against its design and task acceptance criteria — read-only, never merges.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Mermaid from '../../../components/Mermaid.astro';
+
+```
+/quack review
+```
+
+The Reviewer judges whether an **already-implemented** pull request actually satisfies the design and task it was built for. It posts a real GitHub PR review with a verdict and file-level findings — but it is strictly **read-only**: it never edits code, never runs `git`/`gh` write commands, and never merges anything.
+
+**Type:** LLM (Claude) · **Scripts:** `.autoducks/agents/reviewer/{pre,post}.sh` · **Verb:** `review`
+
+<Mermaid chart={`
+flowchart LR
+    Triggers@{ shape: bolt, label: "Triggers" }
+    Reviewer["Reviewer"]
+    PR@{ shape: notch-rect, label: "PR review\\nverdict + findings\\nlabel: Review:done or Review:changes" }
+
+    Triggers --triggers--> Reviewer
+    Reviewer -- posts --> PR
+
+    class Triggers triggersOrange
+    class Reviewer reviewTeal
+
+    classDef triggersOrange fill:#ffe8d4,stroke:#d66a28,color:#d66a28
+    classDef reviewTeal fill:#d4f4f8,stroke:#0e8a9c,color:#0e8a9c
+`} />
+
+## Triggers
+
+| Event | Condition |
+|-------|-----------|
+| Issue comment | `/quack review` on the feature/bug issue, or directly on its pull request |
+| Workflow dispatch | `pr_number` or `issue_number` |
+
+There is **no** automatic trigger and **no** Definition-of-Ready cascade — the Reviewer sits outside the four-agent pipeline, run on demand once there's something to review.
+
+## Definition of Ready
+
+A **reviewable feature/bug PR must exist**. The Reviewer resolves the target PR itself:
+
+- Commented directly on a PR → reviews that PR.
+- Commented on the feature/bug issue → looks up the open pipeline PR for that issue's branch.
+
+If no open PR is found, the diff is empty, or the PR is already closed/merged, the run posts **"Nothing to review"**, clears the in-progress label, and exits green — this is not treated as a failure.
+
+## Behavior
+
+1. Reacts 👀, posts the status comment, applies `Review:reviewing`.
+2. Resolves the target PR and the feature/bug issue it implements, then gathers context: the design and full issue body (`/tmp/design-plan.md`), every linked task's title and acceptance criteria (`/tmp/task-criteria.md`), the unified diff (`/tmp/pr-diff.patch`), and PR metadata (`/tmp/pr-meta.md`).
+3. **[LLM]** Explores the repository read-only (`Read`, `Grep`, `Glob`, read-only `Bash` — no write tools) and writes `/tmp/review.md`: a verdict line, a plan-conformance checklist against every acceptance criterion, scope/boundary notes, severity-ranked findings (`blocker`/`major`/`minor`/`nit`) with `file:line` citations, and a summary.
+4. Submits the review to the PR via the Git provider (`git::submit_pr_review`).
+5. `Review:reviewing` → `Review:done` (verdict `approve` or `comment`) or `Review:changes` (verdict `request-changes`). Edits the status comment to ✅ with the next step; continues the `#auto:` chain if one is queued.
+
+## Output contract
+
+The LLM writes exactly one word to `/tmp/review-verdict`, which `post.sh` maps to a GitHub review event:
+
+| Verdict | Meaning | Label applied | GitHub review event |
+|---------|---------|----------------|----------------------|
+| `approve` | No findings above `nit`, every acceptance criterion `met` | `Review:done` | `COMMENT` |
+| `comment` | Only `minor`/`nit` findings, or a `partially met` criterion with nothing blocking | `Review:done` | `COMMENT` |
+| `request-changes` | At least one `blocker`/`major` finding, or any criterion `missing` | `Review:changes` | `REQUEST_CHANGES` |
+
+A missing or malformed verdict file falls back to `comment`, the conservative middle ground.
+
+<Aside type="caution">
+**`approve` is never published as a formal GitHub approval.** The bot review is always posted as `COMMENT` or `REQUEST_CHANGES` — never `APPROVE` — so it can never satisfy a required-reviewer check on its own. A human still has to approve and merge.
+</Aside>
+
+## Read-only, never-merge
+
+The Reviewer is constrained on both sides:
+
+- **Prompt-level:** the LLM's allowed tools are `Read,Grep,Glob,Write,Bash(read-only)` — no `Edit`, and `Bash` is restricted to read-only exploration. It may only `Write` to `/tmp/review.md` and `/tmp/review-verdict`.
+- **Script-level:** `pre.sh`/`post.sh` never check out a branch to modify, never commit, and never call a merge function — the only Git-provider write is posting the review itself.
+
+## Where it sits
+
+The Reviewer runs **after** the pipeline (or a task) has already produced a PR — it's a post-execution gate you invoke explicitly with `/quack review`, not a stage the Maestro dispatches automatically. Like the [utility commands](/agents/utilities), it has no Definition-of-Ready cascade; unlike them, it does carry its own stage labels (`Review:reviewing` → `Review:done`/`Review:changes`) so review state is visible on the issue.
+
+## Overrides
+
+```
+/quack review model:opus effort:max turns:40
+/quack review #auto:close
+```
+
+See [Slash commands](/reference/slash-commands) for the full grammar.
