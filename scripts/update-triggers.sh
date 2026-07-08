@@ -169,11 +169,21 @@ EOF
 # The Reviewer fires on comments on both issues and PRs, so its guard
 # deliberately omits the `pull_request == null` clause every other agent
 # carries — do NOT reuse render_simple for this reason.
+#
+# It also auto-fires when a final feature/fix PR is marked ready-for-review
+# (base = integration branch, so task PRs — which target a feature/|fix/
+# pipeline branch — are excluded here; pre.sh does the exact base check).
 render_reviewer() {
   local -a all=(review); mapfile -t c < <(read_custom review); all+=("${c[@]}")
   cat <<'EOF'
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.action == 'ready_for_review' &&
+       (startsWith(github.event.pull_request.head.ref, 'feature/') ||
+        startsWith(github.event.pull_request.head.ref, 'fix/')) &&
+       !startsWith(github.event.pull_request.base.ref, 'feature/') &&
+       !startsWith(github.event.pull_request.base.ref, 'fix/')) ||
       (github.event_name == 'issue_comment' &&
        github.event.comment.author_association != 'MANNEQUIN' &&
 EOF

@@ -83,6 +83,13 @@ fi
 export AUTODUCKS_MERGE_METHOD
 AUTODUCKS_MERGE_METHOD="$(echo "$_merged" | jq -r '.merge_method // "auto"')"
 
+# ── Reviewer required-check name ─────────────────────────────────────
+# Single source of truth shared by the reviewer (pre/post.sh) and
+# scripts/setup.sh, so the emitted Check-run name and the ruleset that
+# requires it can never drift apart.
+export AUTODUCKS_REVIEW_CHECK_NAME
+AUTODUCKS_REVIEW_CHECK_NAME="$(jq -r '.reviewer.check_name // "Autoducks: Reviewer"' "$_config")"
+
 # ── Source provider interfaces ──────────────────────────────────────
 source "$AUTODUCKS_ROOT/providers/its/interface.sh"
 source "$AUTODUCKS_ROOT/providers/git/interface.sh"

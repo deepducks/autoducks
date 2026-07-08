@@ -45,6 +45,8 @@ done
 #   git::get_pr_diff(pr_number)                       → unified diff on stdout
 #   git::submit_pr_review(pr_number, event, body_file) → event ∈ {COMMENT, REQUEST_CHANGES, APPROVE}
 #   git::list_pr_reviews(pr_number)                    → JSON array (reviews + inline thread comments)
+#   git::start_check_run(name, head_sha)              → check_run_id (status=in_progress)
+#   git::conclude_check_run(check_run_id, conclusion, title, summary)
 
 REQUIRED_FUNCTIONS=(
   "git::create_branch"
@@ -68,6 +70,8 @@ REQUIRED_FUNCTIONS=(
   "git::get_pr_diff"
   "git::submit_pr_review"
   "git::list_pr_reviews"
+  "git::start_check_run"
+  "git::conclude_check_run"
 )
 
 missing=0

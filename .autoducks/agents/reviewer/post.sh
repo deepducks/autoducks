@@ -12,6 +12,7 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
       status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
       react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
       progress_labels::abort "$ISSUE_NUM" "Review:reviewing" 2>/dev/null || true; \
+      { [[ -n "${CHECK_RUN_ID:-}" ]] && git::conclude_check_run "$CHECK_RUN_ID" failure "Review failed" "The reviewer agent errored before producing a verdict." 2>/dev/null; } || true; \
       exit $_rc' ERR
 
 # pre.sh has already posted its own comment (failure, or a benign "nothing
@@ -29,6 +30,7 @@ if [[ ! -f /tmp/review.md ]]; then
   status_comment::fail "$ISSUE_NUM"
   react_to_comment "${COMMENT_ID:-}" "confused"
   progress_labels::abort "$ISSUE_NUM" "Review:reviewing"
+  { [[ -n "${CHECK_RUN_ID:-}" ]] && git::conclude_check_run "$CHECK_RUN_ID" failure "Review incomplete" "The reviewer did not produce a review." 2>/dev/null; } || true
   exit 1
 fi
 
@@ -51,6 +53,17 @@ else
 fi
 
 git::submit_pr_review "$PR_NUM" "$VERDICT_EVENT" /tmp/review.md
+
+# Reflect the verdict on the required Check-run (created by pre.sh on final PRs
+# only; CHECK_RUN_ID is empty otherwise). Only `request-changes` blocks the
+# merge — `approve`/`comment` conclude success so the gate stays advisory.
+if [[ -n "${CHECK_RUN_ID:-}" ]]; then
+  if [[ "$VERDICT" == "request-changes" ]]; then
+    git::conclude_check_run "$CHECK_RUN_ID" failure "Reviewer: request changes" "The reviewer requested changes on PR #$PR_NUM." || true
+  else
+    git::conclude_check_run "$CHECK_RUN_ID" success "Reviewer: $VERDICT" "The reviewer did not block PR #$PR_NUM." || true
+  fi
+fi
 
 if [[ "$VERDICT" == "request-changes" ]]; then
   progress_labels::finish "$ISSUE_NUM" "Review:reviewing" "Review:changes"

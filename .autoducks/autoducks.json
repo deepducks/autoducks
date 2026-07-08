@@ -11,6 +11,10 @@
     "base_branch": "main",
     "merge_method": "auto"
   },
+  "reviewer": {
+    "required_check": false,
+    "check_name": "Autoducks: Reviewer"
+  },
   "triggers": {
     "architect": [],
     "engineer":  [],

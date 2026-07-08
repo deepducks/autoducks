@@ -22,6 +22,8 @@
 #   7. Issue types (Feature, Task) at the org level — reports if missing
 #   8. Public-repo security posture — advisory for public repos without a security block
 #   9. Runtime workflow sync — verifies .autoducks/runtimes match .github/workflows
+#  10. Reviewer required-check ruleset — when reviewer.required_check=true, requires
+#      the reviewer Check on the integration/base branch (needs repo admin)
 # =============================================================================
 
 set -euo pipefail
@@ -62,7 +64,7 @@ echo "=== Setup check for $REPO ==="
 echo ""
 
 # --- Check 1: gh CLI auth ---
-echo "[1/9] GitHub CLI authentication"
+echo "[1/10] GitHub CLI authentication"
 if gh auth status &>/dev/null; then
   pass "gh CLI is authenticated"
 else
@@ -72,7 +74,7 @@ fi
 echo ""
 
 # --- Check 2: Labels ---
-echo "[2/9] Required labels"
+echo "[2/10] Required labels"
 LABELS=("Feature|6F42C1|Orchestration feature issue"
         "Bug|D73A4A|Autoducks bug pipeline"
         "Task|1D76DB|Autoducks task issue"
@@ -99,7 +101,7 @@ done
 echo ""
 
 # --- Check 3: Secret ---
-echo "[3/9] Required secrets"
+echo "[3/10] Required secrets"
 if gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null | grep -qx "ANTHROPIC_API_KEY"; then
   pass "Secret ANTHROPIC_API_KEY is configured"
 else
@@ -111,7 +113,7 @@ fi
 echo ""
 
 # --- Check 4: Actions permissions ---
-echo "[4/9] Actions workflow permissions"
+echo "[4/10] Actions workflow permissions"
 PERMS=$(gh api "repos/$REPO/actions/permissions/workflow" --jq '.default_workflow_permissions + "|" + (.can_approve_pull_request_reviews | tostring)' 2>/dev/null || echo "")
 
 if [[ -z "$PERMS" ]]; then
@@ -127,7 +129,7 @@ fi
 echo ""
 
 # --- Check 5: Claude Code GitHub App ---
-echo "[5/9] Claude Code GitHub App"
+echo "[5/10] Claude Code GitHub App"
 # There is no public API to list installations on a repo without proper auth.
 # Best we can do is check if the workflows can authenticate — which only happens at runtime.
 manual "Verify the Claude Code GitHub App is installed on this repository
@@ -137,7 +139,7 @@ manual "Verify the Claude Code GitHub App is installed on this repository
 echo ""
 
 # --- Check 6: Sub-issues API availability ---
-echo "[6/9] Sub-issues API availability"
+echo "[6/10] Sub-issues API availability"
 # Probe against an arbitrary issue in the repo. If the repo has zero issues,
 # the check is inconclusive — report a soft manual item.
 FIRST_ISSUE=$(gh issue list $REPO_ARG --state all --limit 1 --json number \
@@ -167,7 +169,7 @@ echo ""
 # Issue types are an org-level feature. Workflows degrade gracefully if
 # types aren't configured — the type parameter is silently ignored by the
 # API. But without them, typed feature/task relationships don't render.
-echo "[7/9] Issue types (Feature, Task)"
+echo "[7/10] Issue types (Feature, Task)"
 ORG=$(echo "$REPO" | cut -d/ -f1)
 TYPES_JSON=$(gh api "orgs/$ORG/issue-types" 2>/dev/null || echo "")
 if [[ -z "$TYPES_JSON" ]]; then
@@ -196,7 +198,7 @@ echo ""
 # --- Check 8: Public-repo security ---
 VISIBILITY=$(gh repo view "$REPO" --json visibility --jq '.visibility' 2>/dev/null || echo "")
 if [[ "$VISIBILITY" == "PUBLIC" ]]; then
-  echo "[8/9] Public-repo security posture"
+  echo "[8/10] Public-repo security posture"
   HAS_SEC=$(jq -r '.security != null' .autoducks/autoducks.json 2>/dev/null || echo "false")
   if [[ "$HAS_SEC" == "true" ]]; then
     pass "security block present in .autoducks/autoducks.json"
@@ -209,7 +211,7 @@ if [[ "$VISIBILITY" == "PUBLIC" ]]; then
 fi
 
 # --- Check 9: Runtime sync ---
-echo "[9/9] Runtime workflow sync"
+echo "[9/10] Runtime workflow sync"
 SYNC_OK=true
 for runtime in .autoducks/runtimes/github-actions/autoducks-*.yml; do
   bn=$(basename "$runtime")
@@ -224,6 +226,54 @@ for runtime in .autoducks/runtimes/github-actions/autoducks-*.yml; do
 done
 if [[ "$SYNC_OK" == "true" ]]; then
   pass "All runtimes synced to .github/workflows/"
+fi
+echo ""
+
+# --- Check 10: Reviewer required-check ruleset ---
+# Opt-in (reviewer.required_check=true). Requires the reviewer's Check-run on
+# the integration/base branch so a request-changes verdict blocks the merge.
+# Uses the operator's own gh admin credentials (no stored PAT) and is idempotent.
+echo "[10/10] Reviewer required-check ruleset"
+REQUIRED_CHECK=$(jq -r '.reviewer.required_check // false' .autoducks/autoducks.json 2>/dev/null || echo "false")
+if [[ "$REQUIRED_CHECK" != "true" ]]; then
+  pass "Reviewer required-check disabled (reviewer.required_check=false) — nothing to enforce"
+else
+  CHECK_NAME=$(jq -r '.reviewer.check_name // "Autoducks: Reviewer"' .autoducks/autoducks.json 2>/dev/null)
+  GATE_BRANCH=$(jq -r '.defaults.integration_branch // .defaults.base_branch // "main"' .autoducks/autoducks.json 2>/dev/null)
+  RULESET_NAME="autoducks-reviewer-required"
+  PAYLOAD=$(jq -n \
+    --arg name "$RULESET_NAME" \
+    --arg ref "refs/heads/$GATE_BRANCH" \
+    --arg ctx "$CHECK_NAME" \
+    '{
+      name: $name,
+      target: "branch",
+      enforcement: "active",
+      conditions: { ref_name: { include: [$ref], exclude: [] } },
+      rules: [ {
+        type: "required_status_checks",
+        parameters: {
+          strict_required_status_checks_policy: false,
+          required_status_checks: [ { context: $ctx } ]
+        }
+      } ]
+    }')
+  EXISTING_ID=$(gh api "repos/$REPO/rulesets" --jq ".[] | select(.name==\"$RULESET_NAME\") | .id" 2>/dev/null | head -1 || echo "")
+  if [[ -n "$EXISTING_ID" ]]; then
+    if printf '%s' "$PAYLOAD" | gh api "repos/$REPO/rulesets/$EXISTING_ID" --method PUT --input - >/dev/null 2>&1; then
+      pass "Ruleset '$RULESET_NAME' updated — '$CHECK_NAME' required on '$GATE_BRANCH'"
+    else
+      manual "Could not update ruleset '$RULESET_NAME' (needs repo admin).
+Re-run setup.sh with an admin token, or set the '$CHECK_NAME' required check on '$GATE_BRANCH' via Settings → Rules."
+    fi
+  else
+    if printf '%s' "$PAYLOAD" | gh api "repos/$REPO/rulesets" --method POST --input - >/dev/null 2>&1; then
+      pass "Ruleset '$RULESET_NAME' created — '$CHECK_NAME' required on '$GATE_BRANCH'"
+    else
+      manual "Could not create the reviewer ruleset (needs repo admin).
+Require the '$CHECK_NAME' status check on '$GATE_BRANCH' via Settings → Rules, or re-run setup.sh with an admin token."
+    fi
+  fi
 fi
 echo ""
 
