@@ -86,6 +86,101 @@ grep -q "'/ship'" "$SCRATCH/.github/workflows/autoducks-developer.yml" \
 grep -q "'/mend'" "$SCRATCH/.github/workflows/autoducks-fix.yml" \
   && pass "fix custom alias in fix guard" || fail "mend missing"
 
+echo "── product guard idempotence ──"
+cp "$SCRATCH/.autoducks/runtimes/github-actions/autoducks-product.yml" "$SCRATCH/product-before.yml"
+run
+if diff "$SCRATCH/product-before.yml" "$SCRATCH/.autoducks/runtimes/github-actions/autoducks-product.yml" >/dev/null; then
+  pass "second run of autoducks-product.yml is byte-identical"
+else
+  fail "autoducks-product.yml changed on a no-op second run"
+fi
+if diff "$SCRATCH/.autoducks/runtimes/github-actions/autoducks-product.yml" \
+        "$SCRATCH/.github/workflows/autoducks-product.yml" >/dev/null; then
+  pass "autoducks-product.yml runtime and .github/workflows/ copies match"
+else
+  fail "autoducks-product.yml runtime/.github mirror out of sync"
+fi
+
+echo "── product custom aliases are baked into the product guard ──"
+python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+cfg["triggers"]["triage"] = ["scan"]
+cfg["triggers"]["merge"] = ["land"]
+json.dump(cfg, open(p, "w"), indent=2)
+EOF
+run
+grep -q "'/scan'" "$SCRATCH/.github/workflows/autoducks-product.yml" \
+  && pass "triage custom alias in product guard" || fail "scan missing in product guard"
+grep -q "'/land'" "$SCRATCH/.github/workflows/autoducks-product.yml" \
+  && pass "merge custom alias in product guard" || fail "land missing in product guard"
+
+echo "── product/merge alias collision with a built-in verb fails validation ──"
+python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+cfg["triggers"]["triage"] = []
+cfg["triggers"]["merge"] = []
+cfg["triggers"]["fix"] = ["triage"]
+json.dump(cfg, open(p, "w"), indent=2)
+EOF
+if run 2>/dev/null; then
+  fail "alias colliding with built-in 'triage' accepted"
+else
+  pass "alias colliding with built-in 'triage' rejected (hard error)"
+fi
+python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+cfg["triggers"]["fix"] = []
+json.dump(cfg, open(p, "w"), indent=2)
+EOF
+run
+
+echo "── product.schedule is baked into the workflow's schedule.cron ──"
+python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+cfg["product"]["schedule"] = "30 3 * * 1"
+json.dump(cfg, open(p, "w"), indent=2)
+EOF
+run
+grep -q "cron: '30 3 \* \* 1'" "$SCRATCH/.github/workflows/autoducks-product.yml" \
+  && pass "baked cron reflects product.schedule" || fail "product.schedule not baked into cron"
+
+echo "── product.enabled=false removes the schedule trigger ──"
+python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+cfg["product"]["enabled"] = False
+json.dump(cfg, open(p, "w"), indent=2)
+EOF
+run
+if grep -q "^  schedule:$" "$SCRATCH/.github/workflows/autoducks-product.yml"; then
+  fail "schedule trigger still present after product.enabled=false"
+else
+  pass "schedule trigger removed when product.enabled=false"
+fi
+
+echo "── re-enabling restores the schedule trigger with the current cron ──"
+python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+cfg["product"]["enabled"] = True
+cfg["product"]["schedule"] = "15 4 * * *"
+json.dump(cfg, open(p, "w"), indent=2)
+EOF
+run
+grep -q "cron: '15 4 \* \* \*'" "$SCRATCH/.github/workflows/autoducks-product.yml" \
+  && pass "schedule trigger restored with the current cron on re-enable" \
+  || fail "schedule trigger not restored on re-enable"
+
 echo "── custom prefix is baked into guards ──"
 python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
 import json, sys

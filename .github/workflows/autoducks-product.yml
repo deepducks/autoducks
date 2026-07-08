@@ -1,0 +1,159 @@
+name: 'Autoducks: Product Agent'
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        required: false
+        type: string
+        default: 'triage'
+      issue_number:
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        required: false
+        type: string
+        default: 'false'
+      model:
+        required: false
+        type: string
+        default: ''
+      effort:
+        required: false
+        type: string
+        default: ''
+      max_turns:
+        required: false
+        type: string
+        default: ''
+      actor:
+        required: false
+        type: string
+        default: ''
+  issue_comment:
+    types: [created]
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  actions: write
+  id-token: write
+  repository-projects: write
+
+jobs:
+  product:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' && github.event.action == 'opened' &&
+       !(github.event.sender.type == 'Bot' &&
+         (github.event.issue.type.name == 'Task' ||
+          contains(github.event.issue.labels.*.name, 'Task')))) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request == null &&
+       github.event.comment.author_association != 'MANNEQUIN' &&
+       (startsWith(github.event.comment.body, '/triage') ||
+        startsWith(github.event.comment.body, '/merge')))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authorize
+        id: authz
+        run: bash .autoducks/core/security/authorize.sh
+        env:
+          AUTODUCKS_AGENT: >-
+            ${{
+              ((github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/merge')) ||
+               (github.event_name == 'workflow_dispatch' && inputs.mode == 'merge'))
+              && 'merge' || 'triage'
+            }}
+          ACTOR: ${{ github.event.comment.user.login || github.event.sender.login }}
+          AUTHOR_ASSOC: ${{ github.event.comment.author_association || github.event.issue.author_association }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUM: ${{ github.event.issue.number || inputs.issue_number }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Load agent defaults
+        id: agent
+        if: steps.authz.outcome == 'success'
+        run: AUTODUCKS_AGENT=product bash .autoducks/core/config/load-agent-defaults.sh >> "$GITHUB_OUTPUT"
+      - name: Set context
+        id: ctx
+        if: steps.authz.outcome == 'success'
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+            echo "issue_num=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
+            echo "dry_run=${{ inputs.dry_run }}" >> "$GITHUB_OUTPUT"
+            echo "model=${{ inputs.model }}" >> "$GITHUB_OUTPUT"
+            echo "effort=${{ inputs.effort }}" >> "$GITHUB_OUTPUT"
+            echo "max_turns=${{ inputs.max_turns }}" >> "$GITHUB_OUTPUT"
+            echo "commenter=${{ inputs.actor }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/merge') }}" == "true" ]]; then
+            echo "mode=merge" >> "$GITHUB_OUTPUT"
+            echo "issue_num=$(printf '%s' "$COMMENT_BODY" | grep -oE '#[0-9]+' | head -1 | tr -d '#')" >> "$GITHUB_OUTPUT"
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+            echo "commenter=${{ github.event.comment.user.login }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "issues" ]]; then
+            echo "mode=triage" >> "$GITHUB_OUTPUT"
+            echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+            echo "commenter=${{ github.event.sender.login }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=triage" >> "$GITHUB_OUTPUT"
+            echo "issue_num=" >> "$GITHUB_OUTPUT"
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+            echo "commenter=${{ github.event.comment.user.login || github.event.sender.login }}" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
+      - name: Pre-execution
+        id: pre
+        if: steps.authz.outcome == 'success' && steps.ctx.outputs.mode == 'triage'
+        run: bash .autoducks/agents/product/pre.sh
+        env:
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          DRY_RUN: ${{ steps.ctx.outputs.dry_run }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: Run LLM agent
+        if: steps.authz.outcome == 'success' && steps.ctx.outputs.mode == 'triage'
+        uses: ./.autoducks/providers/llm/claude
+        with:
+          prompt_file: .autoducks/agents/product/prompt.md
+          allowed_tools: "Read,Grep,Glob,Bash(read-only)"
+          model: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
+          effort: ${{ steps.ctx.outputs.effort || steps.agent.outputs.effort }}
+          max_turns: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      - name: Post-execution
+        if: always() && steps.authz.outcome == 'success' && steps.ctx.outputs.mode == 'triage'
+        run: bash .autoducks/agents/product/post.sh
+        env:
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          DRY_RUN: ${{ steps.ctx.outputs.dry_run }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: Merge
+        if: steps.authz.outcome == 'success' && steps.ctx.outputs.mode == 'merge'
+        run: bash .autoducks/agents/merge/merge.sh
+        env:
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          DRY_RUN: ${{ steps.ctx.outputs.dry_run }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
