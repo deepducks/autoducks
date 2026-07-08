@@ -99,6 +99,10 @@ export AUTODUCKS_MARKER_DIR
 export AUTODUCKS_PRE_FAILED_MARKER="$AUTODUCKS_MARKER_DIR/pre-failed"
 export AUTODUCKS_DOR_DELEGATED_MARKER="$AUTODUCKS_MARKER_DIR/dor-delegated"
 
+# ── Review settings ─────────────────────────────────────────────────
+export AUTODUCKS_REVIEW_SECURITY_GUIDELINES
+AUTODUCKS_REVIEW_SECURITY_GUIDELINES="$(jq -r '.review.security_guidelines // ".autoducks/security-guidelines.md"' "$_config")"
+
 # ── Source provider interfaces ──────────────────────────────────────
 source "$AUTODUCKS_ROOT/providers/its/interface.sh"
 source "$AUTODUCKS_ROOT/providers/git/interface.sh"

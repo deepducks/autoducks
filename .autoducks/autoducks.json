@@ -31,6 +31,9 @@
     "defer":     [],
     "resolve":   []
   },
+  "review": {
+    "security_guidelines": ".autoducks/security-guidelines.md"
+  },
   "security": {
     "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"],
     "allow": ["bot-service-account", "@my-org/agents-users"],
