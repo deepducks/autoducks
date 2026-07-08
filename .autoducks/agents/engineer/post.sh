@@ -1,40 +1,47 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export AUTODUCKS_AGENT="tactical"
+export AUTODUCKS_AGENT="engineer"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/robustness/ask-questions.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/reconcile-tasks.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
+source "$AUTODUCKS_ROOT/core/orchestration/dispatch-chain.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
 # Catch-all safety net for anything that fails before an explicit handler
 # runs (the explicit sites below set richer categories and are preferred;
-# this is only a backstop).
+# this is only the backstop).
 trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
+      status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
       react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
       progress_labels::abort "$ISSUE_NUM" "Tactics:crafting" 2>/dev/null || true; \
       exit $_rc' ERR
 
-# Cross-step guard: pre.sh already failed and posted its own categorized
-# comment via the trap above (mirrored in pre.sh). Skip post-processing
-# entirely so we don't double up on a comment for the same run.
-if [[ -f /tmp/autoducks-pre-failed ]]; then
+# Cross-step guards: pre.sh already failed (and posted its own categorized
+# comment via the trap mirrored there) or delegated to a prerequisite agent.
+# Skip post-processing entirely in both cases.
+if [[ -f /tmp/autoducks-pre-failed || -f /tmp/autoducks-dor-delegated ]]; then
   exit 0
 fi
 
-# Questions mode: if the agent wrote questions instead of a plan
+# Questions mode: the agent wrote questions instead of a plan.
 if [[ -f /tmp/questions.md ]]; then
   ask_questions "$ISSUE_NUM" /tmp/questions.md
   react_to_comment "$COMMENT_ID" "+1"
   progress_labels::abort "$ISSUE_NUM" "Tactics:crafting"
+  status_comment::finish "$ISSUE_NUM" "**Blocked on questions.** The Engineer needs answers before it can plan — see the questions comment below, answer them, then re-run \`${AUTODUCKS_COMMAND} engineer\`."
+  # A blocked plan never continues the #auto: chain.
   exit 0
 fi
 
 # Validate tactical zone was produced
 if [[ ! -f /tmp/tactical-body.md ]]; then
+  export AUTODUCKS_FAIL_CATEGORY="scope-missing"
   notify_failure "$ISSUE_NUM" "$RUN_ID"
+  status_comment::fail "$ISSUE_NUM"
   react_to_comment "$COMMENT_ID" "confused"
   progress_labels::abort "$ISSUE_NUM" "Tactics:crafting"
   exit 1
@@ -47,6 +54,7 @@ if ! python3 "$AUTODUCKS_ROOT/core/robustness/parse-plan.py" /tmp/tactical-body.
   if [[ -f "$PARSE_ERROR_FILE" ]]; then
     its::comment_issue "$ISSUE_NUM" "$(cat "$PARSE_ERROR_FILE")"
   fi
+  status_comment::fail "$ISSUE_NUM"
   react_to_comment "$COMMENT_ID" "confused"
   progress_labels::abort "$ISSUE_NUM" "Tactics:crafting"
   exit 1
@@ -57,7 +65,8 @@ fi
 # can only happen if zone classification zeroed the design zone (the historical
 # Case C bug); abort loudly instead of wiping the human-authored spec.
 if [[ ! -s /tmp/design-zone.md && -s /tmp/issue-body-raw.md ]]; then
-  its::comment_issue "$ISSUE_NUM" "❌ Aborting \`/agents devise\`: the design zone resolved to empty while the issue body is non-empty. Publishing would wipe the human-authored design spec, so no changes were made. Check the \`<!-- autoducks:tactical:begin -->\` / \`<!-- autoducks:tactical:end -->\` markers and re-run."
+  its::comment_issue "$ISSUE_NUM" "❌ Aborting \`${AUTODUCKS_COMMAND} engineer\`: the design zone resolved to empty while the issue body is non-empty. Publishing would wipe the human-authored design, so no changes were made. Check the \`<!-- autoducks:tactical:begin -->\` / \`<!-- autoducks:tactical:end -->\` markers and re-run."
+  status_comment::fail "$ISSUE_NUM"
   react_to_comment "$COMMENT_ID" "confused"
   progress_labels::abort "$ISSUE_NUM" "Tactics:crafting"
   exit 1
@@ -67,10 +76,10 @@ TASK_COUNT=$(wc -l < /tmp/tasks.jsonl | tr -d ' ')
 
 if [[ "$TASK_COUNT" -eq 1 ]]; then
   # --- SINGLE-TASK FAST PATH ---
+  # No child issues, no waves YAML, no Progress checklist — and no special
+  # label (D12): the Maestro detects the single-task case structurally, by
+  # the absence of a waves plan in the tactical zone.
   TASK_LINE=$(head -1 /tmp/tasks.jsonl)
-  # .body is a complete markdown block from parse-plan.py's build_issue_body:
-  #   ## Summary … / ## Tasks … / ## Acceptance Criteria … [/ ## References …]
-  # Build the tactical zone from it — NO waves: YAML, NO ## Progress checklist.
   echo "$TASK_LINE" | jq -r '.body' > /tmp/tactical-zone-new.md
 
   # Assemble via the shared assembler so the tactical sentinels survive
@@ -85,13 +94,9 @@ if [[ "$TASK_COUNT" -eq 1 ]]; then
     its::close_issue "$old" "Superseded by revised single-task plan on #$ISSUE_NUM" "not_planned" 2>/dev/null || true
   done
 
-  # Lazily create + add Tactics:single (mirror the priority:P* creation style).
-  gh label create "Tactics:single" --repo "$REPO" 2>/dev/null || true
-  its::add_label "$ISSUE_NUM" "Tactics:single"
-
   TASK_NUMBERS=""
 else
-  # --- MULTI-TASK PATH (unchanged) ---
+  # --- MULTI-TASK PATH ---
   # Reconcile tasks (create/update/close)
   RECONCILE_OUTPUT=$(reconcile_tasks "$ISSUE_NUM" /tmp/tasks.jsonl "${OLD_NUMBERS:-}")
 
@@ -116,41 +121,27 @@ else
   assemble_body /tmp/design-zone.md /tmp/tactical-zone-new.md /tmp/feature-body.md
 
   its::update_issue_body "$ISSUE_NUM" /tmp/feature-body.md
-
-  # Clear a stale Tactics:single so a single→multi revision cleans up:
-  its::remove_label "$ISSUE_NUM" "Tactics:single" 2>/dev/null || true
 fi
 
-# Labels and type (idempotent — safe on both first pass and revision)
-its::add_label "$ISSUE_NUM" "Ready"
-progress_labels::finish "$ISSUE_NUM" "Tactics:crafting" "Tactics:ready"
-its::set_issue_type "$ISSUE_NUM" "Feature" 2>/dev/null || true
-its::add_label "$ISSUE_NUM" "Feature"
+# Legacy-label cleanup (pre-rename installs): Tactics:single and Ready are no
+# longer part of the taxonomy (D6/D12).
+its::remove_label "$ISSUE_NUM" "Tactics:single" 2>/dev/null || true
+its::remove_label "$ISSUE_NUM" "Ready" 2>/dev/null || true
 
-# Feature branch and PR — create if missing (handles first pass and
-# recovery from a prior run that crashed before reaching this point)
-ISSUE_TITLE=$(its::get_issue "$ISSUE_NUM" | jq -r '.title')
-SLUG=$(git::generate_slug "$ISSUE_NUM" "$ISSUE_TITLE")
-FEATURE_BRANCH="feature/$SLUG"
+# Completion label — D6: `Tactics:done` is both the record and the routing
+# signal for the Maestro.
+progress_labels::finish "$ISSUE_NUM" "Tactics:crafting" "Tactics:done"
 
-if ! git::branch_exists "$FEATURE_BRANCH"; then
-  git::create_branch "$AUTODUCKS_BASE_BRANCH" "$FEATURE_BRANCH"
+# Classification: keep Bug issues as Bug (D10); everything else is Feature.
+ISSUE_KIND_DATA=$(its::get_issue "$ISSUE_NUM")
+if [[ "$(echo "$ISSUE_KIND_DATA" | jq -r '.type // empty')" != "Bug" ]] \
+   && ! echo "$ISSUE_KIND_DATA" | jq -r '.labels[]?' | grep -qx 'Bug'; then
+  its::set_issue_type "$ISSUE_NUM" "Feature" 2>/dev/null || true
+  its::add_label "$ISSUE_NUM" "Feature"
 fi
 
-EXISTING_FEATURE_PR=$(gh pr list --repo "$REPO" --head "$FEATURE_BRANCH" --base "$AUTODUCKS_INTEGRATION_BRANCH" --json number --jq '.[0].number // empty' 2>/dev/null || true)
-if [[ -z "$EXISTING_FEATURE_PR" ]]; then
-  PR_TITLE="Feature #$ISSUE_NUM: $ISSUE_TITLE"
-  PR_BODY="Closes #$ISSUE_NUM"
-  git::create_pr "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$PR_TITLE" "$PR_BODY" true || true
-fi
-
-if [[ "${IS_REVISION:-false}" != "true" ]]; then
-  # First pass only: priority labels and assignee
-  for p in P0 P1 P2 P3; do
-    gh label create "priority:$p" --repo "$REPO" 2>/dev/null || true
-  done
-  gh issue edit "$ISSUE_NUM" --repo "$REPO" --add-assignee "$COMMENTER" 2>/dev/null || true
-fi
+# Done-assignee (D15): the command author owns the next action.
+its::assign_issue "$ISSUE_NUM" "${COMMENTER:-}" 2>/dev/null || true
 
 react_to_comment "$COMMENT_ID" "+1"
 
@@ -171,22 +162,37 @@ if [[ "$TASK_COUNT" -ne 1 && -s /tmp/link-outcomes.tsv ]]; then
   elif (( LINKED == TOTAL )); then
     LINK_SUMMARY=$'\n> All tasks linked as native sub-issues — the parent issue now shows a progress bar in the GitHub UI.'
   else
-    LINK_SUMMARY=$"\n> Sub-issue linking: $LINKED/$TOTAL tasks linked ($ERR errors, $FORBID forbidden, $UNAVAIL unavailable). Retry with \`/agents devise\` to reconcile."
+    LINK_SUMMARY=$"\n> Sub-issue linking: $LINKED/$TOTAL tasks linked ($ERR errors, $FORBID forbidden, $UNAVAIL unavailable). Retry \`${AUTODUCKS_COMMAND} engineer\` to reconcile."
   fi
 fi
 
-# Notify
 if [[ "$TASK_COUNT" -eq 1 ]]; then
-  its::comment_issue "$ISSUE_NUM" "✅ Tactical plan complete (single-task fast path — no child issues created).
-_Ran with \`${MODEL:-unknown}\` at reasoning \`${REASONING:-unknown}\`._"
+  status_comment::finish "$ISSUE_NUM" "**Tactical plan complete** (single task — no child issues created; the task lives in the tactical zone of this issue).
+
+**Next:** run \`${AUTODUCKS_COMMAND} execute\` to implement it.
+
+_Ran with \`${MODEL:-unknown}\` at effort \`${EFFORT:-unknown}\`._"
 else
-  its::comment_issue "$ISSUE_NUM" "✅ **Tactical plan complete.**
+  status_comment::finish "$ISSUE_NUM" "**Tactical plan complete.**
 
 Tasks created: $TASK_NUMBERS. The plan, wave order, and \`## Progress\`
 checklist now live in the tactical zone of the issue body.
 ${LINK_SUMMARY}
-**Next:** run \`/agents execute\` to start the wave orchestrator, which will
-dispatch these tasks in dependency order.
+**Next:** run \`${AUTODUCKS_COMMAND} execute\` to start the Maestro, which
+dispatches tasks in dependency order.
 
-_Ran with \`${MODEL:-unknown}\` at reasoning \`${REASONING:-unknown}\`._"
+_Ran with \`${MODEL:-unknown}\` at effort \`${EFFORT:-unknown}\`._"
 fi
+
+# ── #auto: chain ─────────────────────────────────────────────────────
+# If the run was routed here from an `execute` verb (the user asked for
+# execution, but planning had to happen first), continue to execution
+# implicitly. Explicit `#auto:` chains are honored either way.
+EFFECTIVE_CHAIN="${AUTO_CHAIN:-}"
+if [[ "${COMMAND:-}" == "execute" ]]; then
+  case "+${EFFECTIVE_CHAIN}+" in
+    *"+execute+"*) : ;;
+    *) EFFECTIVE_CHAIN="execute${EFFECTIVE_CHAIN:++$EFFECTIVE_CHAIN}" ;;
+  esac
+fi
+chain::dispatch_next "$EFFECTIVE_CHAIN" "$ISSUE_NUM"

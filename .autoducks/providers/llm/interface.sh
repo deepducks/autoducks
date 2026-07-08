@@ -28,7 +28,7 @@ done
 
 # ── Required function signatures ──────────────────────────────────────────
 #
-#   llm::invoke_agent(prompt_file, model, reasoning)  → exit code
+#   llm::invoke_agent(prompt_file, model, effort)  → exit code
 
 REQUIRED_FUNCTIONS=(
   "llm::invoke_agent"

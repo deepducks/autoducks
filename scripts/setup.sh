@@ -74,14 +74,10 @@ echo ""
 # --- Check 2: Labels ---
 echo "[2/9] Required labels"
 LABELS=("Feature|6F42C1|Orchestration feature issue"
+        "Bug|D73A4A|Autoducks bug pipeline"
         "Task|1D76DB|Autoducks task issue"
-        "Ready|0E8A16|Plan complete, ready for execution"
         "Draft|CCCCCC|Draft issue, not yet designed"
-        "smoke-test|FFA500|Smoke test marker"
-        "priority:P0|B60205|Critical path"
-        "priority:P1|D93F0B|High priority"
-        "priority:P2|FBCA04|Medium priority"
-        "priority:P3|0E8A16|Low priority")
+        "smoke-test|FFA500|Smoke test marker")
 
 # Progress labels: sourced from progress-labels.sh so the two lists can't drift apart.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -149,8 +145,8 @@ FIRST_ISSUE=$(gh issue list $REPO_ARG --state all --limit 1 --json number \
 if [[ -z "$FIRST_ISSUE" ]]; then
   manual "Sub-issues API check skipped — repository has no issues to probe.
       Re-run scripts/setup.sh after your first issue exists, or trust the
-      Tactical agent's runtime probe to report the state on the first
-      \`/agents devise\` run."
+      Engineer agent's runtime probe to report the state on the first
+      \`/quack engineer\` run."
 else
   HTTP=$(gh api "repos/$REPO/issues/$FIRST_ISSUE/sub_issues" \
          --include -H "Accept: application/vnd.github+json" 2>/dev/null \
@@ -159,7 +155,7 @@ else
     2*) pass "Sub-issues API is available on $REPO" ;;
     401|403) manual "Sub-issues API responded 401/403 — token needs 'issues:write'." ;;
     404|410) manual "Sub-issues API responded 404 — the feature is not enabled for this repository.
-      The Tactical agent will fall back to the markdown-based '## Progress' checklist.
+      The Engineer agent will fall back to the markdown-based '## Progress' checklist.
       This is not fatal; native linking is a UX enhancement." ;;
     *) manual "Sub-issues API probe was inconclusive (HTTP ${HTTP:-none}).
       Autoducks will still function; native linking may or may not work." ;;
@@ -178,7 +174,7 @@ if [[ -z "$TYPES_JSON" ]]; then
   manual "Could not list issue types for org '$ORG' (not an org, or no admin access).
       If '$ORG' is a user account, types are only available under organizations.
       If it's an org and you're not an admin, ask an admin to define them.
-      Routing is label-first: the tactical and design agents automatically apply the
+      Routing is label-first: the Engineer and Architect agents automatically apply the
       \`Feature\` label, so no manual labeling is needed. The native issue type is a
       visual enhancement for org repos and is not required for routing."
 else

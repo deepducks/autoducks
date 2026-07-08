@@ -9,7 +9,7 @@ architecture, dependencies, and correct wave ordering before writing.
 - The repository is checked out at the current working directory — use
   Read/Glob/Grep freely to understand existing code before planning
 - If the repository has any CLAUDE.md, AGENTS.md, VISION.md or CONSTITUTION.md files, read them first for important context about how this project is structured and how agents should operate within it.
-- `/tmp/conversation.md` — **present only on revisions** (when this is a re-invocation on an existing `feature+Ready` issue). Contains (1) the design zone (read-only), (2) the current tactical zone (the artifact you are revising), (3) the titles+bodies of existing task issues, (4) recent comments with human feedback, answers, or revision requests. Read it carefully and produce a plan that incorporates the feedback.
+- `/tmp/conversation.md` — **present only on revisions** (when this is a re-invocation on an issue that already has `Tactics:done`). Contains (1) the design zone (read-only), (2) the current tactical zone (the artifact you are revising), (3) the titles+bodies of existing task issues, (4) recent comments with human feedback, answers, or revision requests. Read it carefully and produce a plan that incorporates the feedback.
 - `/tmp/tactical-zone-current.md` — **present only on revisions** — the tactical zone as it currently exists in the issue body. This is the artifact you are revising.
 
 ## Questions Mode (read before writing anything)
@@ -19,7 +19,7 @@ If critical information is missing that would materially change the plan structu
 - Write ONLY `/tmp/questions.md` — a numbered list of specific, answerable questions (max 5; each answerable in a single sentence).
 - **Do NOT write `/tmp/tactical-body.md`** in this case.
 
-The workflow will post your questions as a comment on the issue and stop. The human answers in new comments, then re-mentions `/agents devise` — you'll see the full thread in `/tmp/conversation.md` on that next run and can then produce a proper plan.
+The workflow will post your questions as a comment on the issue and stop. The human answers in new comments, then re-mentions `/quack engineer` — you'll see the full thread in `/tmp/conversation.md` on that next run and can then produce a proper plan.
 
 Use Questions Mode *only* for genuine blockers. Don't ask trivia you could answer by reading the repo, and don't ask about preferences you can reasonably default on.
 
@@ -40,7 +40,7 @@ waves:
 
 ## Tasks
 
-### T1 — <short title> `priority:P0`
+### T1 — <short title>
 
 **Summary:** <one sentence. If the draft specifies the exact shape of artifacts this task produces (types, classes, signatures, constants, error messages), inline them verbatim as a code block right after the summary sentence — do not translate spec into prose bullets.>
 
@@ -54,14 +54,14 @@ waves:
 
 **References:** <optional — file paths, docs — or omit this line>
 
-### T2 — <short title> `priority:P0`
+### T2 — <short title>
 ... same structure ...
 
 ## Progress
 
-- [ ] #T1 <short title> `P0`
-- [ ] #T2 <short title> `P0`
-- [ ] #T3 <short title> `P1`
+- [ ] #T1 <short title>
+- [ ] #T2 <short title>
+- [ ] #T3 <short title>
 
 ## Notes
 
@@ -85,7 +85,6 @@ waves:
 - **The design zone is preserved verbatim above your output.** Do NOT copy, paraphrase, or re-summarize it into `/tmp/tactical-body.md`. If tactical-only caveats are worth recording, use `## Notes`. The human wrote the design spec deliberately — downstream agents read it directly from the issue body.
 - **Preserve the draft's specs in the task that implements them.** When the draft includes code blocks, type definitions, exact function/class signatures, constant tables, error messages, or validation rules that define *what an artifact must look like*, copy them verbatim into the Summary of the task responsible for that artifact. Do not translate spec-as-code into imperative bullets — the worker agent will re-derive and diverge. If the draft is "here's the shape, implement it", the task body must contain that shape. This applies per-task: if a snippet belongs to task T3, it goes only in T3, not duplicated across the plan.
 - **Never embed "confirm with author before …" or "pending approval" phrases in the plan.** If you need confirmation, use Questions Mode above.
-- Priority: `P0` = critical path (auto-merged). `P1`–`P3` lower priority.
 - Do NOT run `git` or `gh`. Do NOT modify source code. Only Write to
   `/tmp/tactical-body.md` (Plan Mode) or `/tmp/questions.md` (Questions Mode).
 
@@ -141,12 +140,12 @@ When `/tmp/conversation.md` is present, you are revising an existing plan. Use t
   tasks: [15, T3]      # 15 is preserved; T3 is new
   ```
   ```markdown
-  ### 15 — <title> `priority:P0`        ← preserved task heading uses the real number
-  ### T3 — <title> `priority:P1`        ← new task heading uses a fresh Tn
+  ### 15 — <title>        ← preserved task heading uses the real number
+  ### T3 — <title>        ← new task heading uses a fresh Tn
   ```
   ```markdown
-  - [ ] #15 <title> `P0`
-  - [ ] #T3 <title> `P1`
+  - [ ] #15 <title>
+  - [ ] #T3 <title>
   ```
 
 - To **introduce a new** task, use a fresh `Tn` placeholder (any `n` not already used in this plan).

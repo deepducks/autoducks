@@ -1,36 +1,37 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export AUTODUCKS_AGENT="execution"
+export AUTODUCKS_AGENT="developer"
 
-# pre.sh's ERR trap already notified on this run's failure — bail out
-# quietly so post.sh doesn't post a duplicate comment. (_AUTODUCKS_NOTIFIED
-# doesn't carry across GHA steps, so this file marker is required instead.)
-if [[ -f /tmp/autoducks-pre-failed ]]; then
+# pre.sh's ERR trap already notified on this run's failure, or the DoR guard
+# delegated to another agent — bail out quietly so post.sh doesn't post a
+# duplicate comment. (_AUTODUCKS_NOTIFIED doesn't carry across GHA steps, so
+# these file markers are required instead.)
+if [[ -f /tmp/autoducks-pre-failed || -f /tmp/autoducks-dor-delegated ]]; then
   exit 0
 fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/robustness/assert-changes.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/trigger-loop-closure.sh"
+source "$AUTODUCKS_ROOT/core/orchestration/branch-prefix.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
 # Reconstruct state from git (pre.sh exports don't persist across GHA steps)
 TASK_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 PR_BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_INTEGRATION_BRANCH}"
 BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
-FEATURE_NUM=""
-if [[ "$BASE_BRANCH" =~ ^feature/([0-9]+) ]]; then
-  FEATURE_NUM="${BASH_REMATCH[1]}"
-fi
+FEATURE_NUM=$(pipeline_branch_number "$BASE_BRANCH")
 
 # Catch-all: any uncaught non-zero exit below here posts a categorized
 # failure comment on the task issue (and the parent feature, if any),
 # reacts confused, and aborts the progress label — never a silent red X.
 trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/null || true; \
+      status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
       react_to_comment "${COMMENT_ID:-}" "confused" 2>/dev/null || true; \
-      progress_labels::abort "$ISSUE_NUM" "Work:progress" 2>/dev/null || true; \
+      progress_labels::abort "$ISSUE_NUM" "Work:coding" 2>/dev/null || true; \
       exit $_rc' ERR
 
 if [[ "${LLM_ERROR_SUBTYPE:-}" == "error_max_turns" ]]; then
@@ -43,16 +44,18 @@ if [[ "${LLM_ERROR_SUBTYPE:-}" == "error_max_turns" ]]; then
   # machine summary so the comment is never empty:
   [[ -s /tmp/work-summary.md ]] || git diff --stat "origin/$BASE_BRANCH"...HEAD > /tmp/work-summary.md 2>/dev/null || true
   notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}"   # emits max_turns guidance + branch
+  status_comment::fail "$ISSUE_NUM"
   react_to_comment "${COMMENT_ID:-}" "confused"
-  progress_labels::abort "$ISSUE_NUM" "Work:progress"
+  progress_labels::abort "$ISSUE_NUM" "Work:coding"
   exit 1
 fi
 
 # Check agent made changes
 if ! assert_changes; then
   notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:+$FEATURE_NUM}"
+  status_comment::fail "$ISSUE_NUM"
   react_to_comment "${COMMENT_ID:-}" "confused"
-  progress_labels::abort "$ISSUE_NUM" "Work:progress"
+  progress_labels::abort "$ISSUE_NUM" "Work:coding"
   exit 1
 fi
 
@@ -80,7 +83,7 @@ $SUMMARY"
 fi
 
 if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
-  # Scenario B: task with feature parent — auto-merge with rebase retry
+  # Task with a feature/bug parent — auto-merge with rebase retry
   MERGE_OK=false
   FAILURE_REASON="conflict"
   for attempt in 1 2 3; do
@@ -114,47 +117,49 @@ if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
     else
       notify_failure "$ISSUE_NUM" "$RUN_ID" "$FEATURE_NUM"
     fi
+    status_comment::fail "$ISSUE_NUM"
     react_to_comment "${COMMENT_ID:-}" "confused"
-    progress_labels::abort "$ISSUE_NUM" "Work:progress"
+    progress_labels::abort "$ISSUE_NUM" "Work:coding"
     exit 1
   fi
 
   # Sub-PRs merge into the feature branch, not the default branch, so
   # GitHub's "fixes #N" auto-close does not fire. Close the task explicitly.
   its::close_issue "$ISSUE_NUM" \
-    "Auto-closed by execution agent after merging sub-PR #$PR_NUM into \`$BASE_BRANCH\`." \
+    "Auto-closed by the Developer agent after merging sub-PR #$PR_NUM into \`$BASE_BRANCH\`." \
     "completed" \
     2>/dev/null || echo "::warning::Could not close task #$ISSUE_NUM"
 
-  # Trigger wave orchestrator to continue (non-fatal — PR merge event is the primary trigger)
+  # Trigger orchestrator continuation (non-fatal — the PR merge event is the
+  # primary trigger)
   trigger_loop_closure "$FEATURE_NUM" || true
 fi
 
-# Scenario A (orphan task): PR goes to main, no auto-merge — human review needed
-
 react_to_comment "${COMMENT_ID:-}" "+1"
 
-progress_labels::finish "$ISSUE_NUM" "Work:progress" "Work:done"
+progress_labels::finish "$ISSUE_NUM" "Work:coding" "Work:done"
+
+# Done-assignee (D15): the command author owns the next action.
+its::assign_issue "$ISSUE_NUM" "${COMMENTER:-}" 2>/dev/null || true
 
 if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
-  # Scenario B: sub-PR auto-merged into the feature branch
-  EXEC_MSG="✅ **Task implemented and merged.**
+  EXEC_MSG="**Task implemented and merged.**
 
-PR #$PR_NUM was merged into \`$BASE_BRANCH\` and this task was closed. The wave
-orchestrator has been notified and will advance to the next wave automatically.
+PR #$PR_NUM was merged into \`$BASE_BRANCH\` and this task was closed. The
+Maestro has been notified and will advance to the next wave automatically.
 
-**Next:** nothing — the orchestrator drives the feature to completion from here."
+**Next:** nothing — the Maestro drives the feature to completion from here."
 else
-  # Scenario A: orphan task, PR targets the base branch, awaits human review
-  EXEC_MSG="✅ **Implementation complete.**
+  # Manually-dispatched task against the base branch — PR awaits human review
+  EXEC_MSG="**Implementation complete.**
 
 PR #$PR_NUM is open against \`$PR_BASE_BRANCH\` and is waiting for your review — it
 is **not** auto-merged.
 
-**Next:** review and merge PR #$PR_NUM, or comment \`/agents fix\` on this issue
+**Next:** review and merge PR #$PR_NUM, or comment \`${AUTODUCKS_COMMAND} fix\` on this issue
 if changes are needed."
 fi
 
-its::comment_issue "$ISSUE_NUM" "$EXEC_MSG
+status_comment::finish "$ISSUE_NUM" "$EXEC_MSG
 
-_Ran with \`${MODEL:-unknown}\` at reasoning \`${REASONING:-unknown}\`._"
+_Ran with \`${MODEL:-unknown}\` at effort \`${EFFORT:-unknown}\`._"

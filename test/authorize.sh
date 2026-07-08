@@ -33,7 +33,7 @@ build_fixture_root() {
   # Link the real ITS interface (which sources $AUTODUCKS_ITS_PROVIDER/*.sh)
   ln -sf "$REAL_AUTODUCKS/providers/its/interface.sh" "$root/providers/its/interface.sh"
 
-  # Mock ITS provider — stubs the 14 required functions and records the
+  # Mock ITS provider — stubs the required functions and records the
   # ones the authorization gate exercises.
   cat > "$root/providers/its/mock/mock.sh" <<'MOCK'
 its::get_issue()               { :; }
@@ -51,6 +51,8 @@ its::list_comments()           { :; }
 its::list_sub_issues()         { :; }
 its::get_issue_edit_history()  { :; }
 its::delete_comment()          { :; }
+its::update_comment()          { printf 'UPDATE:%s|%s\n' "$1" "$2" >> "${AUTHZ_TEST_LOG:-/dev/null}"; }
+its::assign_issue()            { :; }
 MOCK
 }
 
@@ -73,14 +75,14 @@ write_config() {
     cat > "$AUTZ_ROOT/autoducks.json" <<JSON
 {
   "providers": { "its": "mock", "git": "github", "llm": "claude" },
-  "defaults":  { "model": "test", "reasoning": "low", "base_branch": "main" }
+  "defaults":  { "model": "test", "effort": "low", "base_branch": "main" }
 }
 JSON
   else
     cat > "$AUTZ_ROOT/autoducks.json" <<JSON
 {
   "providers": { "its": "mock", "git": "github", "llm": "claude" },
-  "defaults":  { "model": "test", "reasoning": "low", "base_branch": "main" },
+  "defaults":  { "model": "test", "effort": "low", "base_branch": "main" },
   "security":  $security_json
 }
 JSON
@@ -364,7 +366,7 @@ echo "[4b] pull_request bypass"
 D=$(new_test_dir "t4b")
 write_config "$D" null
 run_authz "$D" \
-  AUTODUCKS_AGENT=waveOrchestrator \
+  AUTODUCKS_AGENT=maestro \
   ACTOR="" AUTHOR_ASSOC="" \
   EVENT_NAME=pull_request \
   REPO=x/y GH_TOKEN=t
@@ -422,6 +424,23 @@ run_authz "$D" \
   EVENT_NAME=issue_comment \
   REPO=x/y GH_TOKEN=t
 if [[ "$LAST_EXIT" -eq 77 ]]; then pass "revert denies COLLABORATOR"; else fail "expected 77, got $LAST_EXIT"; fi
+
+echo "[6b] per_agent key mapping: maestro/developer resolve to the execute policy"
+D=$(new_test_dir "t6b")
+write_config "$D" '{"per_agent":{"execute":{"trusted_associations":["OWNER"]}}}'
+run_authz "$D" \
+  AUTODUCKS_AGENT=developer \
+  ACTOR=alice AUTHOR_ASSOC=COLLABORATOR \
+  EVENT_NAME=issue_comment \
+  REPO=x/y GH_TOKEN=t
+if [[ "$LAST_EXIT" -eq 77 ]]; then pass "developer inherits execute policy (COLLABORATOR denied)"; else fail "expected 77, got $LAST_EXIT"; fi
+
+run_authz "$D" \
+  AUTODUCKS_AGENT=maestro \
+  ACTOR=alice AUTHOR_ASSOC=OWNER \
+  EVENT_NAME=issue_comment \
+  REPO=x/y GH_TOKEN=t
+if [[ "$LAST_EXIT" -eq 0 ]]; then pass "maestro inherits execute policy (OWNER allowed)"; else fail "expected 0, got $LAST_EXIT"; fi
 
 # ---------------------------------------------------------------------------
 # Test 7: Audit trail (denials, allowlist, CODEOWNERS)

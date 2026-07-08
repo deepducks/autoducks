@@ -60,7 +60,7 @@
 # - Tactical/Wave Orchestrator cut the feature branch from `base_branch` (main)
 # - Feature PR (and task PR) target `integration_branch` (build), not main
 # - merge-base(feature, build) == base_branch tip (the decoupling invariant)
-# - `/agents close` tears down branches, PRs, and tasks (when --cleanup)
+# - `/quack close` tears down branches, PRs, and tasks (when --cleanup)
 #
 # NOT COVERED (see scripts/smoke-test.sh for the full golden-path coverage)
 # =============================================================================
@@ -121,7 +121,7 @@ trap revert_config EXIT
 
 # --- Ensure labels exist ---
 echo "[1/7] Ensuring labels exist..."
-gh label create "Ready"      --color "0E8A16" --description "Plan complete, ready for execution" $REPO_ARG 2>/dev/null || true
+gh label create "Tactics:done" --color "D93F0B" --description "Tactical plan complete" $REPO_ARG 2>/dev/null || true
 gh label create "smoke-test" --color "FFA500" --description "Smoke test" $REPO_ARG 2>/dev/null || true
 gh label create "priority:P0" --color "B60205" --description "Critical" $REPO_ARG 2>/dev/null || true
 
@@ -217,7 +217,7 @@ EOF
 
 META_URL=$(gh issue create $REPO_ARG \
   --title "Feature: Fork Smoke Test ${TIMESTAMP}" \
-  --label "Feature,Ready,smoke-test" \
+  --label "Feature,Tactics:done,smoke-test" \
   --body "$META_BODY")
 FEATURE=$(echo "$META_URL" | grep -oE '[0-9]+$')
 echo "  Feature: #$FEATURE"
@@ -227,7 +227,7 @@ gh api "repos/$REPO_NAME/issues/$FEATURE" --method PATCH -f "type=Feature" --sil
 
 # --- Kickstart ---
 echo "[5/7] Kickstarting the loop..."
-KICKSTART_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/agents execute")
+KICKSTART_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/quack execute")
 KICKSTART_ID=$(echo "$KICKSTART_URL" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+$' || echo "")
 echo "  Kickstart comment posted (id: ${KICKSTART_ID:-unknown})."
 
@@ -363,11 +363,11 @@ fi
 echo ""
 
 if [[ "$CLEANUP" == true ]]; then
-  echo "Cleaning up via /agents close (also exercises the close workflow)..."
+  echo "Cleaning up via /quack close (also exercises the close workflow)..."
 
   gh pr close "$PR_NUM" $REPO_ARG --comment "Fork-mode smoke test validated — closing." 2>/dev/null || true
-  gh issue comment "$FEATURE" $REPO_ARG --body "/agents close"
-  echo "  /agents close triggered. Waiting for teardown..."
+  gh issue comment "$FEATURE" $REPO_ARG --body "/quack close"
+  echo "  /quack close triggered. Waiting for teardown..."
 
   CLOSE_WAITED=0; STATE=""
   while [[ $CLOSE_WAITED -lt 60 ]]; do
@@ -381,7 +381,7 @@ if [[ "$CLEANUP" == true ]]; then
   done
 
   if [[ "$STATE" != "CLOSED" ]]; then
-    echo "  ⚠️  /agents close didn't finish within 60s — falling back to manual cleanup"
+    echo "  ⚠️  /quack close didn't finish within 60s — falling back to manual cleanup"
     for i in "$TASK1" "$FEATURE"; do
       gh issue close "$i" $REPO_ARG --comment "Fork-mode smoke test cleanup" 2>/dev/null || true
     done

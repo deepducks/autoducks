@@ -1,4 +1,4 @@
-name: 'Autoducks: Execution Agent'
+name: 'Autoducks: Engineer Agent'
 
 on:
   issue_comment:
@@ -8,15 +8,19 @@ on:
       issue_number:
         required: true
         type: string
-      base_branch:
-        required: true
+      auto_chain:
+        required: false
         type: string
-        default: 'main'
+        default: ''
+      actor:
+        required: false
+        type: string
+        default: ''
       model:
         required: false
         type: string
         default: ''
-      reasoning:
+      effort:
         required: false
         type: string
         default: ''
@@ -32,63 +36,61 @@ permissions:
   actions: write
   id-token: write
 
-# Serialize duplicate dispatches of the SAME task. When two orchestrator runs
-# both dispatch task N before either execute creates a PR, the second run queues
-# behind the first; by the time it runs, the first's PR exists (open or merged),
-# so pre.sh's idempotency guard skips it instead of producing a duplicate branch.
-concurrency:
-  group: autoducks-execute-${{ github.event_name == 'workflow_dispatch' && inputs.issue_number || github.event.issue.number }}
-  cancel-in-progress: false
-
 jobs:
-  execute:
+  engineer:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request == null &&
        github.event.comment.author_association != 'MANNEQUIN' &&
-       (startsWith(github.event.comment.body, '/agents execute') ||
-        startsWith(github.event.comment.body, '/agents work') ||
-        startsWith(github.event.comment.body, '/agents run') ||
-        startsWith(github.event.comment.body, '/agents start')) &&
-       !(github.event.issue.type.name == 'Feature' ||
-         contains(github.event.issue.labels.*.name, 'Feature')))
+       (
+         startsWith(github.event.comment.body, '/quack engineer') ||
+         startsWith(github.event.comment.body, '/quack tactics') ||
+         (
+           (startsWith(github.event.comment.body, '/quack execute') ||
+            startsWith(github.event.comment.body, '/quack work') ||
+            startsWith(github.event.comment.body, '/quack run')) &&
+           !(github.event.issue.type.name == 'Task' ||
+             contains(github.event.issue.labels.*.name, 'Task')) &&
+           !contains(github.event.issue.labels.*.name, 'Tactics:done')
+         )
+       ))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.base_branch || 'main' }}
-          fetch-depth: 0
           token: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Authorize
         id: authz
         run: bash .autoducks/core/security/authorize.sh
         env:
-          AUTODUCKS_AGENT: execution
+          AUTODUCKS_AGENT: engineer
           ACTOR: ${{ github.event.comment.user.login || github.event.sender.login }}
           AUTHOR_ASSOC: ${{ github.event.comment.author_association || github.event.issue.author_association }}
           EVENT_NAME: ${{ github.event_name }}
-          ISSUE_NUM: ${{ github.event.issue.number }}
+          ISSUE_NUM: ${{ github.event.issue.number || inputs.issue_number }}
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Load agent defaults
         id: agent
         if: steps.authz.outcome == 'success'
-        run: AUTODUCKS_AGENT=execution bash .autoducks/core/config/load-agent-defaults.sh >> "$GITHUB_OUTPUT"
+        run: AUTODUCKS_AGENT=engineer bash .autoducks/core/config/load-agent-defaults.sh >> "$GITHUB_OUTPUT"
       - name: Set context
         id: ctx
         if: steps.authz.outcome == 'success'
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "issue_num=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
-            echo "base_branch=${{ inputs.base_branch }}" >> "$GITHUB_OUTPUT"
             echo "model=${{ inputs.model }}" >> "$GITHUB_OUTPUT"
-            echo "reasoning=${{ inputs.reasoning }}" >> "$GITHUB_OUTPUT"
+            echo "effort=${{ inputs.effort }}" >> "$GITHUB_OUTPUT"
             echo "max_turns=${{ inputs.max_turns }}" >> "$GITHUB_OUTPUT"
+            echo "auto_chain=${{ inputs.auto_chain }}" >> "$GITHUB_OUTPUT"
+            echo "commenter=${{ inputs.actor }}" >> "$GITHUB_OUTPUT"
+            echo "command=" >> "$GITHUB_OUTPUT"
           else
             echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
-            echo "base_branch=main" >> "$GITHUB_OUTPUT"
+            echo "commenter=${{ github.event.comment.user.login }}" >> "$GITHUB_OUTPUT"
             source .autoducks/core/config/parse-directive.sh >> "$GITHUB_OUTPUT"
           fi
         env:
@@ -96,38 +98,44 @@ jobs:
       - name: Pre-execution
         id: pre
         if: steps.authz.outcome == 'success'
-        run: bash .autoducks/agents/execution/pre.sh
+        run: bash .autoducks/agents/engineer/pre.sh
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
-          BASE_BRANCH: ${{ steps.ctx.outputs.base_branch }}
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          COMMAND: ${{ steps.ctx.outputs.command }}
+          AUTO_CHAIN: ${{ steps.ctx.outputs.auto_chain }}
+          OVERRIDE_MODEL: ${{ steps.ctx.outputs.model }}
+          OVERRIDE_EFFORT: ${{ steps.ctx.outputs.effort }}
+          OVERRIDE_MAX_TURNS: ${{ steps.ctx.outputs.max_turns }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
-        id: llm
-        if: steps.authz.outcome == 'success' && steps.pre.outputs.duplicate_skip != 'true'
+        if: steps.authz.outcome == 'success' && steps.pre.outputs.dor_skip != 'true'
         uses: ./.autoducks/providers/llm/claude
         with:
-          prompt_file: .autoducks/agents/execution/prompt.md
-          allowed_tools: "Read,Write,Edit,Bash"
+          prompt_file: .autoducks/agents/engineer/prompt.md
+          allowed_tools: "Read,Write,Glob,Grep"
           model: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
-          reasoning: ${{ steps.ctx.outputs.reasoning || steps.agent.outputs.reasoning }}
+          effort: ${{ steps.ctx.outputs.effort || steps.agent.outputs.effort }}
           max_turns: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       - name: Post-execution
-        if: always() && steps.authz.outcome == 'success' && steps.pre.outputs.duplicate_skip != 'true'
-        run: bash .autoducks/agents/execution/post.sh
+        if: always() && steps.authz.outcome == 'success'
+        run: bash .autoducks/agents/engineer/post.sh
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
-          BASE_BRANCH: ${{ steps.ctx.outputs.base_branch }}
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          COMMAND: ${{ steps.ctx.outputs.command }}
+          AUTO_CHAIN: ${{ steps.ctx.outputs.auto_chain }}
           MODEL: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
-          REASONING: ${{ steps.ctx.outputs.reasoning || steps.agent.outputs.reasoning }}
-          LLM_ERROR_SUBTYPE: ${{ steps.llm.outputs.error_subtype }}
-          LLM_IS_ERROR: ${{ steps.llm.outputs.is_error }}
-          MAX_TURNS: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
+          EFFORT: ${{ steps.ctx.outputs.effort || steps.agent.outputs.effort }}
+          OVERRIDE_MODEL: ${{ steps.ctx.outputs.model }}
+          OVERRIDE_EFFORT: ${{ steps.ctx.outputs.effort }}
+          OVERRIDE_MAX_TURNS: ${{ steps.ctx.outputs.max_turns }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}

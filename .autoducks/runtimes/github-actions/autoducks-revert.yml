@@ -13,7 +13,7 @@ jobs:
     if: >-
       github.event.issue.pull_request == null &&
       github.event.comment.author_association != 'MANNEQUIN' &&
-      startsWith(github.event.comment.body, '/agents revert')
+      startsWith(github.event.comment.body, '/quack revert')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

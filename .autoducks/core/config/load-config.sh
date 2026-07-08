@@ -35,6 +35,11 @@ if ! command -v jq &>/dev/null; then
   exit 1
 fi
 
+# ── Slash-command prefix (configurable; default /quack) ─────────────
+export AUTODUCKS_COMMAND
+AUTODUCKS_COMMAND="$(jq -r '.command // "/quack"' "$_config")"
+[[ "$AUTODUCKS_COMMAND" =~ ^/[a-z0-9-]+$ ]] || AUTODUCKS_COMMAND="/quack"
+
 # ── Provider env vars ───────────────────────────────────────────────
 export AUTODUCKS_ITS_PROVIDER
 AUTODUCKS_ITS_PROVIDER="$(jq -r '.providers.its // empty' "$_config")"
@@ -59,8 +64,8 @@ _merged="$(jq -s '.[0].defaults * .[1]' "$_config" <(echo "$_agent_defaults"))"
 export AUTODUCKS_MODEL
 AUTODUCKS_MODEL="$(echo "$_merged" | jq -r '.model // empty')"
 
-export AUTODUCKS_REASONING
-AUTODUCKS_REASONING="$(echo "$_merged" | jq -r '.reasoning // empty')"
+export AUTODUCKS_EFFORT
+AUTODUCKS_EFFORT="$(echo "$_merged" | jq -r '.effort // empty')"
 
 # `// empty`, not `// 0`, so a deliberate `0` stays distinguishable from unset.
 export AUTODUCKS_MAX_TURNS

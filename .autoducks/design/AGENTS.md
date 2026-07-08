@@ -1,6 +1,23 @@
 # Agents Architecture
 
-This document is the canonical reference for the autoducks agent architecture: layers, behaviors, branching, provider abstractions, shared functions, and directory layout.
+This document is the canonical reference for the autoducks agent architecture: the command surface, the generic run flow, the four pipeline agents (Architect, Engineer, Maestro, Developer), the utility agents, branching, labels, provider abstractions, and directory layout.
+
+---
+
+## Command surface
+
+```shell
+/quack $trigger [model:$model] [effort:$effort] [turns:$turns] [#auto:$chain]
+```
+
+- **`/quack`** — the slash-command prefix, configurable via `command` in `.autoducks/autoducks.json` (default `/quack`). Changing it requires re-baking the workflow guards with `scripts/update-triggers.sh`.
+- **`$trigger`** — a canonical verb (`architect`, `engineer`, `execute`, `fix`, `revert`, `close`), a built-in alias (`design`→architect, `tactics`→engineer, `run`/`work`→execute), or a per-team custom alias from `triggers.<agent>[]` in the config.
+- **`model:`** — model override (`opus`, `sonnet`, `haiku`, or a full `claude-*` id). Bare aliases (`opus`) also work positionally.
+- **`effort:`** — LLM effort override (`off`, `low`, `medium`, `high`, `max`). Bare aliases also work positionally. ("effort" follows the cross-provider convention — OpenAI `reasoning_effort`, Anthropic `output_config.effort`.)
+- **`turns:`** — `max_turns` override (1–1000). `turns=N`, `max-turns=N`, and `max_turns=N` are also accepted.
+- **`#auto:`** — agent chaining: `+`-separated verbs queued to run after this agent finishes, e.g. `/quack architect #auto:engineer+execute`. Verbs are deduplicated and capped at 5; a verb can appear at most once in a chain (loop protection).
+
+All parsing lives in [`core/config/parse-directive.sh`](../core/config/parse-directive.sh); every downstream consumer sees canonical verbs.
 
 ---
 
@@ -8,25 +25,42 @@ This document is the canonical reference for the autoducks agent architecture: l
 
 **Every trigger-based workflow — every agent listed below, and every future agent added to the pipeline — MUST call the Authorization Gate as its first step, before any LLM invocation, comment, reaction, branch, or PR.**
 
-The gate is the single choke point between an untrusted GitHub event (a `/agents …` comment on a public repo, an `@`-assignment, a workflow dispatch) and a trusted action that spends the maintainer's LLM budget and mutates the repository.
+The gate is the single choke point between an untrusted GitHub event (a `/quack …` comment on a public repo, a workflow dispatch) and a trusted action that spends the maintainer's LLM budget and mutates the repository.
 
-- **Interface:** [`.autoducks/core/security/authorize.sh`](../core/security/authorize.sh) — sourced or exec'd at the top of every agent's `pre.sh` / `run.sh`. Non-zero exit stops the workflow immediately.
-- **Inputs:** the actor's login and `authorAssociation`, the agent verb (`design`, `devise`, `execute`, `fix`, `revert`, `close`, …), and the `security` block from `.autoducks/autoducks.json`.
-- **Policy:** trusted `authorAssociation` allowlist (default `OWNER`, `MEMBER`, `COLLABORATOR` — `CONTRIBUTOR` is deliberately excluded), with per-agent overrides and optional CODEOWNERS extension. Full schema is documented in the [Security reference](../../docs/src/content/docs/reference/security.mdx).
+- **Interface:** [`.autoducks/core/security/authorize.sh`](../core/security/authorize.sh) — run as the first workflow step. Non-zero exit (77) stops the workflow immediately.
+- **Inputs:** the actor's login and `authorAssociation`, the agent key (`architect`, `engineer`, `execute`, `fix`, `revert`, `close`, …), and the `security` block from `.autoducks/autoducks.json`.
+- **Policy:** deny list (beats everything, including OWNER) → allow list → trusted `authorAssociation` allowlist (default `OWNER`, `MEMBER`, `COLLABORATOR` — `CONTRIBUTOR` is deliberately excluded) → optional CODEOWNERS extension → default deny. Per-agent overrides via `security.per_agent`. Full schema is documented in the [Security reference](../../docs/src/content/docs/reference/security.mdx).
+- The gate runs **before any feedback**: a denied actor never receives a "Running…" status comment, only the denial message.
 
-**Rule for future agents:** any new agent added to this document — including but not limited to `/agents plan` and `/agents review` as sketched in [`CLI_DRAFT.md`](../../CLI_DRAFT.md) — MUST include the Authorization Gate call as step 0 of its behavior, prior to reacting with 👀 or any other observable side effect. New utility agents, new command verbs, and new trigger surfaces (labels, assignments, dispatch events) are not exempt: if it can be triggered by a GitHub event, it goes through the gate.
+**Rule for future agents:** any new agent, command verb, or trigger surface (labels, assignments, dispatch events) MUST include the Authorization Gate call as step 0 of its behavior, prior to reacting with 👀 or any other observable side effect.
 
 ---
 
-## Agent Layers
+## Generic run flow
 
-autoducks uses four agent layers, ordered from high-level planning to low-level execution. Each layer can trigger the next.
+Every slash-command run follows the same skeleton (security first, feedback always):
+
+1. **Security gate** — `authorize.sh`, before any observable side effect.
+2. **React** to the triggering comment with 👀 (`+1` on success, `confused` on failure — reactions always live on the *user's* comment).
+3. **Post a bot-owned status comment** — `<img loading.gif> **\`Agent\`**: running on [workflow #id](link)` — and **edit that same comment in place** as the run progresses (✅ finished / ⚠️ failed / 🔁 delegated). The user's comment is never edited, which keeps the revert agent's "delete bot comments, preserve human content" model intact. Module: [`core/feedback/status-comment.sh`](../core/feedback/status-comment.sh); requires `its::update_comment`.
+4. **Definition-of-Ready guards** — distinct from the security gate. When an agent is not ready, it **auto-dispatches its prerequisite agent** and re-queues itself (plus any pending `#auto:` chain) behind it via [`core/orchestration/dispatch-chain.sh`](../core/orchestration/dispatch-chain.sh). Chains are depth-capped and loop-protected.
+5. **Apply the layer's in-progress label** to the issue.
+6. **Run the agent's specific workflow** (LLM step for Architect/Engineer/Developer/Fix; pure orchestration for Maestro/Revert/Close).
+7. *(Future)* wrap the agentic workflow in a verification loop against a definition of done.
+8. **Edit the status comment** to ✅ with the friendly outcome details and the `_Ran with \`model\` at effort \`level\`._` footer.
+9. **Apply the layer's done label** and **assign the command author** to the issue — the assignee always marks who owns the next action (D15).
+
+Failures never end as a silent red X: [`core/feedback/notify-failure.sh`](../core/feedback/notify-failure.sh) posts a categorized diagnosis (merge-conflict / no-changes / scope-missing / parse / max_turns / infra) with a run-log link and a retry hint, mirrored to the parent feature when a task fails.
+
+---
+
+## Pipeline agents
 
 ```mermaid
 flowchart TB
-    DesignAgent:::designPurple -- calls --> TacticalAgent:::tacticalPink
-    TacticalAgent -- triggers --> WaveOrchestrator:::waveGreen
-    WaveOrchestrator -- orchestrates --> ExecutionAgent:::executionBlue
+    Architect:::designPurple -- "DoR cascade / #auto" --> Engineer:::tacticalPink
+    Engineer -- "DoR cascade / #auto" --> Maestro:::waveGreen
+    Maestro -- dispatches --> Developer:::executionBlue
 
     classDef designPurple fill:#f0d4f8,stroke:#a836e5,color:#a836e5;
     classDef tacticalPink fill:#f8d4e4,stroke:#e55398,color:#e55398;
@@ -34,326 +68,75 @@ flowchart TB
     classDef executionBlue fill:#cfe8ff,stroke:#0366d6,color:#0366d6;
 ```
 
----
-
-### Design Agent
-
-```mermaid
-flowchart LR
-    Triggers@{ shape: bolt, label: "Triggers" }
-    classDef triggersOrange fill:#ffe8d4,stroke:#d66a28,color:#d66a28;
-    class Triggers triggersOrange;
-    Triggers --triggers--> DesignAgent
-
-    Issue@{ shape: notch-rect, label: "**Issue**\ntype: Feature\nlabels: Draft" }
-
-    DesignAgent -- creates --> Issue
-    DesignAgent:::designPurple
-    classDef designPurple fill:#f0d4f8,stroke:#a836e5,color:#a836e5;
-
-    TacticalAgent:::tacticalPink
-    classDef tacticalPink fill:#f8d4e4,stroke:#e55398,color:#e55398;
-
-    DesignAgent -- calls --> TacticalAgent
-```
-
-**Command verb:** `design`
-
-#### Triggers
-
-- **Issue assignment**: agent `@design` + label `Draft` on an issue
-- **Issue comment**: slash command `/agents design` (built-in alias: `/agents plan`)
-
-#### Behavior
-
-<!--
-designAgent.sh
-
-Arguments:
-- issueId
-- issueTitle
-- issueDescription
-- issueComments
-- issueMetadata (labels, author, etc.)
-
-Permissions:
-- read/write access to issues
-- permission to edit issue descriptions and labels
-- permission to set issue type
-- author information
--->
-
-<!-- PRE EXECUTION -->
-1. Adds the `Spec:draft` label to signal that design work is in progress. <!-- its::addLabel(issueId, "Spec:draft") -->
-<!-- EXECUTION -->
-2. **[AGENT]** Creates the full issue specification (design/architecture) and edits the issue description. <!-- llm::designSpecification(issueId, issueTitle, issueDescription, issueComments, issueMetadata) + its::editIssueDescription(issueId, specification) -->
-<!-- POST EXECUTION -->
-3. Removes `Spec:draft` and adds `Spec:plan` to record that the design layer is complete. <!-- its::removeLabel(issueId, "Spec:draft") + its::addLabel(issueId, "Spec:plan") -->
-4. Assigns the `Feature` type to the issue. <!-- its::setIssueType(issueId, "Feature") -->
-5. Removes the `Draft` label from the issue. <!-- its::removeLabel(issueId, "Draft") -->
-6. Runs the Tactical agent to create the tactical plan and dependent tasks. <!-- invokeTacticalAgent(issueId) -->
-
----
-
-### Tactical Agent
-
-```mermaid
-flowchart LR
-    Triggers@{ shape: bolt, label: "Triggers" }
-    classDef triggersOrange fill:#ffe8d4,stroke:#d66a28,color:#d66a28;
-    class Triggers triggersOrange;
-    Triggers --triggers--> TacticalAgent
-
-    Issue@{ shape: notch-rect, label: "**Issue**\ntype: Feature\nlabels: --" }
-
-    TacticalAgent:::tacticalPink
-    classDef tacticalPink fill:#f8d4e4,stroke:#e55398,color:#e55398;
-
-    TacticalAgent -- edits --> Issue
-
-    Tasks@{ shape: processes, label: "Tasks" }
-    TacticalAgent -- creates --> Tasks
-```
-
-**Command verb:** `devise`
-
-#### Triggers
-
-- **Issue assignment**: agent `@tactical` + issue type `Feature` **or** issue label `Feature` + issue labels don't include `Draft` or `Ready`
-- **Issue comment**: slash command `/agents devise` (built-in aliases: `/agents drilldown`, `/agents specify`)
-- **Issue comment**: slash command `/agents execute` (built-in aliases: `/agents work`, `/agents run`, `/agents start`) + issue type `Feature` **or** issue label `Feature` + issue labels don't include `Draft` or `Ready` (opt-out available via config file)
-
-> Routing is label-first: the `Feature` label is the primary routing signal and works on all repositories. The native issue type is an optional UI layer available only on organization-owned repositories.
-
-#### Behavior
-
-<!--
-tacticalAgent.sh
-
-Arguments:
-- featureIssueId
-- featureIssueTitle
-- featureIssueDescription
-- featureIssueComments
-- featureIssueMetadata (labels, author, etc.)
-
-Permissions:
-- read/write access to the repository
-- read/write access to issues and PRs
-- permission to create branches and pull requests
-- permission to create issues (child tasks)
-- permission to set issue type
-- author information
--->
-
-<!-- PRE EXECUTION -->
-1. Adds the `Tactics:crafting` label to signal that tactical planning is in progress. <!-- its::addLabel(featureIssueId, "Tactics:crafting") -->
-<!-- EXECUTION -->
-2. **[AGENT]** Creates the tactical plan, **appending** it to the existing design spec via the tactical-zone markers — the design zone is never rewritten. <!-- llm::deviseTacticalPlan(featureIssueId, featureIssueTitle, featureIssueDescription, featureIssueComments, featureIssueMetadata) -->
-
-   The feature issue body is split into two zones by a pair of HTML-comment sentinels:
-   - **Design zone** — everything above `<!-- autoducks:tactical:begin -->`. Owned by the Design Agent and humans; the Tactical Agent preserves it byte-for-byte.
-   - **Tactical zone** — content between the sentinels. Owned by the Tactical Agent; contains the YAML wave plan, `## Progress` checkboxes, and `## Notes`.
-
-<!-- POST EXECUTION -->
-3. Removes `Tactics:crafting` and adds `Tactics:ready` to record that the tactical layer is complete. `Tactics:ready` is distinct from `Ready`: `Ready` is the execution routing signal; `Tactics:ready` records that the planning phase finished. <!-- its::removeLabel(featureIssueId, "Tactics:crafting") + its::addLabel(featureIssueId, "Tactics:ready") -->
-4. Each dependent task is created, associated with the parent issue, labeled `Task`, and — best-effort on organizations with issue types configured — assigned the native `Task` type. <!-- its::createChildIssue(featureIssueId, taskTitle, taskDescription, labels=["priority:PN","Task"]) + its::setIssueType(taskId, "Task") -->
-5. The `Ready` label is added to the issue. <!-- its::addLabel(featureIssueId, "Ready") -->
-6. A slug is generated: `feature/<issue_id>-<slugified_title>`. <!-- generateSlug(featureIssueId, featureIssueTitle) -->
-7. A branch is created from `base_branch` (the cut-point, e.g. `main`) named `feature/<issue_id>-<slugified_title>`. <!-- git::createBranch(baseBranch, featureSlug) -->
-8. A pull request is created from the feature branch into `integration_branch` (the PR target, defaulting to `base_branch`), titled `Feature <issue_id>: <issue_title>`. <!-- its::createPullRequest(featureBranch, integrationBranch, prTitle) -->
-9. The PR is linked to the parent issue. <!-- its::linkPRToIssue(prId, featureIssueId) -->
-10. A comment on the issue mentions the feature author, suggesting work can begin with `/agents execute` or by assigning the PR to the agents. <!-- its::commentIssue(featureIssueId, featureAuthor, message) -->
-
----
-
-### Wave Orchestrator
-
-```mermaid
-flowchart LR
-    Triggers@{ shape: bolt, label: "Triggers" }
-    classDef triggersOrange fill:#ffe8d4,stroke:#d66a28,color:#d66a28;
-    class Triggers triggersOrange;
-    Triggers --triggers--> WaveOrchestrator
-
-    Issue@{ shape: notch-rect, label: "**Issue**\ntype: Feature\nlabels: Ready" }
-    WaveOrchestrator -. depends on .-> Issue
-
-    WaveOrchestrator:::waveGreen
-
-    WaveOrchestrator -- orchestrates --> ExecutionAgent
-
-    ExecutionAgent@{ shape: processes, label: "Execution agents" }
-    class ExecutionAgent executionBlue;
-
-    classDef executionBlue fill:#cfe8ff,stroke:#0366d6,color:#0366d6;
-    classDef waveGreen fill:#d4f8d4,stroke:#28a745,color:#28a745;
-```
-
-**Command verb:** `execute` (on a Feature issue with `Ready` label)
-
-#### Triggers
-
-- **Issue comment**: slash command `/agents execute` (built-in aliases: `/agents work`, `/agents run`, `/agents start`) + issue type `Feature` **or** issue label `Feature` + label `Ready`
-- **PR assignment**: agent `@execution` + association to an issue of type `Feature` **or** label `Feature` + label `Ready`
-
-> Routing is label-first: the `Feature` label is the primary routing signal and works on all repositories. The native issue type is an optional UI layer available only on organization-owned repositories.
-
-#### Behavior
-
-<!--
-waveOrchestrator.sh
-
-Arguments:
-- featureIssueId
-
-Permissions:
-- read access to issues
-- read/write access to PRs
-- permission to trigger workflow dispatches
-- author information
--->
-
-1. Get the parent feature issue and its dependent tasks. <!-- its::getIssue(featureIssueId) + its::listChildIssues(featureIssueId) -->
-2. Filter tasks that are not yet completed (no merged PR). <!-- filterPendingTasks(childIssues) -->
-3. Group tasks into execution waves based on dependency order or labels. <!-- groupTasksIntoWaves(pendingTasks) -->
-4. On the first wave dispatch, adds `Work:progress` to the feature issue to signal that execution is underway. <!-- its::addLabel(featureIssueId, "Work:progress") -->
-5. For each wave, dispatch execution agents in parallel for each task, each cutting its task branch from the feature branch (the feature branch itself was already cut from `base_branch` and PR'd into `integration_branch` by the Tactical agent). <!-- dispatchExecutionAgents(wave, featureIssueId) -->
-6. Wait for all execution agents in the current wave to complete before starting the next wave. <!-- awaitWaveCompletion(waveId) -->
-7. After all waves are complete, removes `Work:progress` and adds `Work:done` to the feature issue. <!-- its::removeLabel(featureIssueId, "Work:progress") + its::addLabel(featureIssueId, "Work:done") -->
-8. Comments on the feature issue with a summary. <!-- its::commentIssue(featureIssueId, summary) -->
-
----
-
-### Execution Agent
-
-```mermaid
-flowchart LR
-    Triggers@{ shape: bolt, label: "Triggers" }
-    classDef triggersOrange fill:#ffe8d4,stroke:#d66a28,color:#d66a28;
-    class Triggers triggersOrange;
-    Triggers --triggers--> ExecutionAgent
-
-    ExecutionAgent:::executionBlue
-    classDef executionBlue fill:#cfe8ff,stroke:#0366d6,color:#0366d6;
-```
-
-**Command verb:** `execute` (on a non-Feature issue)
-
-#### Triggers
-
-- **Issue assignment**: agent `@execution`
-- **Issue comment**: slash command `/agents execute` (built-in aliases: `/agents work`, `/agents run`, `/agents start`) + issue is not a Feature (native type **or** label)
-
-#### Behavior
-
-The Execution Agent has two scenarios depending on whether the task has a parent feature issue.
-
-<details>
-<summary><strong>Scenario A: Orphan task (no parent issue) -- PR to <code>integration_branch</code>, human review</strong></summary>
-
-<!--
-executionAgent_taskOrphan.sh
-
-Arguments:
-- taskId
-- taskTitle
-- taskDescription
-- taskComments
-- taskMetadata (labels, author, etc.)
-
-Permissions:
-- read/write access to the repository
-- read/write access to issues and PRs
-- permission to create branches and pull requests
-- author information
--->
-
-<!-- PRE EXECUTION -->
-1. A slug is generated: `<task_id>-<slugified_title>`. <!-- generateSlug(taskId, taskTitle) -->
-2. A branch is created from `base_branch` (the cut-point, e.g. `main`) named `feature/<task_id>-<slugified_title>`. <!-- git::createBranch(baseBranch, slug) -->
-3. A pull request is created from the branch into `integration_branch` (the PR target, defaulting to `base_branch`), titled `Task <task_id>: <taskTitle>`. <!-- its::createPullRequest(branch, integrationBranch, prTitle) -->
-4. Adds the `Work:progress` label to the task issue to signal that execution is underway. <!-- its::addLabel(taskId, "Work:progress") -->
-<!-- EXECUTION -->
-5. The agent executes the task. <!-- llm::executeTask(taskId, taskTitle, taskDescription, taskComments, taskMetadata) -->
-<!-- POST EXECUTION -->
-6. Removes `Work:progress` and adds `Work:done` to the task issue to record successful execution. <!-- its::removeLabel(taskId, "Work:progress") + its::addLabel(taskId, "Work:done") -->
-7. A comment on the PR mentions the task author/requester and assigns the PR to them for **human review**. No auto-merge. <!-- its::commentPR(prId, taskAuthor) + its::assignPR(prId, taskAuthor) -->
-</details>
-
-<details>
-<summary><strong>Scenario B: Task with parent feature -- PR to <code>feature</code> branch, auto-merge</strong></summary>
-
-<!--
-executionAgent_taskFeature.sh
-
-Arguments:
-- taskId
-- taskTitle
-- taskDescription
-- taskComments
-- taskMetadata (labels, author, etc.)
-- parentIssueId
-
-Permissions:
-- read/write access to the repository
-- read/write access to issues and PRs
-- permission to create branches and pull requests
-- author information
-- merge permissions (auto-merge PR)
--->
-
-<!-- PRE EXECUTION -->
-1. Get the parent issue information (title, labels, etc.). <!-- its::getIssue(parentIssueId) -->
-2. Generate a slug for the task: `<task_id>-<slugified_task_title>`. <!-- generateSlug(taskId, taskTitle) -->
-3. Generate a slug for the feature: `<feature_id>-<slugified_feature_title>`. <!-- generateSlug(featureId, featureTitle) -->
-4. If the parent issue does not have an associated branch, create one from `base_branch` (the cut-point, e.g. `main`) named `feature/<feature_id>-<slugified_feature_title>` and create its PR into `integration_branch` (the PR target, defaulting to `base_branch`). <!-- git::createBranch(baseBranch, featureSlug) + its::createPullRequest(featureBranch, integrationBranch, prTitle) -->
-5. Create a branch from the feature branch named `feature/<feature_id>-<slugified_feature_title>/task/<task_id>-<task_slug>`. <!-- git::createBranch(featureBranch, taskSlug) -->
-6. Create a pull request from the task branch into the feature branch, titled `Task <task_id>: <task_title>`. <!-- its::createPullRequest(taskBranch, featureBranch, prTitle) -->
-7. Adds the `Work:progress` label to the task issue to signal that execution is underway. <!-- its::addLabel(taskId, "Work:progress") -->
-<!-- EXECUTION -->
-8. The agent executes the task. <!-- llm::executeTask(taskId, taskTitle, taskDescription, taskComments, taskMetadata) -->
-<!-- POST EXECUTION -->
-9. The task PR is **auto-merged** (only CI checks run, no code review) and the branch is deleted by policy. <!-- its::mergePR(prId) -->
-10. Removes `Work:progress` and adds `Work:done` to the task issue to record successful execution. <!-- its::removeLabel(taskId, "Work:progress") + its::addLabel(taskId, "Work:done") -->
-11. The task issue is closed as `completed` with a comment linking to the
-   merged sub-PR. This is required because the sub-PR merged into the
-   feature branch, not the default branch, so the `fixes #N` keyword does
-   not auto-close the issue.
-   <!-- its::close_issue(taskIssueId, comment, "completed") -->
-</details>
-
-> **Auto-merge policy:** Auto-merge is imperative for Scenario B only, where task PRs merge into a feature branch that will itself undergo human review before reaching `integration_branch`. Scenario A PRs target `integration_branch` (defaulting to `base_branch`) directly and require human review.
+| | **Architect** | **Engineer** | **Maestro** | **Developer** |
+|---|---|---|---|---|
+| **Purpose** | (Design) Creates **or revises** the design of features and bugs | (Tactics) Creates the execution plan: tasks + dependency waves | (Orchestration) Coordinates parallel execution waves | (Build) Implements one task |
+| **Trigger phrases** | `architect`, `design` | `engineer`, `tactics` — or `execute`/`run`/`work` on an unplanned issue | `execute`, `run`, `work` on an issue with `Tactics:done` | `execute`, `run`, `work` on a Task issue |
+| **Definition of Ready** | none (any issue) | issue has `Design:done` | issue has `Tactics:done` | Task with a parent whose pipeline branch exists |
+| **Auto-dispatch when not ready** | — | Architect (`architect #auto:engineer[+…]`) | Engineer (`engineer #auto:execute`) | Maestro on the parent issue |
+| **Stage labels** | `Design:draft` → `Design:done` | `Tactics:crafting` → `Tactics:done` | `Work:orchestrating` → `Work:done` | `Work:coding` → `Work:done` |
+| **Definition of Done** | structured design in the body; type/label `Feature` or `Bug` | plan + subtasks created/linked | all subtasks closed, final PR ready | task PR merged into the pipeline branch; task closed |
+
+The same `execute` comment is claimed by exactly **one** workflow via label/type routing (the user never has to know which): Task issue → Developer; `Tactics:done` → Maestro; anything else → Engineer (whose DoR guard cascades to the Architect when the design is missing). A raw `/quack execute` on a fresh issue therefore runs the whole pipeline: Architect → Engineer → Maestro → Developers.
+
+### Architect (design layer)
+
+1. Preserve the tactical zone byte-for-byte if the body already has one (abort loudly on malformed markers).
+2. **[AGENT]** Create the specification — or **revise/structure an existing design** — with sections: Problem Statement / Proposed Solution / Technical Design / Dependencies / Constraints / Out of Scope. Classify the issue as `Feature` or `Bug`.
+3. Publish the new design zone (+ preserved tactical zone) to the issue body.
+4. Set the native issue type and label to `Feature` or `Bug` (label is route-critical; type is best-effort, org-only). Remove `Draft` if present.
+5. `Design:draft` → `Design:done`; assign the command author; continue the `#auto:` chain.
+
+There is **no** auto-trigger by the `Draft` label (D13) — entry is by command or cascade only.
+
+### Engineer (tactics layer)
+
+1. **DoR:** requires `Design:done`, else delegates to the Architect with itself re-queued.
+2. **[AGENT]** Produce the tactical plan **inside the tactical zone** (`<!-- autoducks:tactical:begin/end -->`); the design zone above is never rewritten. Plan = YAML `waves:` block + `## Tasks` blocks + `## Progress` checklist. **Questions Mode**: when the design is insufficient, post up to 5 blocking questions and stop instead of guessing.
+3. Parse deterministically ([`core/robustness/parse-plan.py`](../core/robustness/parse-plan.py)); reconcile child Task issues (create/update/close dropped ones), link as native sub-issues with graceful degradation, replace `Tn` placeholders with real numbers.
+4. **Single-task plans** create no child issue and no special label — the task lives in the tactical zone and the Maestro detects the case structurally (no waves block).
+5. `Tactics:crafting` → `Tactics:done` (one label: completion record **and** routing signal). Re-running the Engineer on a `Tactics:done` issue is **revision mode** (existing tasks preserved by number, dropped ones closed as superseded).
+6. Assign the command author; continue the chain (an `execute`-routed run implicitly chains to `execute`).
+
+The Engineer is **pure ITS** — it never touches git (D7).
+
+### Maestro (orchestration layer)
+
+1. **DoR:** requires `Tactics:done`, else delegates to the Engineer with `#auto:execute`.
+2. **Owns all pipeline git** (D7): ensures the pipeline branch — `feature/<slug>` for Features, `fix/<slug>` for Bugs (D10) — cut from `base_branch`, and the **draft PR** into `integration_branch`.
+3. Computes wave states from merged task PRs (`fixes #N` bodies), ticks the `## Progress` checkboxes, and dispatches the next eligible wave of Developers (`autoducks-developer.yml` via `workflow_dispatch`), propagating model/effort/turns overrides and the original actor. Three independent guards prevent duplicate dispatch (open-PR check, Developer pre-flight skip, per-task concurrency group).
+4. **Advancement is event-driven**: every PR merged into a `feature/*` or `fix/*` branch re-triggers the Maestro, which recomputes and continues. No polling.
+5. When every wave is done: rebuilds the final PR body (`Closes #…` + a `## Work Log` harvested from each task PR's Implementation Summary), marks the PR ready, requests review from the issue assignees, `Work:orchestrating` → `Work:done`, assigns the command author.
+6. Single-task fast path: dispatches the Developer on the feature issue itself.
+
+### Developer (build layer)
+
+1. **DoR (D1):** a Task must have its pipeline context. When invoked by comment without one, it resolves the parent issue; if the parent branch is missing it delegates to the Maestro on the parent. Parentless standalone execution was retired — the pipeline guarantees a reviewed design and plan before code.
+2. Cuts a task branch from the pipeline branch, inheriting its prefix: `<feature|fix>/<parentNum>-issue-<taskNum>-<epoch>`.
+3. **[AGENT]** Implements the task spec (never runs git/gh itself); writes `/tmp/work-summary.md`.
+4. Opens the task PR into the pipeline branch (`fixes #N` + Implementation Summary) and **auto-merges** it (adaptive method: `auto` probes merge/squash/rebase; 3 attempts with rebase in between; conflicts → `notify_conflict`).
+5. Closes the task explicitly (sub-PR merges don't fire GitHub's auto-close), `Work:coding` → `Work:done`, assigns the command author.
+6. On `max_turns` exhaustion: commits `WIP:`, pushes the branch, and reports it — `/quack fix` resumes from the preserved branch.
+
+> **Auto-merge policy:** task PRs merge into a pipeline branch that itself undergoes human review before reaching `integration_branch`. Manually-dispatched tasks against the default branch are **not** auto-merged.
 
 ---
 
 ## Utility Agents
 
-Utility agents handle recovery, cleanup, and lifecycle operations. They are not part of the main planning-to-execution pipeline.
+Utility agents handle recovery, cleanup, and lifecycle operations. They are not part of the planning-to-execution pipeline and have no stage labels.
 
 ### Fix Agent
 
-**Command verb:** `fix`
-
-**Trigger:** `/agents fix` on a PR with failing CI checks.
-
-**Behavior:** Reads CI failure logs, diagnoses the issue, pushes a fix commit to the same branch, and comments on the PR with what was changed.
+**Verb:** `fix` — re-runs/repairs a failed task: finds the newest existing task branch (either prefix), reads the failure context (last 10 comments), fixes on top of the partial work, reuses or opens the PR, single-attempt merge when under a parent. This is **not** the Bug flow — Bugs go through the full pipeline (D10).
 
 ### Revert Agent
 
-**Command verb:** `revert`
-
-**Trigger:** `/agents revert` on a PR or issue.
-
-**Behavior:** Creates a revert PR for the specified merge commit, links it to the original issue, and requests human review.
+**Verb:** `revert` — undoes a feature: closes child tasks as not-planned, strips pipeline labels (current and legacy), restores the last **human-authored** body revision via the edit history, and deletes only bot comments. Security default: `OWNER`, `MEMBER`.
 
 ### Close Agent
 
-**Command verb:** `close`
-
-**Trigger:** `/agents close` on an issue or PR.
-
-**Behavior:** Closes the issue or PR with a summary comment. If the issue is a Feature with child tasks, closes all open child tasks and their associated PRs. Cleans up branches that are no longer needed.
+**Verb:** `close` — tears a finished pipeline down: closes child tasks and PRs, deletes task and pipeline branches (both prefixes), strips labels, closes the issue with a cleanup summary. Security default: `OWNER`, `MEMBER`.
 
 ---
 
@@ -367,66 +150,22 @@ autoducks is designed to be platform-agnostic. All external interactions go thro
 | **Git** | `git::` | Branches, commits, merges, repository operations | Git CLI |
 | **LLM** | `llm::` | Agent reasoning, plan generation, code writing | Claude Code |
 
-Each provider exposes a set of functions behind a stable interface. Swapping providers (e.g., GitHub to GitLab, or Claude to another LLM) requires implementing the same function signatures without changing agent logic.
-
-Functions in the agent scripts use the `provider::function()` calling convention documented in the HTML comments throughout this document.
-
----
-
-## Shared Functions
-
-The 17 core functions used across agents, grouped by category.
-
-### Feedback
-
-| # | Function | Description |
-|---|----------|-------------|
-| 1 | `its::commentIssue(issueId, message)` | Post a comment on an issue |
-| 2 | `its::commentPR(prId, message)` | Post a comment on a pull request |
-| 3 | `its::assignPR(prId, userId)` | Assign a user to a pull request |
-
-### ITS Operations
-
-| # | Function | Description |
-|---|----------|-------------|
-| 4 | `its::getIssue(issueId)` | Fetch issue details (title, body, labels, type) |
-| 5 | `its::listChildIssues(issueId)` | List child/dependent issues of a parent |
-| 6 | `its::createChildIssue(parentId, title, body, type)` | Create a child issue linked to a parent |
-| 7 | `its::editIssueDescription(issueId, body)` | Replace an issue's description |
-| 8 | `its::setIssueType(issueId, type)` | Set the issue type (Feature, Task, etc.) |
-| 9 | `its::addLabel(issueId, label)` | Add a label to an issue |
-| 10 | `its::removeLabel(issueId, label)` | Remove a label from an issue |
-| 11 | `its::createPullRequest(head, base, title)` | Create a pull request |
-| 12 | `its::closeIssue(issueId, comment?, reason?)` | Close an issue with an optional comment; `reason` is one of `completed` or `not_planned` |
-| 13 | `its::mergePR(prId)` | Merge a pull request (auto-merge) |
-
-> **PR-to-issue linkage** is not exposed as a dedicated provider function. It is achieved implicitly via the `fixes`/`closes`/`resolves` keyword in the PR body written by `git::createPullRequest`.
-
-### Git Operations
-
-| # | Function | Description |
-|---|----------|-------------|
-| 14 | `git::createBranch(base, name)` | Create a branch from a base ref |
-
-### Orchestration
-
-| # | Function | Description |
-|---|----------|-------------|
-| 15 | `generateSlug(id, title)` | Generate a URL-safe slug from id + title |
-| 16 | `filterPendingTasks(issues)` | Filter issues to those without a merged PR |
-| 17 | `groupTasksIntoWaves(tasks)` | Partition tasks into sequential execution waves |
+Each provider exposes a set of functions behind a stable interface (`providers/{its,git}/interface.sh` validates the contract at source time). Swapping providers requires implementing the same function signatures without changing agent logic. The full required-function lists live in the interface files; notable additions for the status-comment flow: `its::update_comment(comment_id, body)` and `its::assign_issue(issue_id, assignee)`.
 
 ---
 
 ## Branch Naming
 
-All branches follow a predictable convention rooted in issue IDs.
+All branches follow a predictable convention rooted in issue IDs. The prefix encodes the issue kind (D10).
 
 | Context | Pattern | Example |
 |---------|---------|---------|
-| Feature | `feature/<number>-<slug>` | `feature/42-user-auth` |
-| Task under feature | `feature/<number>-<slug>/task/<task_number>-<task_slug>` | `feature/42-user-auth/task/43-login-form` |
-| Orphan task | `feature/<number>-<slug>` | `feature/99-fix-typo` |
+| Feature pipeline branch | `feature/<number>-<slug>` | `feature/42-user-auth` |
+| Bug pipeline branch | `fix/<number>-<slug>` | `fix/57-login-crash` |
+| Task under a pipeline branch | `<feature\|fix>/<parent>-issue-<task>-<epoch>` | `feature/42-issue-43-1751941200` |
+| Fix-utility retry branch | `<feature\|fix>/<parent>-issue-<task>-fix-<epoch>` | `feature/42-issue-43-fix-1751943000` |
+
+The Maestro's PR-merged re-trigger listens on both `feature/*` and `fix/*`. The fix-utility `-fix-<epoch>` suffix is unrelated to the `fix/` prefix.
 
 ---
 
@@ -434,16 +173,18 @@ All branches follow a predictable convention rooted in issue IDs.
 
 | Label | Meaning |
 |-------|---------|
-| `Draft` | Issue needs design work before tactical planning |
-| `Ready` | Tactical plan is complete; issue is ready for execution |
-| `Feature` | Routing signal — set as both a label (route-critical) and the native issue type (best-effort, org-only) |
-| `Task` | Marks a task issue split from a Feature — set as both a label (works everywhere) and the native issue type (best-effort, org-only) |
-| `Spec:draft` | Design agent is currently writing the spec |
-| `Spec:plan` | Design spec is written (design layer complete) |
-| `Tactics:crafting` | Tactical agent is currently building the plan |
-| `Tactics:ready` | Tactical plan is complete (tasks issued, waves defined) |
-| `Work:progress` | Execution / Wave Orchestrator is currently active on this issue |
-| `Work:done` | Execution complete (task PR merged, or all waves finished) |
+| `Draft` | Optional human marker: issue still needs design work (removed by the Architect) |
+| `Feature` / `Bug` | Routing + classification — set as a label (route-critical) and as the native issue type (best-effort, org-only) |
+| `Task` | Marks a task issue split from a plan — label + best-effort native type |
+| `Design:draft` | Architect is writing the design |
+| `Design:done` | Design complete (Engineer's Definition of Ready) |
+| `Tactics:crafting` | Engineer is building the plan |
+| `Tactics:done` | Plan complete — also the Maestro's routing signal and the Engineer's revision-mode marker |
+| `Work:orchestrating` | Maestro is coordinating waves on this issue |
+| `Work:coding` | Developer is implementing this task |
+| `Work:done` | Work complete (task merged, or all waves finished) |
+
+Retired (cleaned up on sight by revert/close/engineer): `Spec:draft`, `Spec:plan`, `Tactics:ready`, `Ready`, `Work:progress`, `Tactics:single`, `priority:P0..P3`.
 
 ---
 
@@ -451,22 +192,34 @@ All branches follow a predictable convention rooted in issue IDs.
 
 ```
 .autoducks/
-  config.yml              # Project-level configuration (opt-outs, defaults)
+  autoducks.json          # Project configuration: command prefix, providers,
+                          # defaults (model/effort/branches/merge), triggers, security
+  assets/                 # Static assets (status-comment loading.gif)
   design/
-    AGENTS.md             # This document -- canonical agent architecture reference
+    AGENTS.md             # This document — canonical agent architecture reference
   agents/
-    design.md             # Design agent prompt / CLAUDE.md
-    tactical.md           # Tactical agent prompt / CLAUDE.md
-    wave.md               # Wave orchestrator prompt / CLAUDE.md
-    execution.md          # Execution agent prompt / CLAUDE.md
-    fix.md                # Fix agent prompt / CLAUDE.md
-    revert.md             # Revert agent prompt / CLAUDE.md
-    close.md              # Close agent prompt / CLAUDE.md
+    architect/            # defaults.json + prompt.md + pre.sh/post.sh
+    engineer/             # defaults.json + prompt.md + pre.sh/post.sh
+    maestro/              # defaults.json + run.sh (no LLM)
+    developer/            # defaults.json + prompt.md + pre.sh/post.sh
+    fix/                  # defaults.json + prompt.md + pre.sh/post.sh
+    revert/               # defaults.json + run.sh (no LLM)
+    close/                # defaults.json + run.sh (no LLM)
+  core/
+    config/               # load-config, load-agent-defaults, parse-directive,
+                          # generate-trigger-conditions
+    feedback/             # status-comment, progress-labels, react-to-comment,
+                          # notify-failure, update-checkboxes
+    orchestration/        # dispatch-chain, branch-prefix, parse-waves,
+                          # reconcile-tasks, tactical-zone, create-final-pr,
+                          # prevent-duplicate-dispatch, build-revision-context
+    robustness/           # parse-plan.py, ask-questions, assert-changes,
+                          # wait-for-branch, retry-on-parse-failure
+    security/             # authorize, parse-codeowners, resolve-team
   providers/
-    its/                  # ITS provider implementations
-    git/                  # Git provider implementations
-    llm/                  # LLM provider implementations
-  shared/
-    functions/            # Shared function implementations (slugify, wave grouping, etc.)
-  workflows/              # CI/CD workflow templates (GitHub Actions, etc.)
+    its/                  # ITS provider implementations (github/)
+    git/                  # Git provider implementations (github/)
+    llm/                  # LLM provider implementations (claude/)
+  runtimes/
+    github-actions/       # Canonical workflow templates (mirrored to .github/workflows/)
 ```
