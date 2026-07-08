@@ -116,6 +116,7 @@ Queue agents to run after this one finishes, separated by `+`:
 
 Semantics:
 
+- **Only `architect`, `engineer`, `execute`, and `review` are chainable.** Utility verbs (`fix`/`revert`/`close`) never carry or continue a chain — they always run standalone, even if you write `#auto:fix`, `#auto:revert`, or `#auto:close`.
 - Verbs are alias-normalized (`#auto:tactics+run` ≡ `#auto:engineer+execute`), deduplicated, and capped at 5.
 - A verb can appear at most once in a chain (loop protection); Definition-of-Ready delegations re-queue the current agent into the same chain.
 - A chained `execute` targets the Maestro.
