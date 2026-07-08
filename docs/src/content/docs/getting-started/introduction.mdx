@@ -12,16 +12,16 @@ import Mermaid from '../../../components/Mermaid.astro';
 
 | Agent | Layer | What it does | You type |
 |-------|-------|--------------|----------|
-| [**Architect**](/agents/architect) | Design | Creates **or revises** the design in the issue body, classifies it as Feature or Bug | `/quack architect` |
-| [**Engineer**](/agents/engineer) | Tactics | Breaks the design into task issues organized in dependency waves | `/quack engineer` |
-| [**Maestro**](/agents/maestro) | Orchestration | Owns branches/PRs, dispatches execution waves in parallel — pure bash, no LLM | `/quack execute` |
+| [**Architect**](/agents/architect) | Design | Creates **or revises** the design in the issue body, classifies it as Feature or Bug | `/architect` |
+| [**Engineer**](/agents/engineer) | Tactics | Breaks the design into task issues organized in dependency waves | `/engineer` |
+| [**Maestro**](/agents/maestro) | Orchestration | Owns branches/PRs, dispatches execution waves in parallel — pure bash, no LLM | `/execute` |
 | [**Developer**](/agents/developer) | Build | Implements one task, merges its PR into the pipeline branch | dispatched by the Maestro |
 
 You never have to know which workflow answers: **the same `execute` comment routes by issue state**. On a Task issue it runs the Developer; on a planned issue (`Tactics:done`) it runs the Maestro; on anything else it runs the Engineer — which cascades to the Architect if there's no design yet.
 
 ## The cascade, concretely
 
-Here's what happens when you comment `/quack execute` on a **raw issue** — just a title and a couple of sentences:
+Here's what happens when you comment `/execute` on a **raw issue** — just a title and a couple of sentences:
 
 <Mermaid chart={`
 flowchart LR
@@ -52,7 +52,7 @@ flowchart LR
 
 Each hop is visible: a bot-owned status comment on the issue is edited in place (Running → ✅ done / 🔁 delegated / ⚠️ failed), and stage labels track progress. See the [full lifecycle walkthrough](/guides/pipeline-lifecycle).
 
-Prefer to review each stage? Run `/quack architect`, review, `/quack engineer`, review, then `/quack execute`. Or chain explicitly with your own stops: `/quack architect #auto:engineer` designs and plans, then waits for you.
+Prefer to review each stage? Run `/architect`, review, `/engineer`, review, then `/execute`. Or chain explicitly with your own stops: `/architect #auto:engineer` designs and plans, then waits for you.
 
 ## Core principles
 
@@ -68,7 +68,7 @@ Prefer to review each stage? Run `/quack architect`, review, `/quack engineer`, 
 
 ## Utility commands
 
-Outside the pipeline, three utilities handle recovery and lifecycle: `/quack fix` (repair a failed task run, resuming preserved partial work), `/quack revert` (undo planning, restore the human-authored issue), and `/quack close` (tear down branches, PRs, and task issues). See [Utility commands](/agents/utilities).
+Outside the pipeline, three utilities handle recovery and lifecycle: `/fix` (repair a failed task run, resuming preserved partial work), `/revert` (undo planning, restore the human-authored issue), and `/close` (tear down branches, PRs, and task issues). See [Utility commands](/agents/utilities).
 
 ## What autoducks is not
 

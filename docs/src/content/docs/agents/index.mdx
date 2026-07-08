@@ -46,22 +46,22 @@ flowchart LR
 
 The same comment is claimed by exactly **one** workflow, decided by issue state — you never pick the agent yourself:
 
-| You comment `/quack execute` on… | Who answers |
+| You comment `/execute` on… | Who answers |
 |---|---|
 | A **Task** issue (type or label `Task`) | Developer |
 | An issue with the **`Tactics:done`** label | Maestro |
 | Anything else (raw issue, or designed but unplanned) | Engineer — cascading to the Architect if `Design:done` is missing |
 
-So `/quack execute` on a fresh issue runs the whole pipeline: Architect → Engineer → Maestro → Developers. See the [lifecycle walkthrough](/guides/pipeline-lifecycle) for what that looks like comment by comment.
+So `/execute` on a fresh issue runs the whole pipeline: Architect → Engineer → Maestro → Developers. See the [lifecycle walkthrough](/guides/pipeline-lifecycle) for what that looks like comment by comment.
 
 ## Utility commands
 
 | Command | Type | What it does |
 |---------|------|--------------|
-| [`/quack review`](/agents/reviewer) | LLM | Reviews a PR against its design and acceptance criteria — read-only, never merges |
-| [`/quack fix`](/agents/utilities#quack-fix) | LLM | Repairs a failed task run, resuming preserved partial work |
-| [`/quack revert`](/agents/utilities#quack-revert) | Bash | Undoes planning, restores the human-authored issue |
-| [`/quack close`](/agents/utilities#quack-close) | Bash | Full cleanup: closes issues, PRs, and deletes branches |
+| [`/review`](/agents/reviewer) | LLM | Reviews a PR against its design and acceptance criteria — read-only, never merges |
+| [`/fix`](/agents/utilities#fix) | LLM | Repairs a failed task run, resuming preserved partial work |
+| [`/revert`](/agents/utilities#revert) | Bash | Undoes planning, restores the human-authored issue |
+| [`/close`](/agents/utilities#close) | Bash | Full cleanup: closes issues, PRs, and deletes branches |
 
 The [Reviewer](/agents/reviewer) is a **post-execution gate**, not a pipeline stage: run it once a feature/bug PR exists to get a verdict (`approve`/`comment`/`request-changes`) and severity-ranked findings before you merge.
 
@@ -89,7 +89,7 @@ Every run gives feedback in two layers:
 | 🔁 **`Agent`**: not ready — delegated | A Definition-of-Ready guard dispatched the prerequisite agent |
 | ⚠️ **`Agent`**: failed | See the categorized failure report posted below it |
 
-The bot never edits *your* comment — reactions stay on it, and `/quack revert` can safely delete all bot content while preserving everything human-authored.
+The bot never edits *your* comment — reactions stay on it, and `/revert` can safely delete all bot content while preserving everything human-authored.
 
 ## Provider abstraction
 

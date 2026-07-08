@@ -26,8 +26,10 @@ set -euo pipefail
 #                       verbatim. Empty (empty string, still base64 of
 #                       nothing) when the comment is directive-only.
 #
-# The slash-command prefix is configurable via `command` in autoducks.json
-# (default `/quack`). Command normalization: built-in synonyms
+# The slash-command namespace is configurable via `command` in
+# autoducks.json (default `""` — bare short forms like `/architect`). When a
+# namespace is set (e.g. `"quack"`), directives take the two-token form
+# `/quack architect`. Command normalization: built-in synonyms
 # (design→architect, tactics→engineer, run/work→execute) and per-agent custom
 # aliases from `triggers.<agent>[]` are resolved to their canonical verb here,
 # so every downstream `command=` consumer sees a consistent value.
@@ -39,14 +41,25 @@ BODY="${COMMENT_BODY:-$(cat)}"
 
 _CONFIG_FILE="${AUTODUCKS_CONFIG:-.autoducks/autoducks.json}"
 
-COMMAND_PREFIX="/quack"
+# Command namespace (validated; falls back to empty — bare short forms — on
+# garbage). NAMESPACE = command with a single optional leading '/' stripped.
+NAMESPACE=""
 if [[ -f "$_CONFIG_FILE" ]] && command -v jq &>/dev/null; then
-  _cfg_prefix=$(jq -r '.command // empty' "$_CONFIG_FILE" 2>/dev/null || true)
-  [[ "$_cfg_prefix" =~ ^/[a-z0-9-]+$ ]] && COMMAND_PREFIX="$_cfg_prefix"
+  NAMESPACE=$(jq -r '.command // ""' "$_CONFIG_FILE" 2>/dev/null || true)
+fi
+[[ "$NAMESPACE" =~ ^$|^/?[a-z0-9-]+$ ]] || NAMESPACE=""
+NAMESPACE="${NAMESPACE#/}"
+
+# Namespace set:   directive line is `/<namespace> <verb> ...`
+# Namespace empty: directive line is any line starting with `/<verb> ...`
+if [[ -n "$NAMESPACE" ]]; then
+  _DIRECTIVE_RE="^/${NAMESPACE}[[:space:]]+[^[:space:]]+.*"
+else
+  _DIRECTIVE_RE="^/[^[:space:]]+.*"
 fi
 
 DIRECTIVE=$(printf '%s\n' "$BODY" \
-  | grep -oE "^${COMMAND_PREFIX}[[:space:]]+[^[:space:]]+.*" \
+  | grep -oE "$_DIRECTIVE_RE" \
   | head -1 || echo "")
 
 COMMAND=""
@@ -113,12 +126,19 @@ is_directive_token() {
 
 if [[ -n "$DIRECTIVE" ]]; then
   read -ra TOKENS <<< "$DIRECTIVE"
-  COMMAND="${TOKENS[1]:-}"
+  if [[ -n "$NAMESPACE" ]]; then
+    COMMAND="${TOKENS[1]:-}"
+    ARG_START=2
+  else
+    COMMAND="${TOKENS[0]:-}"
+    COMMAND="${COMMAND#/}"
+    ARG_START=1
+  fi
   COMMAND=$(echo "$COMMAND" | tr '[:upper:]' '[:lower:]' | tr -d ',.!?:;')
   ORIGINAL_COMMAND="$COMMAND"
   COMMAND=$(normalize_verb "$COMMAND")
 
-  for tok in "${TOKENS[@]:2}"; do
+  for tok in "${TOKENS[@]:$ARG_START}"; do
     # Lowercase without stripping ':' or '#' first, so the colon syntaxes
     # (`turns:<n>`, `model:<m>`, `effort:<e>`) and `#auto:` chaining can be
     # matched below — the general strip (later) removes them for every other
@@ -197,11 +217,11 @@ if [[ -n "$DIRECTIVE" ]]; then
 
   # ── Steering prompt: capture the free-text remainder ────────────────
   # Strip a *leading run* of recognized directive tokens (verb already
-  # removed via TOKENS[1]); the first unrecognized token flips into
-  # "prose" mode, after which every token — even one that looks like a
+  # removed via TOKENS[$ARG_START-1]); the first unrecognized token flips
+  # into "prose" mode, after which every token — even one that looks like a
   # model:/effort:/turns: token — is kept verbatim, untouched.
   _in_directive_zone=1
-  for tok in "${TOKENS[@]:2}"; do
+  for tok in "${TOKENS[@]:$ARG_START}"; do
     if [[ "$_in_directive_zone" -eq 1 ]] && is_directive_token "$tok"; then
       continue
     fi
@@ -210,7 +230,7 @@ if [[ -n "$DIRECTIVE" ]]; then
   done
 
   _DIRECTIVE_LINE_NUM=$(printf '%s\n' "$BODY" \
-    | grep -nE "^${COMMAND_PREFIX}[[:space:]]+[^[:space:]]+.*" | head -1 | cut -d: -f1)
+    | grep -nE "$_DIRECTIVE_RE" | head -1 | cut -d: -f1)
   TRAILING_BODY=$(printf '%s\n' "$BODY" | tail -n +"$((_DIRECTIVE_LINE_NUM + 1))")
 fi
 

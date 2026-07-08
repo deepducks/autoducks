@@ -7,10 +7,11 @@ set -euo pipefail
 # splice into that agent's workflow `if:` guard.
 #
 # GitHub's expression engine cannot read repository files, so per-team custom
-# aliases (and the configurable slash-command prefix, `command` in
-# autoducks.json — default `/quack`) must be baked into the workflow YAML at
-# setup time. This script is the fragment generator used by the patcher in
-# scripts/update-triggers.sh (and at install time).
+# aliases (and the configurable command namespace, `command` in
+# autoducks.json — default `""`, i.e. bare short forms like `/architect`)
+# must be baked into the workflow YAML at setup time. This script is the
+# fragment generator used by the patcher in scripts/update-triggers.sh (and
+# at install time).
 #
 # Invoked with no AUTODUCKS_AGENT it only validates the triggers block
 # (format, collisions with built-ins, cross-agent duplicates).
@@ -29,9 +30,21 @@ fi
 AGENTS=(architect engineer execute fix revert close review)
 BUILTINS="architect design engineer tactics execute run work fix revert close review"
 
-# Slash-command prefix (validated; falls back to /quack on garbage)
-COMMAND_PREFIX="$(jq -r '.command // "/quack"' "$CONFIG")"
-[[ "$COMMAND_PREFIX" =~ ^/[a-z0-9-]+$ ]] || COMMAND_PREFIX="/quack"
+# Command namespace (validated; falls back to empty — bare short forms — on
+# garbage). namespace = command with a single optional leading '/' stripped.
+NS="$(jq -r '.command // ""' "$CONFIG")"
+[[ "$NS" =~ ^$|^/?[a-z0-9-]+$ ]] || NS=""
+NS="${NS#/}"
+
+# cmd_for TRIGGER — bake the command string for a trigger word:
+#   namespace == "" ? "/<trigger>" : "/<namespace> <trigger>"
+cmd_for() {
+  if [[ -z "$NS" ]]; then
+    printf '/%s' "$1"
+  else
+    printf '/%s %s' "$NS" "$1"
+  fi
+}
 
 validate_triggers() {
   local agent alias
@@ -73,5 +86,5 @@ esac
 
 while IFS= read -r alias; do
   [[ -z "$alias" ]] && continue
-  printf "startsWith(github.event.comment.body, '%s %s') ||\n" "$COMMAND_PREFIX" "$alias"
+  printf "startsWith(github.event.comment.body, '%s') ||\n" "$(cmd_for "$alias")"
 done < <(jq -r --arg a "$AGENT" '.triggers[$a][]? // empty' "$CONFIG")

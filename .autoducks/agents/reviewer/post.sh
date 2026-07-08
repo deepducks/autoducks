@@ -68,7 +68,7 @@ case "$VERDICT" in
     ;;
   request-changes)
     HEADLINE="🔴 **Review: request changes**"
-    NEXT="**Next:** run \`${AUTODUCKS_COMMAND} fix\` on the task to address the findings, then re-run \`${AUTODUCKS_COMMAND} review\`."
+    NEXT="**Next:** run \`$(autoducks_command_for fix)\` on the task to address the findings, then re-run \`$(autoducks_command_for review)\`."
     ;;
   *)
     HEADLINE="💬 **Review: comment**"

@@ -7,7 +7,7 @@ import { Aside } from '@astrojs/starlight/components';
 import Mermaid from '../../../components/Mermaid.astro';
 
 ```
-/quack architect
+/architect
 ```
 
 The Architect turns a rough request into a complete, actionable design — or **revises a design that already exists**. It bridges "here's an idea" and "here's what to build and how", and classifies the issue as a **Feature** or a **Bug**.
@@ -34,7 +34,7 @@ flowchart LR
 
 | Event | Condition |
 |-------|-----------|
-| Issue comment | `/quack architect` or `/quack design` |
+| Issue comment | `/architect` or `/design` |
 | Workflow dispatch | Dispatched by the Engineer's Definition-of-Ready guard (with the chain re-queued) |
 
 There is **no** automatic trigger from labels — entry is by command or cascade only. The Architect itself has no Definition of Ready: it accepts any issue.
@@ -71,17 +71,17 @@ This is why the pipeline can require a design for every issue without punishing 
 ## Overrides
 
 ```
-/quack architect model:opus effort:max turns:40
-/quack architect #auto:engineer          # design, then plan, then stop
-/quack architect #auto:engineer+execute  # full pipeline from here
+/architect model:opus effort:max turns:40
+/architect #auto:engineer          # design, then plan, then stop
+/architect #auto:engineer+execute  # full pipeline from here
 ```
 
 See [Slash commands](/reference/slash-commands) for the full grammar.
 
 <Aside type="tip">
-Already have a detailed spec in the issue? Run `/quack architect` anyway — revision mode structures it and applies `Design:done` without rewriting your content, and the rest of the pipeline is then guaranteed a reviewed design.
+Already have a detailed spec in the issue? Run `/architect` anyway — revision mode structures it and applies `Design:done` without rewriting your content, and the rest of the pipeline is then guaranteed a reviewed design.
 </Aside>
 
 ## Steering a re-run
 
-Editing the issue body before re-running is the primary way to steer the Architect today — revision mode preserves your edits rather than rewriting them. A trigger-comment prompt (free text right in the `/quack architect` comment) is a planned enhancement for steering without editing the body first. See [Re-running agents](/guides/re-running-agents) for the full picture across every stage.
+Editing the issue body before re-running is the primary way to steer the Architect today — revision mode preserves your edits rather than rewriting them. A trigger-comment prompt (free text right in the `/architect` comment) is a planned enhancement for steering without editing the body first. See [Re-running agents](/guides/re-running-agents) for the full picture across every stage.

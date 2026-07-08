@@ -1,6 +1,6 @@
 ---
 title: Slash commands
-description: Complete reference for the /quack command surface.
+description: Complete reference for the short-form command surface.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -8,37 +8,39 @@ import { Aside } from '@astrojs/starlight/components';
 All autoducks commands are issue comments. The full grammar:
 
 ```
-/quack <trigger> [model:<model>] [effort:<level>] [turns:<n>] [#auto:<agent>+<agent>...]
+/<trigger> [model:<model>] [effort:<level>] [turns:<n>] [#auto:<agent>+<agent>...]
 ```
+
+The bare `/<trigger>` form (e.g. `/execute`) is the default — no prefix word between the slash and the verb. If your repository sets a `command` namespace in `.autoducks/autoducks.json`, insert it right after the slash instead: `/<namespace> <trigger> ...` (e.g. `/quack execute`). See [Namespace](#namespace) below.
 
 ## Cheat sheet
 
 | You want to… | Comment |
 |---|---|
-| Run the whole pipeline on an issue | `/quack execute` |
-| Design (or revise the design) only | `/quack architect` |
-| Plan (or revise the plan) only | `/quack engineer` |
-| Design + plan, then stop for review | `/quack architect #auto:engineer` |
-| Review a finished PR before merging | `/quack review` |
-| Re-run a failed task | `/quack fix` (on the task issue) |
-| Undo the plan, keep the issue | `/quack revert` |
-| Tear everything down | `/quack close` |
-| Use a stronger model at max effort | `/quack execute model:opus effort:max` |
-| Cap the agent's turns | `/quack execute turns:30` |
+| Run the whole pipeline on an issue | `/execute` |
+| Design (or revise the design) only | `/architect` |
+| Plan (or revise the plan) only | `/engineer` |
+| Design + plan, then stop for review | `/architect #auto:engineer` |
+| Review a finished PR before merging | `/review` |
+| Re-run a failed task | `/fix` (on the task issue) |
+| Undo the plan, keep the issue | `/revert` |
+| Tear everything down | `/close` |
+| Use a stronger model at max effort | `/execute model:opus effort:max` |
+| Cap the agent's turns | `/execute turns:30` |
 
 ## Command routing
 
 | Command | Issue state | Who answers |
 |---------|------------|-------------|
-| `/quack architect` | any | [Architect](/agents/architect) |
-| `/quack engineer` | any (needs `Design:done`, else cascades to Architect) | [Engineer](/agents/engineer) |
-| `/quack execute` | Task issue | [Developer](/agents/developer) |
-| `/quack execute` | has `Tactics:done` | [Maestro](/agents/maestro) |
-| `/quack execute` | anything else | [Engineer](/agents/engineer) → cascade |
-| `/quack review` | feature/bug issue with an open pipeline PR, or the PR itself | [Reviewer](/agents/reviewer) |
-| `/quack fix` | any task | [Fix agent](/agents/utilities#quack-fix) |
-| `/quack revert` | planned issue | [Revert agent](/agents/utilities#quack-revert) |
-| `/quack close` | planned issue | [Close agent](/agents/utilities#quack-close) |
+| `/architect` | any | [Architect](/agents/architect) |
+| `/engineer` | any (needs `Design:done`, else cascades to Architect) | [Engineer](/agents/engineer) |
+| `/execute` | Task issue | [Developer](/agents/developer) |
+| `/execute` | has `Tactics:done` | [Maestro](/agents/maestro) |
+| `/execute` | anything else | [Engineer](/agents/engineer) → cascade |
+| `/review` | feature/bug issue with an open pipeline PR, or the PR itself | [Reviewer](/agents/reviewer) |
+| `/fix` | any task | [Fix agent](/agents/utilities#fix) |
+| `/revert` | planned issue | [Revert agent](/agents/utilities#revert) |
+| `/close` | planned issue | [Close agent](/agents/utilities#close) |
 
 > **Routing signals are labels** (with the native issue type as an org-only enhancement): `Task`, `Tactics:done`, `Design:done`, `Feature`/`Bug`. Agents apply them automatically — no manual labeling required.
 
@@ -60,8 +62,8 @@ Overrides apply to the triggered run — and propagate to chained agents and wav
 ### `model:`
 
 ```
-/quack execute model:opus
-/quack architect model:claude-sonnet-5
+/execute model:opus
+/architect model:claude-sonnet-5
 ```
 
 | Alias | Resolves to |
@@ -71,7 +73,7 @@ Overrides apply to the triggered run — and propagate to chained agents and wav
 | `haiku` | `claude-haiku-4-5` |
 | any `claude-*` id | used as-is |
 
-Bare aliases also work positionally: `/quack execute opus`.
+Bare aliases also work positionally: `/execute opus`.
 
 ### `effort:`
 
@@ -86,17 +88,17 @@ LLM effort level ("effort" follows the cross-provider convention — OpenAI `rea
 | `max` | Maximum reasoning depth |
 
 ```
-/quack engineer effort:max
+/engineer effort:max
 ```
 
-Bare values also work positionally: `/quack engineer max`.
+Bare values also work positionally: `/engineer max`.
 
 ### `turns:`
 
 Maximum number of agentic turns for this run (1–1000). `turns=<n>`, `max-turns=<n>`, and `max_turns=<n>` are equivalent forms. Malformed or out-of-range values are ignored (the next tier of defaults applies).
 
 ```
-/quack execute turns:80
+/execute turns:80
 ```
 
 On the wave path, the Maestro forwards `model:`/`effort:`/`turns:` from your comment to every dispatched Developer.
@@ -108,8 +110,8 @@ On the wave path, the Maestro forwards `model:`/`effort:`/`turns:` from your com
 Queue agents to run after this one finishes, separated by `+`:
 
 ```
-/quack architect #auto:engineer            # design → plan → stop
-/quack architect #auto:engineer+execute    # full pipeline, explicit
+/architect #auto:engineer            # design → plan → stop
+/architect #auto:engineer+execute    # full pipeline, explicit
 ```
 
 Semantics:
@@ -125,15 +127,30 @@ See [Chaining & overrides](/guides/chaining-and-overrides) for recipes.
 
 Yes — every agent recomputes from visible ITS/git state, so re-issuing the same comment is always safe and is how you resume an interrupted run, refine a design or plan, or retry after a fix. See [Re-running agents](/guides/re-running-agents) for what each stage does on a second run and how to steer it.
 
-## Configurable prefix
+## Namespace
 
-The `/quack` prefix comes from `command` in `.autoducks/autoducks.json`. GitHub evaluates workflow `if:` guards without reading repository files, so after changing it you must re-bake the guards and commit:
+By default `command` is empty (`""`) in `.autoducks/autoducks.json`, so every trigger is a bare verb: `/execute`, `/architect`, `/fix`, and so on. Setting `command` to a word gives you a namespaced prefix instead — the escape hatch for repositories that need one, e.g. to avoid colliding with another bot's slash commands:
+
+```json
+{ "command": "quack" }
+```
+
+turns every trigger into `/quack <verb>` (`/quack execute`, `/quack architect`, ...). The value is `/`-tolerant — `"quack"` and `"/quack"` both work — and must otherwise match `^/?[a-z0-9-]+$` (or be empty); anything else falls back to the default. GitHub evaluates workflow `if:` guards without reading repository files, so after changing `command` you must re-bake the guards and commit:
 
 ```bash
 bash scripts/update-triggers.sh
 ```
 
 The same applies to [custom trigger aliases](/reference/configuration#custom-trigger-aliases).
+
+### Bounded blast radius
+
+A bare verb is shorter and slightly more likely to be matched by an unrelated comment than a namespaced one. Two safeguards bound the consequences of an accidental fire, whether or not you use a namespace:
+
+- **The [Authorization Gate](/reference/security)** runs before anything else — an off-target match from an untrusted commenter is denied before any LLM call, comment, branch, or PR.
+- **Agents are safe, state-based no-ops** — they recompute from visible ITS/git state rather than acting blindly, so a stray trigger with nothing to do (e.g. `/revert` on an issue that was never planned) is a no-op, not a destructive action.
+
+Set `command` to a namespace word if you want the extra margin on top of those two gates.
 
 ## Programmatic dispatch
 

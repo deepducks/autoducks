@@ -38,7 +38,7 @@ for t in "${TASK_NUMBERS[@]:-}"; do
     # Find and close open PR on this branch
     PR_NUM=$(gh pr list --repo "$REPO" --head "$branch" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)
     if [[ -n "$PR_NUM" ]]; then
-      git::close_pr "$PR_NUM" "Closed by \`${AUTODUCKS_COMMAND} close\` on #$FEATURE" 2>/dev/null || true
+      git::close_pr "$PR_NUM" "Closed by \`$(autoducks_command_for close)\` on #$FEATURE" 2>/dev/null || true
       ((PRS_CLOSED++)) || true
     fi
 
@@ -51,7 +51,7 @@ for t in "${TASK_NUMBERS[@]:-}"; do
   for lbl in "Work:coding" "Work:progress" "Work:done"; do
     its::remove_label "$t" "$lbl" 2>/dev/null || true
   done
-  its::close_issue "$t" "Closed via \`${AUTODUCKS_COMMAND} close\` on #$FEATURE" 2>/dev/null || true
+  its::close_issue "$t" "Closed via \`$(autoducks_command_for close)\` on #$FEATURE" 2>/dev/null || true
   ((TASKS_CLOSED++)) || true
 done
 
@@ -66,7 +66,7 @@ for prefix in "$(branch_prefix_for_issue "$FEATURE")" feature fix; do
     # Close feature PR if exists
     FEATURE_PR=$(gh pr list --repo "$REPO" --head "$FEATURE_BRANCH" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)
     if [[ -n "$FEATURE_PR" ]]; then
-      git::close_pr "$FEATURE_PR" "Closed by \`${AUTODUCKS_COMMAND} close\` on #$FEATURE" 2>/dev/null || true
+      git::close_pr "$FEATURE_PR" "Closed by \`$(autoducks_command_for close)\` on #$FEATURE" 2>/dev/null || true
       ((PRS_CLOSED++)) || true
     fi
 
@@ -96,7 +96,7 @@ if [[ "$FEATURE_ALREADY_CLOSED" == "true" && "$PRS_CLOSED" -eq 0 && "$BRANCHES_D
 fi
 
 # Close the feature issue
-its::close_issue "$FEATURE" "Closed by @$COMMENTER via \`${AUTODUCKS_COMMAND} close\`.
+its::close_issue "$FEATURE" "Closed by @$COMMENTER via \`$(autoducks_command_for close)\`.
 
 **Cleanup summary:**
 - Tasks closed: $TASKS_CLOSED

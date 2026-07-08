@@ -26,34 +26,34 @@ On failure, a categorized report is posted with the diagnosis, a **View the run 
 
 | Category | What happened | Remedy |
 |----------|---------------|--------|
-| `merge-conflict` | The task PR couldn't merge into the pipeline branch (usually conflicts with work another wave task merged first) | Resolve the conflict on the PR, or `/quack fix` on the task — it rebases and retries |
-| `no-changes` | The agent finished but produced no code changes | Refine the task spec / acceptance criteria, then `/quack fix` |
-| `scope-missing` | The agent didn't produce its expected output (design or plan file) | Re-run `/quack architect` or `/quack engineer` |
-| `parse` | The plan couldn't be parsed into tasks (a template hint is posted) | Re-run `/quack engineer` |
-| `max_turns` | The agent hit its turn limit — **partial work preserved** (the report names the branch) | `/quack fix` resumes from the preserved branch; consider `turns:<n>` for more headroom |
-| `infra` | Unexpected error (API, git, runtime) before finishing | `/quack fix` to retry; check the run logs |
+| `merge-conflict` | The task PR couldn't merge into the pipeline branch (usually conflicts with work another wave task merged first) | Resolve the conflict on the PR, or `/fix` on the task — it rebases and retries |
+| `no-changes` | The agent finished but produced no code changes | Refine the task spec / acceptance criteria, then `/fix` |
+| `scope-missing` | The agent didn't produce its expected output (design or plan file) | Re-run `/architect` or `/engineer` |
+| `parse` | The plan couldn't be parsed into tasks (a template hint is posted) | Re-run `/engineer` |
+| `max_turns` | The agent hit its turn limit — **partial work preserved** (the report names the branch) | `/fix` resumes from the preserved branch; consider `turns:<n>` for more headroom |
+| `infra` | Unexpected error (API, git, runtime) before finishing | `/fix` to retry; check the run logs |
 
 Task failures under a feature also post a mirror report on the parent issue — the Maestro pauses that wave until the task is resolved.
 
-## Resuming with `/quack fix`
+## Resuming with `/fix`
 
 ```
-/quack fix
+/fix
 ```
 
 on the **task** issue. The Fix agent finds the newest existing task branch (including `WIP:` branches preserved on a `max_turns` cutoff), reads the failure context from the last 10 comments, and repairs on top of what's there — reusing the open PR if one exists.
 
 <Aside type="tip">
-Comment *what went wrong* before running `/quack fix` — the agent reads recent comments as context.
+Comment *what went wrong* before running `/fix` — the agent reads recent comments as context.
 </Aside>
 
 ## Merge conflicts
 
-When auto-merge can't resolve a task PR, you get a 🔀 report naming the PR and branch. Resolve it like any conflict (rebase or merge the target into the task branch, push), then either merge the PR yourself or run `/quack fix` — the next merge into the pipeline branch re-triggers the Maestro automatically.
+When auto-merge can't resolve a task PR, you get a 🔀 report naming the PR and branch. Resolve it like any conflict (rebase or merge the target into the task branch, push), then either merge the PR yourself or run `/fix` — the next merge into the pipeline branch re-triggers the Maestro automatically.
 
 ## Questions Mode
 
-If the Engineer finds the design genuinely insufficient, it doesn't guess — it posts up to 5 blocking questions and stops (the chain stops too). Answer them as comments and re-run `/quack engineer`: the revision context carries your answers to the planner.
+If the Engineer finds the design genuinely insufficient, it doesn't guess — it posts up to 5 blocking questions and stops (the chain stops too). Answer them as comments and re-run `/engineer`: the revision context carries your answers to the planner.
 
 ## The pipeline seems stuck
 
@@ -61,7 +61,7 @@ The Maestro advances on PR-merge events. If nothing is moving:
 
 1. Check the issue's last 🌊/⏳ comment — ⏳ means an earlier wave still has an open task.
 2. Check the open task issues for ⚠️ reports (a failed task pauses its wave).
-3. Re-issue `/quack execute` on the issue — the Maestro recomputes from visible state; duplicate-dispatch guards make this always safe.
+3. Re-issue `/execute` on the issue — the Maestro recomputes from visible state; duplicate-dispatch guards make this always safe.
 
 ## Denied runs
 

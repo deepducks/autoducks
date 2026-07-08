@@ -109,7 +109,7 @@ else
 
 PR #$PR_NUM is open and waiting for your review.
 
-**Next:** review and merge PR #$PR_NUM, or comment \`${AUTODUCKS_COMMAND} fix\` again if the
+**Next:** review and merge PR #$PR_NUM, or comment \`$(autoducks_command_for fix)\` again if the
 problem persists."
 fi
 

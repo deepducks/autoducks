@@ -156,7 +156,7 @@ else
 PR #$PR_NUM is open against \`$PR_BASE_BRANCH\` and is waiting for your review — it
 is **not** auto-merged.
 
-**Next:** review and merge PR #$PR_NUM, or comment \`${AUTODUCKS_COMMAND} fix\` on this issue
+**Next:** review and merge PR #$PR_NUM, or comment \`$(autoducks_command_for fix)\` on this issue
 if changes are needed."
 fi
 
