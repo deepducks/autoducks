@@ -42,3 +42,20 @@ pipeline_branch_number() {
     echo "${BASH_REMATCH[2]}"
   fi
 }
+
+# resolve_feature_num_from_pr HEAD_REF PR_BODY → feature/bug issue number, or empty
+# Authoritative source is the pipeline branch name (feature/<N>-… | fix/<N>-…).
+# Falls back to the PR body's `Closes #N` refs — preferring the LAST ref, since
+# the Maestro appends `Closes #<feature>` after every `Closes #<task>`
+# (agents/maestro/run.sh; core/orchestration/create-final-pr.sh).
+resolve_feature_num_from_pr() {
+  local head_ref="$1" pr_body="${2:-}"
+  local n
+  n=$(pipeline_branch_number "$head_ref")
+  if [[ -n "$n" ]]; then
+    echo "$n"
+    return 0
+  fi
+  # Non-pipeline head: take the LAST `Closes #N` (feature is appended last).
+  grep -oiP '\bcloses\s+#\K[0-9]+' <<< "$pr_body" | tail -1 || true
+}
