@@ -78,6 +78,7 @@ export default defineConfig({
           items: [
             { label: 'Lifecycle of an issue', slug: 'guides/pipeline-lifecycle' },
             { label: 'Chaining & overrides', slug: 'guides/chaining-and-overrides' },
+            { label: 'Re-running agents', slug: 'guides/re-running-agents' },
             { label: 'When things fail', slug: 'guides/when-things-fail' },
             { label: 'Migrating from /agents', slug: 'guides/migrating-from-agents' },
           ],
