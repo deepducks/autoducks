@@ -1,0 +1,157 @@
+name: 'Autoducks: Resolver Agent'
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [synchronize]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        required: false
+        type: string
+        default: ''
+      pr_number:
+        required: false
+        type: string
+        default: ''
+      actor:
+        required: false
+        type: string
+        default: ''
+      model:
+        required: false
+        type: string
+        default: ''
+      effort:
+        required: false
+        type: string
+        default: ''
+      max_turns:
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+  id-token: write
+
+# Serialize the resolver per PR: the automatic (synchronize) and manual
+# (/resolve) entry points collide on the same group, so a PR is never
+# resolved by two concurrent runs. Queue rather than cancel — cancelling
+# mid-run could leave the branch half-fixed.
+concurrency:
+  group: autoducks-resolver-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number || inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  resolver:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.action == 'synchronize' &&
+       github.event.pull_request.draft == false &&
+       (startsWith(github.event.pull_request.head.ref, 'feature/') ||
+        startsWith(github.event.pull_request.head.ref, 'fix/')) &&
+       !startsWith(github.event.pull_request.base.ref, 'feature/') &&
+       !startsWith(github.event.pull_request.base.ref, 'fix/')) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.comment.author_association != 'MANNEQUIN' &&
+       startsWith(github.event.comment.body, '/resolve'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref || '' }}
+          token: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: Authorize
+        id: authz
+        run: bash .autoducks/core/security/authorize.sh
+        env:
+          AUTODUCKS_AGENT: resolver
+          ACTOR: ${{ github.event.comment.user.login || github.event.sender.login }}
+          AUTHOR_ASSOC: ${{ github.event.comment.author_association || github.event.issue.author_association || github.event.pull_request.author_association }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUM: ${{ github.event.issue.number || github.event.pull_request.number || inputs.pr_number || inputs.issue_number }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Load agent defaults
+        id: agent
+        if: steps.authz.outcome == 'success'
+        run: AUTODUCKS_AGENT=resolver bash .autoducks/core/config/load-agent-defaults.sh >> "$GITHUB_OUTPUT"
+      - name: Set context
+        id: ctx
+        if: steps.authz.outcome == 'success'
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ -n "${{ inputs.pr_number }}" ]]; then
+              echo "issue_num=${{ inputs.pr_number }}" >> "$GITHUB_OUTPUT"
+              echo "is_pr=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "issue_num=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
+              echo "is_pr=false" >> "$GITHUB_OUTPUT"
+            fi
+            echo "model=${{ inputs.model }}" >> "$GITHUB_OUTPUT"
+            echo "effort=${{ inputs.effort }}" >> "$GITHUB_OUTPUT"
+            echo "max_turns=${{ inputs.max_turns }}" >> "$GITHUB_OUTPUT"
+            echo "commenter=${{ inputs.actor }}" >> "$GITHUB_OUTPUT"
+            echo "command=" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "issue_num=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+            echo "is_pr=true" >> "$GITHUB_OUTPUT"
+            echo "model=" >> "$GITHUB_OUTPUT"
+            echo "effort=" >> "$GITHUB_OUTPUT"
+            echo "max_turns=" >> "$GITHUB_OUTPUT"
+            echo "commenter=${{ github.event.sender.login }}" >> "$GITHUB_OUTPUT"
+            echo "command=" >> "$GITHUB_OUTPUT"
+          else
+            echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+            echo "is_pr=${{ github.event.issue.pull_request != null }}" >> "$GITHUB_OUTPUT"
+            echo "commenter=${{ github.event.comment.user.login }}" >> "$GITHUB_OUTPUT"
+            source .autoducks/core/config/parse-directive.sh >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
+      - name: Pre-execution
+        id: pre
+        if: steps.authz.outcome == 'success'
+        run: bash .autoducks/agents/resolver/pre.sh
+        env:
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          IS_PR: ${{ steps.ctx.outputs.is_pr }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: Run LLM agent
+        if: steps.authz.outcome == 'success'
+        uses: ./.autoducks/providers/llm/claude
+        with:
+          prompt_file: .autoducks/agents/resolver/prompt.md
+          allowed_tools: "Read,Grep,Glob,Edit,Write,Bash(read-only)"
+          model: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
+          effort: ${{ steps.ctx.outputs.effort || steps.agent.outputs.effort }}
+          max_turns: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      - name: Post-execution
+        if: always() && steps.authz.outcome == 'success'
+        run: bash .autoducks/agents/resolver/post.sh
+        env:
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          MODEL: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
+          EFFORT: ${{ steps.ctx.outputs.effort || steps.agent.outputs.effort }}
+          OVERRIDE_MODEL: ${{ steps.ctx.outputs.model }}
+          OVERRIDE_EFFORT: ${{ steps.ctx.outputs.effort }}
+          OVERRIDE_MAX_TURNS: ${{ steps.ctx.outputs.max_turns }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
