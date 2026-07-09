@@ -61,6 +61,12 @@ else
   fail "fresh install: workflows mirror out of sync with runtime templates"
 fi
 
+if cmp -s "$CONSUMER/.autoducks/core/orchestration/fold-duplicate.sh" "$REPO_ROOT/.autoducks/core/orchestration/fold-duplicate.sh"; then
+  pass "fresh install: core/orchestration/fold-duplicate.sh vendored byte-identical"
+else
+  fail "fresh install: core/orchestration/fold-duplicate.sh missing or out of sync"
+fi
+
 if diff -r "$SOURCE_DIR" "$SOURCE_SNAPSHOT" >/dev/null; then
   pass "fresh install: source dir untouched (CLEANUP_TMP guard)"
 else
