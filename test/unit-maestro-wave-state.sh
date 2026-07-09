@@ -495,6 +495,112 @@ fi
 
 echo ""
 
+# =============================================================================
+# Human single-task /execute (M7) — transient status comment must not linger
+# on the duplicate / no-dispatch branch.
+#
+# Reproduces AUDIT-PR-inconsistencies-2026-07-09.md finding M7: a single-task
+# feature (no `waves:` block, IS_SINGLE=true) whose Developer task PR is
+# already open but unmerged. FEATURE_DONE is derived from merged PRs only, so
+# it is false; prevent_duplicate_dispatch then finds the open `fixes #<FEATURE>`
+# PR and returns 1 (duplicate). Pre-fix, the inner `if` had no `else`, so
+# report() never ran on this branch and the transient "Running…" comment
+# lingered forever. Asserts the else added to run.sh resolves it to ✅.
+# =============================================================================
+echo "── Human single-task /execute: transient status comment must not linger (M7) ──"
+
+FEATURE=700
+
+FEATURE_BODY_SINGLE=$(cat <<EOF
+## Plan
+
+Single task — the Engineer collapsed the plan into the feature issue itself
+(no sub-tasks, no \`waves:\` block).
+EOF
+)
+
+jq -n --arg body "$FEATURE_BODY_SINGLE" \
+  '{title: "Add widget", body: $body, labels: ["Tactics:done"], author: "alice"}' \
+  > "$MOCK_ISSUE_DIR/$FEATURE.json"
+
+echo "[]" > "$MOCK_MERGED_PRS_FILE"
+jq -n --arg t "$FEATURE" \
+  '[{number: 970, title: "Task PR in progress", headRefName: "feature/700-add-widget",
+     body: ("Working on it.\n\nFixes #" + $t), mergeable: "MERGEABLE", mergeStateStatus: "CLEAN"}]' \
+  > "$MOCK_OPEN_PRS_FILE"
+echo "[]" > "$MOCK_COMMENTS_FILE"
+: > "$DISPATCH_LOG"
+: > "$COMMENT_LOG"
+
+# --- Mid-build run: task PR already open — the duplicate-guard / no-dispatch
+# branch that pre-fix never called report() on. --------------------------
+RC_MIDBUILD=0
+run_maestro COMMENT_ID=1 || RC_MIDBUILD=$?
+[[ "$RC_MIDBUILD" -eq 0 ]] \
+  && pass "single-task mid-build run: maestro exits 0" \
+  || fail "single-task mid-build run: rc=$RC_MIDBUILD: $(tail -10 "$SCRATCH/stderr.log")"
+
+[[ "$(count_of "issue_number=$FEATURE" "$DISPATCH_LOG")" -eq 0 ]] \
+  && pass "single-task mid-build run: Developer NOT dispatched — duplicate guard fired" \
+  || fail "single-task mid-build run: Developer was dispatched despite an open task PR: $(cat "$DISPATCH_LOG")"
+
+MARKER_SINGLE="<!-- autoducks:maestro-status:$FEATURE -->"
+COMMENTS_AFTER_MIDBUILD=$(jq 'length' "$MOCK_COMMENTS_FILE")
+if [[ "$COMMENTS_AFTER_MIDBUILD" -eq 2 ]]; then
+  pass "single-task mid-build run: exactly two comments exist (transient status + persistent orchestration)"
+else
+  fail "single-task mid-build run: expected exactly 2 comments, found $COMMENTS_AFTER_MIDBUILD: $(cat "$MOCK_COMMENTS_FILE")"
+fi
+
+TRANSIENT_BODY_MIDBUILD=$(jq -r --arg marker "$MARKER_SINGLE" \
+  '[.[] | select((.body // "") | contains($marker) | not)] | .[0].body // empty' "$MOCK_COMMENTS_FILE")
+if [[ -n "$TRANSIENT_BODY_MIDBUILD" ]] && echo "$TRANSIENT_BODY_MIDBUILD" | grep -q '✅' && echo "$TRANSIENT_BODY_MIDBUILD" | grep -q 'finished working'; then
+  pass "single-task mid-build run: transient status comment resolved to ✅ finished, not left at Running… (M7 fix)"
+else
+  fail "single-task mid-build run: transient status comment not resolved: $TRANSIENT_BODY_MIDBUILD"
+fi
+if echo "$TRANSIENT_BODY_MIDBUILD" | grep -qi 'running on'; then
+  fail "single-task mid-build run: transient status comment still shows the Running… headline (M7 regression)"
+else
+  pass "single-task mid-build run: transient status comment no longer shows the Running… headline"
+fi
+
+# --- First-run companion: no open PR yet — the Developer IS dispatched and
+# the transient comment still resolves to ✅. Locks in the un-gated happy
+# path alongside the mid-build fix above. -------------------------------
+FEATURE=701
+
+jq -n --arg body "$FEATURE_BODY_SINGLE" \
+  '{title: "Add gadget", body: $body, labels: ["Tactics:done"], author: "alice"}' \
+  > "$MOCK_ISSUE_DIR/$FEATURE.json"
+
+echo "[]" > "$MOCK_MERGED_PRS_FILE"
+echo "[]" > "$MOCK_OPEN_PRS_FILE"
+echo "[]" > "$MOCK_COMMENTS_FILE"
+: > "$DISPATCH_LOG"
+: > "$COMMENT_LOG"
+
+RC_FIRSTRUN=0
+run_maestro COMMENT_ID=1 || RC_FIRSTRUN=$?
+[[ "$RC_FIRSTRUN" -eq 0 ]] \
+  && pass "single-task first run: maestro exits 0" \
+  || fail "single-task first run: rc=$RC_FIRSTRUN: $(tail -10 "$SCRATCH/stderr.log")"
+
+[[ "$(count_of "issue_number=$FEATURE" "$DISPATCH_LOG")" -eq 1 ]] \
+  && pass "single-task first run: Developer dispatched — no open PR yet" \
+  || fail "single-task first run: expected exactly one dispatch for #$FEATURE, dispatch log: $(cat "$DISPATCH_LOG")"
+
+MARKER_FIRSTRUN="<!-- autoducks:maestro-status:$FEATURE -->"
+TRANSIENT_BODY_FIRSTRUN=$(jq -r --arg marker "$MARKER_FIRSTRUN" \
+  '[.[] | select((.body // "") | contains($marker) | not)] | .[0].body // empty' "$MOCK_COMMENTS_FILE")
+if [[ -n "$TRANSIENT_BODY_FIRSTRUN" ]] && echo "$TRANSIENT_BODY_FIRSTRUN" | grep -q '✅' && ! echo "$TRANSIENT_BODY_FIRSTRUN" | grep -qi 'running on'; then
+  pass "single-task first run: transient status comment resolved to ✅ finished (happy path unaffected)"
+else
+  fail "single-task first run: transient status comment not resolved: $TRANSIENT_BODY_FIRSTRUN"
+fi
+
+echo ""
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

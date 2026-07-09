@@ -135,6 +135,8 @@ if [[ "$IS_SINGLE" == "true" ]]; then
         ${WORKER_EFFORT:+-f "effort=$WORKER_EFFORT"} \
         ${WORKER_MAX_TURNS:+-f "max_turns=$WORKER_MAX_TURNS"}
       report "**Single-task plan** — dispatched the Developer on the issue itself (no sub-tasks). The orchestrator finishes up when its PR merges."
+    else
+      report "**Single-task plan** — the Developer is already on it (task PR still open). No new dispatch needed; the orchestrator finishes up when its PR merges."
     fi
   else
     create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "$FEATURE"
