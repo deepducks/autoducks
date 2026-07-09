@@ -77,7 +77,7 @@ else
 fi
 
 echo "── agent label mapping ──"
-for pair in "engineer Engineer" "maestro Maestro" "developer Developer" "fix Fix" "reviewer Reviewer" "rework Rework" "defer Defer"; do
+for pair in "engineer Engineer" "maestro Maestro" "developer Developer" "fix Fix" "reviewer Reviewer" "resolver Resolver" "rework Rework" "defer Defer"; do
   a="${pair%% *}"; want="${pair##* }"
   got=$(AUTODUCKS_AGENT="$a" status_comment::_label)
   [[ "$got" == "$want" ]] && pass "$a → $want" || fail "$a → $got"

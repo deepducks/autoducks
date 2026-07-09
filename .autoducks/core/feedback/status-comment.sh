@@ -34,6 +34,7 @@ status_comment::_label() {
     revert)    echo "Revert"    ;;
     close)     echo "Close"     ;;
     reviewer)  echo "Reviewer"  ;;
+    resolver)  echo "Resolver"  ;;
     rework)    echo "Rework"    ;;
     defer)     echo "Defer"     ;;
     merge)     echo "Merge"     ;;
