@@ -1,11 +1,10 @@
-# Advisory CI: runs the shell unit suite on every PR and on pushes to main.
+# CI: runs the shell unit suite on every PR and on pushes to main.
 #
-# NON-BLOCKING by design: this workflow is intentionally NOT configured as a
-# required status check in branch protection. It surfaces regressions in the
-# `test/unit-*.sh` suite without gating merges, because the suite still carries
-# pre-existing failures (tracked separately). Once the suite is fully green,
-# promote this to a required check.
-name: CI — unit tests (advisory)
+# The suite is fully green (31/31) on both Linux (GNU) and macOS (BSD) as of #784,
+# so this job now fails the run on any regression. To make it BLOCKING, add it as a
+# required status check in main's branch protection — note this also gates the
+# autoducks agents' auto-merges, so confirm the pipeline waits for it first.
+name: CI — unit tests
 
 on:
   pull_request:
