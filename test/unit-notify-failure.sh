@@ -157,11 +157,42 @@ assert_category "parse" \
 
 assert_category "max_turns" \
   "partial work has been preserved" \
-  '`/fix` to resume from the partial branch'
+  '`/execute turns=100` to resume from the partial branch'
 
 assert_category "infra" \
   "The run hit an unexpected error before it could finish" \
   '`/fix` to retry'
+
+# ---------------------------------------------------------------------------
+# Test 4b: max_turns retry budget derives from MAX_TURNS (double + cap + fallback)
+# ---------------------------------------------------------------------------
+echo "[4b] max_turns retry budget: double + cap + fallback"
+
+assert_max_turns_budget() {
+  local label="$1" max_turns_value="$2" expect_turns="$3"
+  reset_log
+  (
+    unset _AUTODUCKS_NOTIFIED
+    export AUTODUCKS_FAIL_CATEGORY="max_turns"
+    if [[ -n "$max_turns_value" ]]; then
+      export MAX_TURNS="$max_turns_value"
+    else
+      unset MAX_TURNS
+    fi
+    notify_failure "203" "603"
+  )
+  local body
+  body=$(cat "$SCRATCH/comment_1_body.txt")
+  if echo "$body" | grep -qF "turns=$expect_turns"; then
+    pass "$label: suggests turns=$expect_turns"
+  else
+    fail "$label: expected turns=$expect_turns missing: $body"
+  fi
+}
+
+assert_max_turns_budget "MAX_TURNS=200 doubles" "200" "400"
+assert_max_turns_budget "MAX_TURNS=800 caps at 1000" "800" "1000"
+assert_max_turns_budget "MAX_TURNS=abc malformed falls back" "abc" "100"
 
 # ---------------------------------------------------------------------------
 # Test 5: unknown/unset category defaults to infra
