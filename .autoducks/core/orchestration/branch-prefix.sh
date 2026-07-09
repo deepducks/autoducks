@@ -57,5 +57,5 @@ resolve_feature_num_from_pr() {
     return 0
   fi
   # Non-pipeline head: take the LAST `Closes #N` (feature is appended last).
-  grep -oiP '\bcloses\s+#\K[0-9]+' <<< "$pr_body" | tail -1 || true
+  sed -nE 's/.*(^|[^[:alnum:]_])[Cc]loses[[:space:]]+#([0-9]+).*/\2/p' <<< "$pr_body" | tail -1 || true
 }

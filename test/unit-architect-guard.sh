@@ -60,6 +60,7 @@ run_pre() { # $1 = issue json file
     PATH="$SCRATCH/bin:$PATH" \
     GITHUB_ACTIONS=true \
     ISSUE_NUM=10 REPO=x/y RUN_ID=999 COMMENT_ID=555 COMMENTER=alice \
+    RUNNER_TEMP="$SCRATCH" GITHUB_RUN_ID=archtest \
     GITHUB_OUTPUT="$SCRATCH/gh_output" \
     GH_TOKEN=t \
     bash "$REPO_ROOT/.autoducks/agents/architect/pre.sh"
@@ -72,6 +73,7 @@ run_post() { # $1 = auto_chain (optional)
     PATH="$SCRATCH/bin:$PATH" \
     GITHUB_ACTIONS=true \
     ISSUE_NUM=10 REPO=x/y RUN_ID=999 COMMENT_ID=555 COMMENTER=alice \
+    RUNNER_TEMP="$SCRATCH" GITHUB_RUN_ID=archtest \
     AUTO_CHAIN="${1:-}" \
     GH_TOKEN=t \
     bash "$REPO_ROOT/.autoducks/agents/architect/post.sh"
@@ -92,14 +94,14 @@ COMMENT_CALLS=$(grep -c '^gh issue comment' "$GH_LOG" || true)
 [[ "$COMMENT_CALLS" -eq 1 ]] \
   && pass "exactly one comment posted (status_comment::start not reached)" \
   || fail "expected 1 comment call, got $COMMENT_CALLS"
-grep -q 'api repos/x/y/issues/comments/555/reactions.*content=confused' "$GH_LOG" \
+grep -q 'api --method POST repos/x/y/issues/comments/555/reactions.*content=confused' "$GH_LOG" \
   && pass "reacted confused" || fail "no confused reaction: $(cat "$GH_LOG")"
 if grep -q '^gh issue edit' "$GH_LOG"; then
   fail "body/labels were mutated: $(grep '^gh issue edit' "$GH_LOG")"
 else
   pass "no label/body mutation"
 fi
-[[ -f /tmp/autoducks-pre-failed ]] \
+[[ -f "$SCRATCH/autoducks-archtest/pre-failed" ]] \
   && pass "pre-failed marker written for post.sh" || fail "marker missing"
 clean_tmp
 
@@ -162,7 +164,7 @@ grep -q 'issue edit 10 --repo x/y --remove-label Tactics:done' "$GH_LOG" \
 grep -q '⚠️' "$GH_LOG" && grep -q '#101, #102' "$GH_LOG" \
   && pass "finish comment carries the re-run-engineer warning with both numbers" \
   || fail "warning/numbers missing: $(cat "$GH_LOG")"
-grep -q 'workflow run autoducks-engineer.yml -f issue_number=10' "$GH_LOG" \
+grep -q 'workflow run autoducks-engineer.yml --repo x/y -f issue_number=10' "$GH_LOG" \
   && pass "chain::dispatch_next reached the end of post.sh" \
   || fail "chain dispatch not reached: $(cat "$GH_LOG")"
 clean_tmp
@@ -218,7 +220,7 @@ grep -q 'issue edit 10 --repo x/y --remove-label Tactics:done' "$GH_LOG" \
 grep -q '⚠️' "$GH_LOG" \
   && pass "finish comment still carries the re-run-engineer warning" \
   || fail "warning missing: $(cat "$GH_LOG")"
-grep -q 'workflow run autoducks-engineer.yml -f issue_number=10' "$GH_LOG" \
+grep -q 'workflow run autoducks-engineer.yml --repo x/y -f issue_number=10' "$GH_LOG" \
   && pass "chain::dispatch_next reached the end of post.sh (single-task)" \
   || fail "chain dispatch not reached"
 clean_tmp
