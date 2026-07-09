@@ -32,7 +32,7 @@ if [[ -f "$AUTODUCKS_PRE_FAILED_MARKER" ]]; then
   exit 0
 fi
 
-cancellation::handle "$ISSUE_NUM" "Review:reviewing" "${CHECK_RUN_ID:-}"
+cancellation::handle_targets "Review:reviewing" "${CHECK_RUN_ID:-}" "${REVIEW_TARGETS[@]}"
 
 # A validation-skipped LLM run (claude-code-action refused to start on a
 # workflow-touching PR) is neither success nor agent failure: report it as
