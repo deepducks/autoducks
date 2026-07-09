@@ -43,6 +43,9 @@ outputs:
   conclusion:
     description: '"success" or "failure"'
     value: ${{ steps.result.outputs.conclusion }}
+  skipped:
+    description: '"true" if claude-code-action was skipped before executing (e.g. workflow-validation skip on a PR that edits the workflow); "false" otherwise'
+    value: ${{ steps.result.outputs.skipped }}
 
 runs:
   using: 'composite'
@@ -120,8 +123,15 @@ runs:
           CONCLUSION="failure"
         fi
 
+        SKIPPED="false"
+        if [[ "$STEP_OUTCOME" != "failure" && ( -z "$EXECUTION_FILE" || ! -f "$EXECUTION_FILE" ) ]]; then
+          SKIPPED="true"
+          ERROR_SUBTYPE="workflow_validation_skip"
+        fi
+
         {
           echo "error_subtype=$ERROR_SUBTYPE"
           echo "is_error=$IS_ERROR"
           echo "conclusion=$CONCLUSION"
+          echo "skipped=$SKIPPED"
         } >> "$GITHUB_OUTPUT"
