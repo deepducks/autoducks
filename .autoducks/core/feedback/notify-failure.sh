@@ -81,8 +81,20 @@ notify_failure() {
       retry="re-run \`$(autoducks_command_for engineer)\`"
       ;;
     max_turns)
-      diagnosis="The agent hit its turn limit before finishing — **partial work has been preserved** (see the branch below)."
-      retry="\`$(autoducks_command_for execute) turns=$(_max_turns_retry_budget)\` to resume from the partial branch with more turns"
+      if [[ -n "${AUTODUCKS_FAIL_BRANCH:-}" ]]; then
+        diagnosis="The agent hit its turn limit before finishing — **partial work has been preserved** (see the branch below)."
+      else
+        diagnosis="The agent hit its turn limit before producing its output — nothing was committed, so re-run with a larger turn budget."
+      fi
+      local turns; turns=$(_max_turns_retry_budget)
+      case "$agent" in
+        architect) retry="re-run \`$(autoducks_command_for architect) turns=$turns\`" ;;
+        engineer)  retry="re-run \`$(autoducks_command_for engineer) turns=$turns\`" ;;
+        reviewer)  retry="re-run \`$(autoducks_command_for review) turns=$turns\`" ;;
+        rework)    retry="re-run \`$(autoducks_command_for rework) turns=$turns\`" ;;
+        defer)     retry="re-run \`$(autoducks_command_for defer) turns=$turns\`" ;;
+        *)         retry="\`$(autoducks_command_for execute) turns=$turns\` to resume from the partial branch with more turns" ;;
+      esac
       ;;
     *)
       category="infra"

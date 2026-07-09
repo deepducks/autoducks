@@ -148,9 +148,11 @@ jobs:
           AUTO_CHAIN: ${{ steps.ctx.outputs.auto_chain }}
           MODEL: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
           EFFORT: ${{ steps.ctx.outputs.effort || steps.agent.outputs.effort }}
+          MAX_TURNS: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
           OVERRIDE_MODEL: ${{ steps.ctx.outputs.model }}
           OVERRIDE_EFFORT: ${{ steps.ctx.outputs.effort }}
           OVERRIDE_MAX_TURNS: ${{ steps.ctx.outputs.max_turns }}
           JOB_STATUS: ${{ job.status }}
           LLM_SKIPPED: ${{ steps.llm.outputs.skipped }}
+          LLM_ERROR_SUBTYPE: ${{ steps.llm.outputs.error_subtype }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
