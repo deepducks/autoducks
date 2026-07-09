@@ -4,6 +4,7 @@ export AUTODUCKS_AGENT="engineer"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/robustness/ask-questions.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/reconcile-tasks.sh"
@@ -29,6 +30,13 @@ if [[ -f "$AUTODUCKS_PRE_FAILED_MARKER" || -f "$AUTODUCKS_DOR_DELEGATED_MARKER" 
 fi
 
 cancellation::handle "$ISSUE_NUM" "Tactics:crafting"
+
+if [[ "${LLM_SKIPPED:-}" == "true" ]]; then
+  notify_skip "$ISSUE_NUM"
+  progress_labels::abort "$ISSUE_NUM" "Tactics:crafting"
+  # Do NOT react confused; do NOT call notify_failure.
+  exit 0
+fi
 
 # Questions mode: the agent wrote questions instead of a plan.
 if [[ -f /tmp/questions.md ]]; then

@@ -4,6 +4,7 @@ export AUTODUCKS_AGENT="defer"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 
@@ -22,6 +23,13 @@ fi
 # defer clears no in-progress label — pass an empty label so the helper
 # skips the abort and only handles the neutral status comment + exit.
 cancellation::handle "$ISSUE_NUM" ""
+
+if [[ "${LLM_SKIPPED:-}" == "true" ]]; then
+  notify_skip "$ISSUE_NUM"
+  # defer clears no in-progress label — nothing to abort.
+  # Do NOT react confused; do NOT call notify_failure.
+  exit 0
+fi
 
 # The LLM judged there was nothing substantive worth deferring — green skip,
 # no issue created.

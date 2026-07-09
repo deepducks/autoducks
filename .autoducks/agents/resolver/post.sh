@@ -4,6 +4,7 @@ export AUTODUCKS_AGENT="resolver"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 
@@ -18,6 +19,13 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
 # checks below so we don't double-notify.
 if [[ -f "$AUTODUCKS_PRE_FAILED_MARKER" ]]; then
   rm -f "$AUTODUCKS_PRE_FAILED_MARKER"
+  exit 0
+fi
+
+if [[ "${LLM_SKIPPED:-}" == "true" ]]; then
+  notify_skip "$ISSUE_NUM"
+  progress_labels::abort "$ISSUE_NUM" "Resolve:resolving"
+  # Do NOT react confused; do NOT call notify_failure.
   exit 0
 fi
 

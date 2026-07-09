@@ -4,6 +4,7 @@ export AUTODUCKS_AGENT="rework"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
@@ -35,6 +36,13 @@ if [[ "${JOB_STATUS:-}" == "cancelled" ]]; then
   progress_labels::abort "$FEATURE_NUM" "Work:orchestrating" 2>/dev/null || true
 fi
 cancellation::handle "$ISSUE_NUM" ""
+
+if [[ "${LLM_SKIPPED:-}" == "true" ]]; then
+  notify_skip "$ISSUE_NUM"
+  progress_labels::abort "$FEATURE_NUM" "Work:orchestrating"
+  # Do NOT react confused; do NOT call notify_failure.
+  exit 0
+fi
 
 # Nothing actionable — the LLM judged the feedback already resolved or
 # purely informational. Green finish: no sub-issue, no draft flip, no
