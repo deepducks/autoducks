@@ -35,9 +35,24 @@ progress_labels::start "$ISSUE_NUM" "Review:reviewing" "Review:done"
 # in-progress label and short-circuiting post.sh via the shared marker.
 skip_review() {
   local reason="$1"
-  status_comment::finish "$ISSUE_NUM" "**Nothing to review.** $reason"
   react_to_comment "${COMMENT_ID:-}" "+1"
-  progress_labels::abort "$ISSUE_NUM" "Review:reviewing"
+
+  # Teardown covers the full mirror set once it's been built (empty-diff /
+  # closed-PR skips at L168/L171); at the early no-PR skip (L58) REVIEW_TARGETS
+  # is not yet populated and only $ISSUE_NUM was painted — fall back to it.
+  local _targets
+  if [[ -n "${REVIEW_TARGETS[*]-}" ]]; then
+    _targets=("${REVIEW_TARGETS[@]}")
+  else
+    _targets=("$ISSUE_NUM")
+  fi
+
+  local _t
+  for _t in "${_targets[@]}"; do
+    status_comment::finish "$_t" "**Nothing to review.** $reason"
+    progress_labels::abort "$_t" "Review:reviewing"
+  done
+
   { [[ -n "${CHECK_RUN_ID:-}" ]] && git::conclude_check_run "$CHECK_RUN_ID" success "Nothing to review" "$reason" 2>/dev/null; } || true
   touch "$AUTODUCKS_PRE_FAILED_MARKER"
   [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "skip=true" >> "$GITHUB_OUTPUT"
