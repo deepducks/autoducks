@@ -186,6 +186,15 @@ fi
 # draft (or merged/closed out from under us).
 git::mark_pr_draft "$PR_NUM" 2>/dev/null || true
 
+# The review verdict is now being reworked — strip any lingering Review:*
+# labels the Reviewer mirror-painted on the feature issue and its PR before
+# handing back to orchestration, so exactly one stage label is shown. Mirror
+# the Reviewer's target set (FEATURE_NUM + PR_NUM), de-duplicated.
+for _t in "$FEATURE_NUM" "$PR_NUM"; do
+  [[ -n "$_t" ]] || continue
+  progress_labels::clear_review "$_t"
+done
+
 # Hand off to the Maestro. Do NOT mark the PR ready — the Maestro flips it
 # back when the rework task merges.
 progress_labels::start "$FEATURE_NUM" "Work:orchestrating" "Work:done"
