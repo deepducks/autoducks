@@ -30,8 +30,6 @@ FEATURE="${FEATURE_ISSUE:?FEATURE_ISSUE env var required}"
 # wave advances already narrate themselves via 🌊/⏳/🎉 comments.
 if [[ "${COMMENT_ID:-0}" != "0" ]]; then
   status_comment::start "$FEATURE"
-else
-  rm -f /tmp/autoducks-status-comment-id
 fi
 
 # hashify NUM... — "#"-prefix a list of issue/task numbers for rendering as
@@ -45,19 +43,19 @@ hashify() {
   echo "${out% }"
 }
 
-# report MESSAGE [TERMINAL] — milestone narration always flows into the
-# persistent, marker-anchored orchestration comment (one comment per feature,
-# edited in place across runs). For human-initiated runs the transient
-# per-run status comment stays reserved for the running → ✅ lifecycle
-# headline only, so it is only finished when TERMINAL="true" (run
-# completion) — never on intermediate wave-dispatch/waiting narration.
+# report MESSAGE — milestone narration always flows into the persistent,
+# marker-anchored orchestration comment (one comment per feature, edited in
+# place across runs). report() fires at most once per run, so for
+# human-initiated runs it also resolves the transient per-run status comment
+# right here: a multi-wave (or otherwise async) plan typically completes on a
+# later, event-driven runner (COMMENT_ID=0) that never shares this run's
+# /tmp id file, so this run's own completion is the only chance to take the
+# transient "Running…" headline to done.
 report() {
-  local msg="$1" terminal="${2:-false}"
+  local msg="$1"
   orchestrator_comment::upsert "$FEATURE" "$msg"
-  if [[ "$terminal" == "true" ]]; then
-    local f; f=$(_status_comment::_id_file "$FEATURE")
-    [[ -s "$f" ]] && status_comment::finish "$FEATURE"
-  fi
+  local f; f=$(_status_comment::_id_file "$FEATURE")
+  [[ -s "$f" ]] && status_comment::finish "$FEATURE"
   return 0
 }
 
@@ -77,6 +75,7 @@ if ! echo "$ISSUE_LABELS" | grep -qx 'Tactics:done'; then
     orchestrator_comment::upsert "$FEATURE" "🔁 **Not ready to execute** — $DELEGATE_MSG"
     _f=$(_status_comment::_id_file "$FEATURE")
     [[ -s "$_f" ]] && status_comment::delegate "$FEATURE"
+    unset "_f"
     react_to_comment "${COMMENT_ID:-}" "+1" 2>/dev/null || true
     exit 0
   fi
@@ -141,7 +140,7 @@ if [[ "$IS_SINGLE" == "true" ]]; then
     create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "$FEATURE"
     progress_labels::finish "$FEATURE" "Work:orchestrating" "Work:done"
     its::assign_issue "$FEATURE" "${COMMENTER:-}" 2>/dev/null || true
-    report "🎉 **Single-task plan complete!** The PR is ready for review." "true"
+    report "🎉 **Single-task plan complete!** The PR is ready for review."
   fi
 
   react_to_comment "${COMMENT_ID:-}" "+1" 2>/dev/null || true
@@ -297,7 +296,7 @@ Every task across all $TOTAL_WAVES waves has merged into the feature branch and
 the PR is ready.
 
 **Next:** review and merge the PR to ship, or comment \`$(autoducks_command_for close)\`
-to tear the pipeline artifacts down." "true"
+to tear the pipeline artifacts down."
   else
     # Blocked — not all previous waves done
     report "⏳ **Orchestrator waiting.**
