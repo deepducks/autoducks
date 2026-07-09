@@ -36,6 +36,10 @@ permissions:
   actions: write
   id-token: write
 
+concurrency:
+  group: autoducks-architect-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: false
+
 jobs:
   architect:
     if: >-
