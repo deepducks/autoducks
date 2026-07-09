@@ -99,6 +99,67 @@ rm -f /tmp/autoducks-status-comment-id.99
 
 rm -f "$LOG" /tmp/autoducks-status-comment-id.42 /tmp/autoducks-status-comment-id.99
 
+echo "── product/post.sh: JOB_STATUS=cancelled gate ──"
+# End-to-end: run the real script (mocked `gh` on PATH, same shim convention
+# as test/unit-architect-guard.sh) so the cancellation gate is exercised in
+# its actual position — after the ERR trap / pre-failure marker, before the
+# validator — rather than just unit-testing cancellation::handle in isolation.
+SCRATCH="$(mktemp -d)"
+mkdir -p "$SCRATCH/bin"
+cat > "$SCRATCH/bin/gh" <<'SHIM'
+#!/usr/bin/env bash
+echo "gh $*" >> "$GH_LOG"
+case "$1 $2" in
+  "issue comment") echo "https://github.com/x/y/issues/55#issuecomment-1" ;;
+  *) : ;;
+esac
+exit 0
+SHIM
+chmod +x "$SCRATCH/bin/gh"
+
+GH_LOG="$SCRATCH/gh.log"
+: > "$GH_LOG"
+SUMMARY_FILE="$SCRATCH/step-summary.md"
+: > "$SUMMARY_FILE"
+rm -rf /tmp/autoducks-local
+rm -f /tmp/autoducks-status-comment-id.55
+# No /tmp/triage-decisions.json is provided — if the cancellation gate were
+# skipped, the run would fall through to the validator and fail there,
+# proving the gate (not a missing fixture) is what short-circuits the run.
+
+RC=0
+(
+  PATH="$SCRATCH/bin:$PATH" \
+  GITHUB_ACTIONS=true \
+  GH_LOG="$GH_LOG" \
+  JOB_STATUS=cancelled \
+  ISSUE_NUM=55 REPO=x/y RUN_ID=999 COMMENT_ID=555 COMMENTER=alice \
+  GITHUB_STEP_SUMMARY="$SUMMARY_FILE" \
+  GH_TOKEN=t \
+  bash "$REPO_ROOT/.autoducks/agents/product/post.sh"
+) >/dev/null 2>&1 || RC=$?
+
+[[ "$RC" -eq 0 ]] && pass "cancelled run exits 0" || fail "cancelled run rc=$RC"
+grep -q '🚫' "$GH_LOG" && pass "status_comment::cancel posted (🚫)" || fail "no cancel comment: $(cat "$GH_LOG")"
+grep -q 'cancelled on' "$GH_LOG" && pass "cancel headline present" || fail "cancel headline missing"
+if grep -q '⚠️' "$GH_LOG"; then
+  fail "a failure comment (⚠️) was posted on a cancelled run: $(cat "$GH_LOG")"
+else
+  pass "no notify_failure / narrate_fail (⚠️) comment posted"
+fi
+if grep -q 'triage run failed' "$SUMMARY_FILE"; then
+  fail "job-summary 'triage run failed' text leaked onto a cancelled run"
+else
+  pass "no job-summary 'triage run failed' entry"
+fi
+if grep -q 'content=confused' "$GH_LOG"; then
+  fail "😕 confused reaction fired on a cancelled run"
+else
+  pass "no confused reaction"
+fi
+
+rm -rf "$SCRATCH" /tmp/autoducks-local /tmp/autoducks-status-comment-id.55
+
 echo ""
 echo "═══ status-comment: $PASS passed, $FAIL failed ═══"
 [[ "$FAIL" -eq 0 ]] || exit 1
