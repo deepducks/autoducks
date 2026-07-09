@@ -30,7 +30,7 @@ On failure, a categorized report is posted with the diagnosis, a **View the run 
 | `no-changes` | The agent finished but produced no code changes | Refine the task spec / acceptance criteria, then `/fix` |
 | `scope-missing` | The agent didn't produce its expected output (design or plan file) | Re-run `/architect` or `/engineer` |
 | `parse` | The plan couldn't be parsed into tasks (a template hint is posted) | Re-run `/engineer` |
-| `max_turns` | The agent hit its turn limit — **partial work preserved** (the report names the branch) | `/fix` resumes from the preserved branch; consider `turns:<n>` for more headroom |
+| `max_turns` | The agent hit its turn limit — **partial work preserved** (the report names the branch) | re-run `/execute turns=<n>` (or `/run turns=<n>`) — resumes the preserved branch *and* raises the turn budget; `/fix` also resumes but at the same budget |
 | `infra` | Unexpected error (API, git, runtime) before finishing | `/fix` to retry; check the run logs |
 
 Task failures under a feature also post a mirror report on the parent issue — the Maestro pauses that wave until the task is resolved.
@@ -47,15 +47,15 @@ Two commands resume a failed task: re-issuing `/execute` (on the task or the par
 | `merge-conflict` | `/fix` | Yes | No — reuses the open PR (matched by head branch) | Yes, once the retried merge succeeds — the merge event re-triggers the Maestro |
 | `no-changes` | `execute` re-run | N/A — nothing was produced to preserve | No — no branch or PR was ever pushed | Yes — retried as a clean run |
 | `no-changes` | `/fix` | N/A | No | Yes |
-| `max_turns` | `execute` re-run | **Yes** — resumes the preserved `WIP:` branch instead of cutting a new one | No — the same branch is reused, so the eventual PR isn't a duplicate | Yes, once it completes and its PR merges |
-| `max_turns` | `/fix` | Yes — always resumed the preserved branch | No — reuses the open PR if one already exists | Yes |
+| `max_turns` | `execute` re-run (`turns=<n>` raises the budget) | **Yes** — resumes the preserved `WIP:` branch instead of cutting a new one | No — the same branch is reused, so the eventual PR isn't a duplicate | Yes, once it completes and its PR merges |
+| `max_turns` | `/fix` (same turn budget as the failed run) | Yes — always resumed the preserved branch | No — reuses the open PR if one already exists | Yes |
 | `scope-missing` / `parse` | `execute` re-run | N/A — no branch or PR exists at this stage (Architect/Engineer, not Developer) | No | Yes — delegates back through the Engineer/Architect readiness chain |
 | `scope-missing` / `parse` | `/fix` | Not applicable — `/fix` resumes a task branch; re-run `/architect` or `/engineer` instead | — | — |
 | `infra` | `execute` re-run | Depends on when it hit: anything already pushed (even without a `WIP:` marker, since resumption matches by branch name, not commit message) is picked up by the same branch-resume guard | No | Yes |
 | `infra` | `/fix` | Same — resumes whatever was pushed | No | Yes |
 
 <Aside type="caution">
-Before this table's `max_turns` row was true, re-issuing `/execute` on a task whose only trace was a preserved `WIP:` branch (no PR yet) silently cut a fresh branch from the base and orphaned the partial work — `/fix` was the only safe resume path. The Developer now resumes that branch either way, but `/fix` remains the documented remedy because it also carries the failure context (the last 10 comments) into the retry.
+Before this table's `max_turns` row was true, re-issuing `/execute` on a task whose only trace was a preserved `WIP:` branch (no PR yet) silently cut a fresh branch from the base and orphaned the partial work — `/fix` was the only safe resume path. The Developer now resumes that branch either way, so for a turn-limit cutoff specifically, prefer `/execute turns=<n>` (or `/run turns=<n>`) — it resumes the same branch *and* raises the budget that caused the cutoff. `/fix` remains a valid resume path too, and still carries the failure context (the last 10 comments) into the retry, but leaves the turn budget unchanged.
 </Aside>
 
 ## Resuming with `/fix`
@@ -67,7 +67,7 @@ Before this table's `max_turns` row was true, re-issuing `/execute` on a task wh
 on the **task** issue. The Fix agent finds the newest existing task branch (including `WIP:` branches preserved on a `max_turns` cutoff), reads the failure context from the last 10 comments, and repairs on top of what's there — reusing the open PR if one exists.
 
 <Aside type="tip">
-Comment *what went wrong* before running `/fix` — the agent reads recent comments as context.
+Comment *what went wrong* before running `/fix` — the agent reads recent comments as context. For a `max_turns` cutoff specifically, `/execute turns=<n>` (or `/run turns=<n>`) is usually the better call — same branch-resume behavior, plus the raised turn budget.
 </Aside>
 
 ## Merge conflicts
