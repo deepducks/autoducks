@@ -33,6 +33,8 @@ The [Reviewer](/agents/reviewer) sits outside the four-agent pipeline, but still
 | `Review:done` | Reviewer | Review finished with verdict `approve` or `comment` — no blocking findings |
 | `Review:changes` | Reviewer | Review finished with verdict `request-changes` — at least one `blocker`/`major` finding or a missing acceptance criterion |
 
+Any lingering `Review:*` label is removed from both the issue and the PR when `/rework` re-enters orchestration on an actionable round.
+
 ## Classification and routing labels
 
 | Label | Applied by | Meaning |

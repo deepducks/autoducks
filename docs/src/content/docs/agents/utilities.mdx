@@ -84,7 +84,7 @@ Distills unresolved PR review feedback into a single follow-up task, then hands 
 3. Checks for an already-open rework sub-issue for this feature (an idempotency marker in the body) — reuses it instead of minting a duplicate.
 4. **[LLM]** Reads every PR review, comment, and feature-issue comment and judges each distinct concern resolved or unresolved. If everything is resolved, or the feedback was purely informational, writes only a "nothing to rework" explanation — no task is created.
 5. Otherwise, folds every unresolved concern into **exactly one** follow-up task, citing the reviewer/comment behind each item.
-6. `post.sh` parses that task with the same parser the Engineer uses, appends it as a new task on the feature issue (a new wave, or promoting a single-task issue into a two-wave plan), and reverts the PR to draft.
+6. `post.sh` parses that task with the same parser the Engineer uses, appends it as a new task on the feature issue (a new wave, or promoting a single-task issue into a two-wave plan), clears any lingering `Review:*` labels from both the feature issue and the PR, and reverts the PR to draft.
 7. Dispatches `execute` on the feature issue so the Maestro/Developer builds the fix; the PR flips back to ready once it merges.
 
 <Aside type="note">
