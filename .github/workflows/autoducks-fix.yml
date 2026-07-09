@@ -109,3 +109,4 @@ jobs:
           JOB_STATUS: ${{ job.status }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
           LLM_ERROR_SUBTYPE: ${{ steps.llm.outputs.error_subtype }}
+          LLM_SKIPPED: ${{ steps.llm.outputs.skipped }}

@@ -14,6 +14,7 @@ fi
 
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/robustness/assert-changes.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/trigger-loop-closure.sh"
@@ -37,6 +38,13 @@ trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}" 2>/dev/nu
       exit $_rc' ERR
 
 cancellation::handle "$ISSUE_NUM" "Work:coding"
+
+if [[ "${LLM_SKIPPED:-}" == "true" ]]; then
+  notify_skip "$ISSUE_NUM"
+  progress_labels::abort "$ISSUE_NUM" "Work:coding"
+  # Do NOT react confused; do NOT call notify_failure.
+  exit 0
+fi
 
 if [[ "${LLM_ERROR_SUBTYPE:-}" == "error_max_turns" ]]; then
   export AUTODUCKS_FAIL_CATEGORY="max_turns" AUTODUCKS_FAIL_PHASE="llm"
