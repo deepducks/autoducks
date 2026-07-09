@@ -1,0 +1,52 @@
+# Advisory CI: runs the shell unit suite on every PR and on pushes to main.
+#
+# NON-BLOCKING by design: this workflow is intentionally NOT configured as a
+# required status check in branch protection. It surfaces regressions in the
+# `test/unit-*.sh` suite without gating merges, because the suite still carries
+# pre-existing failures (tracked separately). Once the suite is fully green,
+# promote this to a required check.
+name: CI — unit tests (advisory)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-unit-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: shell unit suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure jq
+        run: sudo apt-get update -y && sudo apt-get install -y jq
+      - name: Run test/unit-*.sh
+        run: |
+          set -uo pipefail
+          pass=0; fail=0; failed=()
+          for t in test/unit-*.sh; do
+            if bash "$t" >/tmp/out 2>&1; then
+              echo "✅ $(basename "$t")"
+              pass=$((pass+1))
+            else
+              echo "❌ $(basename "$t")"
+              sed 's/^/    /' /tmp/out | tail -20
+              fail=$((fail+1)); failed+=("$(basename "$t")")
+            fi
+          done
+          {
+            echo "## Unit suite: $pass passed, $fail failed"
+            if [ "$fail" -gt 0 ]; then
+              printf '%s\n' "### Failing" "${failed[@]/#/- }"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Real signal (non-zero on failure); advisory because not a required check.
+          [ "$fail" -eq 0 ]
