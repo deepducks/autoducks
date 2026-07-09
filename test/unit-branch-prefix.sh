@@ -65,6 +65,15 @@ check "non-pipeline head takes last Closes ref" "42" \
 check "non-pipeline head with no Closes ref yields empty" "" \
   "$(resolve_feature_num_from_pr 'patch-1' 'no refs here')"
 
+# FEATURE_NUM regression (Task #725): resolver/pre.sh used to take the FIRST
+# `Closes #N` ref before falling back to the pipeline branch number — backwards
+# from resolve_feature_num_from_pr's branch-number-first, last-ref-fallback
+# contract. Pin both halves of the fix.
+check "non-pipeline head takes the LAST of several Closes refs, not the first" "55" \
+  "$(resolve_feature_num_from_pr 'patch-1' "$(printf 'Closes #101\nsome text\nCloses #102\nmore text\nCloses #55')")"
+check "pipeline feature head resolves from the branch regardless of body ref order" "42" \
+  "$(resolve_feature_num_from_pr 'feature/42-foo' "$(printf 'Closes #55\nCloses #102\nCloses #101')")"
+
 # ---------------------------------------------------------------------------
 echo ""
 echo "═══ branch-prefix: $PASS passed, $FAIL failed ═══"
