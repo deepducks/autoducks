@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Unit tests for the Reviewer's mirror behavior: REVIEW_TARGETS is built from
 # (FEATURE_NUM, PR_NUM), both targets get painted with a Review:reviewing
-# label + a "Running…" status comment, and a verdict swaps the label on both.
-# Mirrors the REVIEW_TARGETS build/paint loop in
-# .autoducks/agents/reviewer/pre.sh and the verdict → done_label swap loop in
-# .autoducks/agents/reviewer/post.sh, driven against the real
-# progress-labels.sh/status-comment.sh helpers with mocked gh/its::* calls —
-# same style as test/unit-status-comment.sh and test/unit-notify-failure.sh.
+# label + a "Running…" status comment, a verdict swaps the label on both, and
+# the skip/cancel teardown paths clear that same set cleanly. Mirrors the
+# REVIEW_TARGETS build/paint loop and skip_review() teardown in
+# .autoducks/agents/reviewer/pre.sh, the verdict → done_label swap loop in
+# .autoducks/agents/reviewer/post.sh, and the set-aware
+# cancellation::handle_targets (plus its cancellation::handle single-target
+# wrapper) in .autoducks/core/feedback/handle-cancellation.sh — driven against
+# the real progress-labels.sh/status-comment.sh/react-to-comment.sh/
+# handle-cancellation.sh helpers with mocked gh/its::*/git::conclude_check_run
+# calls — same style as test/unit-status-comment.sh and
+# test/unit-notify-failure.sh.
 # Run: bash test/unit-reviewer-mirror.sh
 set -euo pipefail
 
@@ -32,6 +37,10 @@ its::update_comment() { echo "UPDATE:$1|$2" >> "$LOG"; }
 its::comment_issue()  { echo "COMMENT:$1|$2" >> "$LOG"; }
 its::add_label()      { echo "ADD:$1|$2" >> "$LOG"; }
 its::remove_label()   { echo "REMOVE:$1|$2" >> "$LOG"; }
+# git::conclude_check_run — used by both skip_review and cancellation::handle_targets
+# to resolve the reviewer's Check-run; stubbed to the shared log so a test can
+# assert on it when a CHECK_RUN_ID is actually supplied.
+git::conclude_check_run() { echo "CONCLUDE:$1|$2|$3|$4" >> "$LOG"; }
 
 export REPO="x/y" RUN_ID="999" AUTODUCKS_AGENT="reviewer"
 
@@ -39,6 +48,17 @@ export REPO="x/y" RUN_ID="999" AUTODUCKS_AGENT="reviewer"
 source "$REPO_ROOT/.autoducks/core/feedback/progress-labels.sh"
 # shellcheck source=/dev/null
 source "$REPO_ROOT/.autoducks/core/feedback/status-comment.sh"
+# shellcheck source=/dev/null
+source "$REPO_ROOT/.autoducks/core/feedback/react-to-comment.sh"
+# shellcheck source=/dev/null
+source "$REPO_ROOT/.autoducks/core/feedback/handle-cancellation.sh"
+
+# Scratch paths for the skip_review teardown below (AUTODUCKS_PRE_FAILED_MARKER
+# is touched, GITHUB_OUTPUT is appended to — both real side effects in pre.sh,
+# neither asserted on here, but they must point somewhere writable and NOT at
+# whatever GITHUB_OUTPUT the actual CI step running this test already has).
+SKIP_MARKER=$(mktemp)
+SKIP_OUTPUT=$(mktemp)
 
 # ── REVIEW_TARGETS build — mirrors reviewer/pre.sh's de-duplicating loop
 # building REVIEW_TARGETS from ("$FEATURE_NUM" "$PR_NUM").
@@ -79,6 +99,36 @@ finish_review_targets() {
   for _t in "${REVIEW_TARGETS[@]}"; do
     status_comment::finish "$_t" "verdict: $verdict"
   done
+}
+
+# ── skip_review — mirrors reviewer/pre.sh's "nothing to review" teardown:
+# reacts +1, edits every target's status comment to a finished "Nothing to
+# review" note and clears its Review:reviewing label, then resolves the
+# Check-run (if any) and exit 0s. Tears down the full REVIEW_TARGETS set once
+# built; before that (the early no-PR skip) it falls back to $ISSUE_NUM alone,
+# since that's the only target painted so far. Real exit 0 like the original
+# — callers must invoke it in a subshell.
+skip_review() {
+  local reason="$1"
+  react_to_comment "${COMMENT_ID:-}" "+1"
+
+  local _targets
+  if [[ -n "${REVIEW_TARGETS[*]-}" ]]; then
+    _targets=("${REVIEW_TARGETS[@]}")
+  else
+    _targets=("$ISSUE_NUM")
+  fi
+
+  local _t
+  for _t in "${_targets[@]}"; do
+    status_comment::finish "$_t" "**Nothing to review.** $reason"
+    progress_labels::abort "$_t" "Review:reviewing"
+  done
+
+  { [[ -n "${CHECK_RUN_ID:-}" ]] && git::conclude_check_run "$CHECK_RUN_ID" success "Nothing to review" "$reason" 2>/dev/null; } || true
+  touch "$AUTODUCKS_PRE_FAILED_MARKER"
+  [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "skip=true" >> "$GITHUB_OUTPUT"
+  exit 0
 }
 
 echo "── build: two distinct targets (feature issue + PR) ──"
@@ -181,7 +231,98 @@ for v in approve comment; do
   fi
 done
 
-rm -f "$LOG" /tmp/autoducks-status-comment-id.500 /tmp/autoducks-status-comment-id.77
+echo "── skip: skip_review tears down the full built REVIEW_TARGETS set ──"
+reset
+build_review_targets "500" "77"
+paint_review_targets   # seeds each target's cached status-comment id
+: > "$LOG"              # isolate skip assertions from the paint calls above
+(
+  ISSUE_NUM=500
+  AUTODUCKS_PRE_FAILED_MARKER="$SKIP_MARKER"
+  GITHUB_OUTPUT="$SKIP_OUTPUT"
+  skip_review "PR #77 has an empty diff."
+) 2>/dev/null || true
+if grep -q 'REMOVE:500|Review:reviewing' "$LOG" && grep -q 'REMOVE:77|Review:reviewing' "$LOG"; then
+  pass "Review:reviewing removed on both #500 and #77"
+else
+  fail "label remove missing: $(cat "$LOG")"
+fi
+if grep -q 'UPDATE:1500|✅' "$LOG" && grep -q 'UPDATE:177|✅' "$LOG" && grep -q 'Nothing to review' "$LOG"; then
+  pass "\"Nothing to review\" finish comment edited in place on both targets"
+else
+  fail "status comment finish missing: $(cat "$LOG")"
+fi
+
+echo "── skip: no-PR early fallback tears down ISSUE_NUM only (REVIEW_TARGETS unset) ──"
+reset
+status_comment::start "500"   # mirrors pre.sh's paint of ISSUE_NUM before PR_NUM is resolved
+: > "$LOG"
+(
+  unset REVIEW_TARGETS
+  ISSUE_NUM=500
+  AUTODUCKS_PRE_FAILED_MARKER="$SKIP_MARKER"
+  GITHUB_OUTPUT="$SKIP_OUTPUT"
+  skip_review "No open pull request was found for this issue."
+) 2>/dev/null || true
+REMOVE_CALLS=$(grep -c '^REMOVE:' "$LOG" || true)
+UPDATE_CALLS=$(grep -c '^UPDATE:' "$LOG" || true)
+if [[ "$REMOVE_CALLS" -eq 1 && "$UPDATE_CALLS" -eq 1 ]]; then
+  pass "exactly one label-abort and one finish comment for the no-PR fallback"
+else
+  fail "expected 1 REMOVE + 1 UPDATE, got REMOVE=$REMOVE_CALLS UPDATE=$UPDATE_CALLS: $(cat "$LOG")"
+fi
+if grep -q 'REMOVE:500|Review:reviewing' "$LOG" && grep -q 'UPDATE:1500|✅' "$LOG" && grep -q 'Nothing to review' "$LOG"; then
+  pass "the single call targets #500, not a second/empty target"
+else
+  fail "single call did not target #500: $(cat "$LOG")"
+fi
+
+echo "── cancel: handle_targets tears down the full mirror set when cancelled ──"
+reset
+status_comment::start "500"
+status_comment::start "77"
+: > "$LOG"
+( export JOB_STATUS=cancelled; cancellation::handle_targets "Review:reviewing" "" 500 77 ) 2>/dev/null || true
+if grep -q 'REMOVE:500|Review:reviewing' "$LOG" && grep -q 'REMOVE:77|Review:reviewing' "$LOG"; then
+  pass "Review:reviewing aborted on both #500 and #77"
+else
+  fail "label abort missing: $(cat "$LOG")"
+fi
+if grep -q 'UPDATE:1500|.*🚫' "$LOG" && grep -q 'UPDATE:177|.*🚫' "$LOG"; then
+  pass "cancelled status comment edited in place on both targets"
+else
+  fail "cancelled status comment missing: $(cat "$LOG")"
+fi
+
+echo "── cancel: handle_targets no-ops when JOB_STATUS != cancelled ──"
+reset
+unset JOB_STATUS || true
+cancellation::handle_targets "Review:reviewing" "" 500 77
+if [[ ! -s "$LOG" ]]; then
+  pass "no label/status calls made when the job wasn't cancelled"
+else
+  fail "unexpected calls on a non-cancelled job: $(cat "$LOG")"
+fi
+
+echo "── cancel: handle() wrapper still performs single-target teardown ──"
+reset
+status_comment::start "500"
+: > "$LOG"
+( export JOB_STATUS=cancelled; cancellation::handle 500 "Review:reviewing" ) 2>/dev/null || true
+REMOVE_CALLS=$(grep -c '^REMOVE:' "$LOG" || true)
+UPDATE_CALLS=$(grep -c '^UPDATE:' "$LOG" || true)
+if [[ "$REMOVE_CALLS" -eq 1 && "$UPDATE_CALLS" -eq 1 ]]; then
+  pass "exactly one label-abort and one status comment for the single-target wrapper"
+else
+  fail "expected 1 REMOVE + 1 UPDATE, got REMOVE=$REMOVE_CALLS UPDATE=$UPDATE_CALLS: $(cat "$LOG")"
+fi
+if grep -q 'REMOVE:500|Review:reviewing' "$LOG" && grep -q 'UPDATE:1500|.*🚫' "$LOG"; then
+  pass "handle() delegates to handle_targets for #500, the six non-mirror callers' contract"
+else
+  fail "wrapper did not target #500: $(cat "$LOG")"
+fi
+
+rm -f "$LOG" "$SKIP_MARKER" "$SKIP_OUTPUT" /tmp/autoducks-status-comment-id.500 /tmp/autoducks-status-comment-id.77
 
 echo ""
 echo "═══ reviewer-mirror: $PASS passed, $FAIL failed ═══"
