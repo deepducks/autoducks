@@ -6,7 +6,7 @@ description: The four pipeline agents, their guards, and how one command routes 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 import Mermaid from '../../../components/Mermaid.astro';
 
-autoducks runs four pipeline agents — **Architect → Engineer → Maestro → Developer** — plus three utilities. You drive them with one command surface, and each agent guards its own entry: if a prerequisite is missing, the agent **dispatches it automatically** and re-queues itself behind it (the *Definition-of-Ready cascade*).
+autoducks runs four pipeline agents — **Architect → Engineer → Maestro → Developer** — plus a set of utility commands you invoke directly. You drive them with one command surface, and each agent guards its own entry: if a prerequisite is missing, the agent **dispatches it automatically** and re-queues itself behind it (the *Definition-of-Ready cascade*).
 
 <Mermaid chart={`
 flowchart LR
@@ -59,11 +59,15 @@ So `/execute` on a fresh issue runs the whole pipeline: Architect → Engineer �
 | Command | Type | What it does |
 |---------|------|--------------|
 | [`/review`](/agents/reviewer) | LLM | Reviews a PR against its design and acceptance criteria — read-only, never merges |
+| [`/triage`](/agents/product) | LLM | Grooms the backlog: assigns priorities and proposes duplicate groupings — scheduled, on issue open, or on demand |
+| [`/merge`](/agents/product#merge-behavior) | Bash | Deterministically closes one issue as a duplicate of another |
 | [`/fix`](/agents/utilities#fix) | LLM | Repairs a failed task run, resuming preserved partial work |
 | [`/revert`](/agents/utilities#revert) | Bash | Undoes planning, restores the human-authored issue |
 | [`/close`](/agents/utilities#close) | Bash | Full cleanup: closes issues, PRs, and deletes branches |
 
 The [Reviewer](/agents/reviewer) is a **post-execution gate**, not a pipeline stage: run it once a feature/bug PR exists to get a verdict (`approve`/`comment`/`request-changes`) and severity-ranked findings before you merge.
+
+The [Product Owner](/agents/product) is the only agent that also runs **unattended** — a daily schedule sweep (or an `issues.opened` event) grooms the backlog without any comment at all; `/triage` and `/merge` are how you drive it on demand.
 
 ## LLM vs. bash
 
@@ -71,7 +75,7 @@ A deliberate design choice: **only agents that need reasoning use an LLM**. Orch
 
 | Needs LLM | Pure bash |
 |-----------|-----------|
-| Architect, Engineer, Developer, Reviewer, Fix | Maestro, Revert, Close |
+| Architect, Engineer, Developer, Reviewer, Fix, `/triage` | Maestro, Revert, Close, `/merge` |
 
 This makes wave progression fast, cheap (no API calls), and auditable.
 

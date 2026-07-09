@@ -29,13 +29,27 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
     "required_check": false,
     "check_name": "Autoducks: Reviewer"
   },
+  "product": {
+    "enabled": true,
+    "schedule": "0 9 * * *",
+    "priority_backend": "auto",
+    "project_number": null,
+    "priority_field": "Priority",
+    "auto_merge_duplicates": true,
+    "max_closes_per_run": 5,
+    "confidence_threshold": "high",
+    "max_issues_per_run": 100
+  },
   "triggers": {
     "architect": [],
     "engineer":  [],
     "execute":   [],
     "fix":       [],
     "revert":    [],
-    "close":     []
+    "close":     [],
+    "review":    [],
+    "triage":    [],
+    "merge":     []
   },
   "review": {
     "security_guidelines": ".autoducks/security-guidelines.md"
@@ -46,8 +60,10 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
     "deny": [],
     "codeowners": false,
     "per_agent": {
-      "revert": { "trusted_associations": ["OWNER", "MEMBER"] },
-      "close":  { "trusted_associations": ["OWNER", "MEMBER"] }
+      "revert":  { "trusted_associations": ["OWNER", "MEMBER"] },
+      "close":   { "trusted_associations": ["OWNER", "MEMBER"] },
+      "product": { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
+      "merge":   { "trusted_associations": ["OWNER", "MEMBER"] }
     }
   }
 }
@@ -154,10 +170,70 @@ When `true`, `scripts/setup.sh` (run with repo-admin `gh` credentials) creates a
 ### `reviewer.check_name`
 
 The Check-run name emitted on final PRs and required by the ruleset — kept in one place so the two never drift. **Default:** `Autoducks: Reviewer`.
+## `product`
+
+Configuration for the [Product Owner](/agents/product) (`/triage` and `/merge`) — the only agent that also runs unattended, on a schedule.
+
+### `product.enabled`
+
+Whether the schedule sweep fires at all. **Default:** `true`
+
+Setting this to `false` removes the `schedule:` trigger from the baked workflow entirely — `/triage`, `/merge`, and `workflow_dispatch` keep working, only the timer is gone. Like the [namespace](#command) and [custom trigger aliases](#triggers--custom-trigger-aliases), this is baked into the workflow YAML and requires `bash scripts/update-triggers.sh` after changing it.
+
+### `product.schedule`
+
+The cron expression for the backlog sweep. **Default:** `"0 9 * * *"` (09:00 UTC daily)
+
+Also baked into the workflow by `scripts/update-triggers.sh` — GitHub Actions' `on.schedule` cron is static YAML and can't read config at run time.
+
+### `product.priority_backend`
+
+Which storage `/triage` uses for priorities: `auto`, `project`, `labels`, or `off`. **Default:** `auto`
+
+| Value | Behavior |
+|-------|----------|
+| `auto` | Probes for a reachable Projects v2 priority field; uses `project` if found, else falls back to `labels` |
+| `project` | Trusts the config — always targets the repo's Projects v2 board, no probing |
+| `labels` | Trusts the config — always uses the named `Priority:*` labels, no probing |
+| `off` | Priority assignment disabled entirely; `/triage` still runs duplicate detection |
+
+<Aside type="caution">
+**`project` is Projects-v2-only.** The native priority field lives on a GitHub Projects v2 board linked to the repository — there is no classic-Projects or plain-REST-API equivalent. If no Projects v2 board is reachable (none linked, or the token lacks `repository-projects` access), the `project` backend is `unavailable` and priorities silently fail to apply; use `auto` (the default) unless you're certain a board is linked, or `labels` if you don't use Projects v2 at all.
+</Aside>
+
+### `product.project_number`
+
+Pins the `project` backend to a specific Projects v2 board by number, when a repository has more than one linked. **Default:** `null` (use the first project linked to the repository)
+
+### `product.priority_field`
+
+The Projects v2 single-select field name that represents priority, matched case-insensitively. **Default:** `"Priority"`
+
+### `product.auto_merge_duplicates`
+
+Whether `/triage` proposes and applies duplicate-issue closes at all. **Default:** `true`
+
+Only takes effect on a full backlog sweep — a scoped single-issue `/triage` never has anything to compare against, regardless of this setting.
+
+### `product.max_closes_per_run`
+
+Caps how many duplicates a single `/triage` sweep can close, to bound the blast radius of a bad LLM proposal. **Default:** `5`
+
+Groups are kept in the order proposed, greedily, until the next group would exceed the cap — the rest are dropped and reported in the job summary, not silently discarded.
+
+### `product.confidence_threshold`
+
+The minimum confidence (`high`, `medium`, `low`) a proposed duplicate group must carry to be applied. **Default:** `"high"`
+
+### `product.max_issues_per_run`
+
+Caps how many open issues a full backlog sweep pulls into the inbox. **Default:** `100`
+
+When the open backlog exceeds this, the run is bounded and the excess is reported in the job summary rather than silently dropped.
 
 ## `triggers` — custom trigger aliases
 
-Per-team alias verbs, keyed by agent (`architect`, `engineer`, `execute`, `fix`, `revert`, `close`):
+Per-team alias verbs, keyed by agent (`architect`, `engineer`, `execute`, `fix`, `revert`, `close`, `review`, `triage`, `merge`):
 
 ```json
 {
@@ -189,7 +265,7 @@ Each agent can have its own `.autoducks/agents/<agent>/defaults.json`:
 }
 ```
 
-Agent directories: `architect`, `engineer`, `maestro`, `developer`, `fix`, `revert`, `close`.
+Agent directories: `architect`, `engineer`, `maestro`, `developer`, `fix`, `revert`, `close`, `reviewer`, `product`.
 
 **Priority (highest to lowest):**
 1. Directive argument in the comment (`model:`, `effort:`, `turns:`)
@@ -213,6 +289,6 @@ This field is unrelated to the `security` block below — that block controls *w
 
 ## `security`
 
-Every trigger passes the [Authorization Gate](/reference/security) before any agent runs — before any reaction or status comment. The `security` block controls trusted author associations, allow/deny lists, per-agent overrides (keys: `architect`, `engineer`, `execute`, `fix`, `revert`, `close` — the Maestro and Developer share the `execute` policy), and optional CODEOWNERS integration.
+Every trigger passes the [Authorization Gate](/reference/security) before any agent runs — before any reaction or status comment. The `security` block controls trusted author associations, allow/deny lists, per-agent overrides (keys: `architect`, `engineer`, `execute`, `fix`, `revert`, `close`, `review`, `product`, `merge` — the Maestro and Developer share the `execute` policy), and optional CODEOWNERS integration.
 
 See the [Security reference](/reference/security) for the full threat model and schema.

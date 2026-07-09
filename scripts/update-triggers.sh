@@ -270,6 +270,72 @@ EOF
   fi
 }
 
+# Product agent guard: fires unconditionally on schedule/workflow_dispatch,
+# on newly opened issues (excluding bot-created Task/pipeline issues), and on
+# issue comments matching /triage or /merge (built-in + custom aliases).
+render_product() {
+  local -a all=(triage); mapfile -t tc < <(read_custom triage); all+=("${tc[@]}")
+  local -a mg=(merge);   mapfile -t mc < <(read_custom merge);  mg+=("${mc[@]}")
+  all+=("${mg[@]}")
+  cat <<'EOF'
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' && github.event.action == 'opened' &&
+       !(github.event.sender.type == 'Bot' &&
+         (github.event.issue.type.name == 'Task' ||
+          contains(github.event.issue.labels.*.name, 'Task')))) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request == null &&
+       github.event.comment.author_association != 'MANNEQUIN' &&
+EOF
+  emit_group "       " "(" "        " "))" "${all[@]}"
+}
+
+# ── Bake product.schedule into autoducks-product.yml's `schedule:` trigger ──
+# GitHub's `on.schedule` cron is static YAML — it cannot read config at run
+# time, so like the comment guards it must be baked in. `product.enabled ==
+# false` removes the `schedule:` trigger entirely (the workflow still runs on
+# workflow_dispatch/issue_comment/issues, just never on a timer).
+patch_product_cron() {
+  local bn="autoducks-product.yml"
+  local runtime="$RUNTIME_DIR/$bn"
+  if [[ ! -f "$runtime" ]]; then
+    echo "update-triggers: missing $runtime" >&2
+    exit 1
+  fi
+  local enabled cron
+  # NOTE: jq's `//` alternative operator treats `false` like `null` — an
+  # explicit `.product.enabled // true` would always resolve to `true`.
+  enabled="$(jq -r 'if .product.enabled == false then "false" else "true" end' "$CONFIG")"
+  cron="$(jq -r '.product.schedule // "0 9 * * *"' "$CONFIG")"
+  if [[ "$enabled" == "false" ]]; then
+    awk '
+      /^  schedule:$/ { getline; next }
+      { print }
+    ' "$runtime" > "$runtime.tmp"
+  elif grep -q '^  schedule:$' "$runtime"; then
+    local cron_line="    - cron: '${cron}'"
+    awk -v line="$cron_line" '
+      /^    - cron:/ { print line; next }
+      { print }
+    ' "$runtime" > "$runtime.tmp"
+  else
+    # Re-enabling after a prior enabled:false run: the `schedule:` trigger
+    # was removed outright, so reinsert it right after `on:` (its original
+    # template position) rather than only rewriting an existing cron line.
+    local cron_line="    - cron: '${cron}'"
+    awk -v line="$cron_line" '
+      /^on:$/ { print; print "  schedule:"; print line; next }
+      { print }
+    ' "$runtime" > "$runtime.tmp"
+  fi
+  mv "$runtime.tmp" "$runtime"
+  mkdir -p "$WORKFLOW_DIR"
+  cp "$runtime" "$WORKFLOW_DIR/$bn"
+  echo "  baked product schedule ($bn)"
+}
+
 # ── Splice a rendered guard into a workflow file, then mirror it ─────
 apply_file() { # $1 = basename, $2.. = render function + args
   local bn="$1"; shift
@@ -304,5 +370,7 @@ apply_file autoducks-defer.yml     render_defer
 apply_file autoducks-fix.yml       render_simple fix
 apply_file autoducks-revert.yml    render_simple revert
 apply_file autoducks-close.yml     render_simple close
+apply_file autoducks-product.yml   render_product
+patch_product_cron
 
 echo "Done. Commit the modified .github/workflows/ and .autoducks/runtimes/ files."

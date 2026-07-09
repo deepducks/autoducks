@@ -35,6 +35,20 @@ The [Reviewer](/agents/reviewer) sits outside the four-agent pipeline, but still
 
 Any lingering `Review:*` label is removed from both the issue and the PR when `/rework` re-enters orchestration on an actionable round.
 
+## Triage labels
+
+The [Product Owner](/agents/product) (`/triage`, `/merge`) applies these when the `labels` priority backend is active, or the `project` backend can't be reached. They are a **named** taxonomy, distinct from — and not a replacement scheme continuing — the retired lowercase `priority:P0`–`priority:P3` labels below; nothing migrates one to the other automatically.
+
+| Label | Color | Meaning | Applied by |
+|-------|-------|---------|-----------|
+| `Priority:Critical` | `#B60205` | Critical — drop-everything | Product Owner |
+| `Priority:High` | `#D93F0B` | High | Product Owner |
+| `Priority:Medium` | `#FBCA04` | Medium | Product Owner |
+| `Priority:Low` | `#0E8A16` | Low | Product Owner |
+| `Duplicate` | `#CFD3D7` | Issue closed as a duplicate of another issue (`/triage` or `/merge`) | Product Owner |
+
+When `product.priority_backend` resolves to `project` instead, priority lives on the repository's Projects v2 board's native single-select field and no `Priority:*` label is applied — see [Configuration](/reference/configuration#productpriority_backend) and the [Product Owner](/agents/product#priority-backends) reference.
+
 ## Classification and routing labels
 
 | Label | Applied by | Meaning |

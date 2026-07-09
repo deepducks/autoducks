@@ -24,6 +24,8 @@ The bare `/<trigger>` form (e.g. `/execute`) is the default — no prefix word b
 | Review a finished PR before merging | `/review` |
 | Turn unresolved review feedback into a follow-up task | `/rework` |
 | Save unresolved review feedback for later, merge/close now | `/defer` |
+| Groom the backlog: priorities + duplicate proposals | `/triage` |
+| Mark an issue as a duplicate of another | `/merge #<issue>` |
 | Re-run a failed task | `/fix` (on the task issue) |
 | Undo the plan, keep the issue | `/revert` |
 | Tear everything down | `/close` |
@@ -42,6 +44,8 @@ The bare `/<trigger>` form (e.g. `/execute`) is the default — no prefix word b
 | `/review` | feature/bug issue with an open pipeline PR, or the PR itself | [Reviewer](/agents/reviewer) |
 | `/rework` | feature/bug issue with an open pipeline PR, or the PR itself | [Rework agent](/agents/utilities#rework) |
 | `/defer` | feature/bug issue with a pipeline PR (any state), or the PR itself | [Defer agent](/agents/utilities#defer) |
+| `/triage` | any issue (scoped) or no issue (full backlog sweep) | [Product Owner](/agents/product) |
+| `/merge` | any open issue | [Product Owner](/agents/product#merge-behavior) |
 | `/fix` | any task | [Fix agent](/agents/utilities#fix) |
 | `/revert` | planned issue | [Revert agent](/agents/utilities#revert) |
 | `/close` | planned issue | [Close agent](/agents/utilities#close) |
@@ -55,13 +59,17 @@ The bare `/<trigger>` form (e.g. `/execute`) is the default — no prefix word b
 | `architect` | `design` |
 | `engineer` | `tactics` |
 | `execute` | `run`, `work` |
-| `fix` / `revert` / `close` / `review` / `rework` / `defer` | *(none)* |
+| `fix` / `revert` / `close` / `review` / `rework` / `defer` / `triage` / `merge` | *(none)* |
 
 Aliases behave identically to the canonical verb, including routing and cascade.
 
 ## Overrides
 
 Overrides apply to the triggered run — and propagate to chained agents and wave workers **only when you set them explicitly** (each agent otherwise resolves its own defaults).
+
+<Aside type="note">
+`/triage` and `/merge` don't parse `model:`/`effort:`/`turns:` or `#auto:` from the comment at all — they're a narrower grammar than the pipeline verbs. `/triage`'s model/effort/turns are only overridable via its `workflow_dispatch` inputs (falling back to its `defaults.json`/global config otherwise); `/merge` never invokes an LLM, so no override applies. See the [Product Owner](/agents/product#overrides) reference for details.
+</Aside>
 
 ### `model:`
 
@@ -120,7 +128,7 @@ Queue agents to run after this one finishes, separated by `+`:
 
 Semantics:
 
-- **Only `architect`, `engineer`, `execute`, and `review` are chainable.** Utility verbs (`fix`/`revert`/`close`/`rework`/`defer`) never carry or continue a chain — they always run standalone, even if you write `#auto:fix`, `#auto:revert`, `#auto:close`, `#auto:rework`, or `#auto:defer`.
+- **Only `architect`, `engineer`, `execute`, and `review` are chainable.** Utility verbs (`fix`/`revert`/`close`/`rework`/`defer`/`triage`/`merge`) never carry or continue a chain — they always run standalone, even if you write `#auto:fix`, `#auto:revert`, `#auto:close`, `#auto:rework`, `#auto:defer`, `#auto:triage`, or `#auto:merge`.
 - Verbs are alias-normalized (`#auto:tactics+run` ≡ `#auto:engineer+execute`), deduplicated, and capped at 5.
 - A verb can appear at most once in a chain (loop protection); Definition-of-Ready delegations re-queue the current agent into the same chain.
 - A chained `execute` targets the Maestro.

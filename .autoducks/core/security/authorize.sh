@@ -4,7 +4,7 @@
 #   bash .autoducks/core/security/authorize.sh
 #
 # Required env: AUTODUCKS_AGENT, ACTOR, AUTHOR_ASSOC, EVENT_NAME, REPO, GH_TOKEN
-# Optional env: ISSUE_NUM, COMMENT_ID
+# Optional env: ISSUE_NUM, COMMENT_ID, EVENT_ACTION
 #
 # Exit 0  = authorized (or bypassed).
 # Exit 77 = denied — caller must skip remaining steps via
@@ -58,6 +58,7 @@ authz::load_config() {
     maestro|developer) agent="execute" ;;
     reviewer)          agent="review"  ;;
     resolver)          agent="resolve" ;;
+    triage)            agent="product" ;;
   esac
   local config="$AUTODUCKS_ROOT/autoducks.json"
 
@@ -71,8 +72,10 @@ authz::load_config() {
     "deny": [],
     "codeowners": false,
     "per_agent": {
-      "revert": { "trusted_associations": ["OWNER", "MEMBER"] },
-      "close":  { "trusted_associations": ["OWNER", "MEMBER"] }
+      "revert":  { "trusted_associations": ["OWNER", "MEMBER"] },
+      "close":   { "trusted_associations": ["OWNER", "MEMBER"] },
+      "product": { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
+      "merge":   { "trusted_associations": ["OWNER", "MEMBER"] }
     }
   }'
 
@@ -193,11 +196,23 @@ authz::allow_silent() {
 # ── Main ────────────────────────────────────────────────────────────────
 authz::main() {
   # 1 & 2 — event-level bypasses (checked BEFORE env-var validation because
-  # workflow_dispatch and PR-closure events legitimately have empty
-  # AUTHOR_ASSOC / ACTOR).
+  # workflow_dispatch, PR-closure, and schedule events legitimately have
+  # empty AUTHOR_ASSOC / ACTOR — a schedule event has no actor and is
+  # write-access-gated by construction). `issues` is bypassed only for the
+  # `opened` action (EVENT_ACTION, passed alongside EVENT_NAME): an
+  # externally-opened issue still gets its single-issue priority pass
+  # instead of being denied on AUTHOR_ASSOC and silently falling back to
+  # the next daily sweep. This mirrors the workflow's job-level `if:`
+  # (which also excludes bot-authored Task issues) but isn't relying on it
+  # as the sole backstop — any other `issues` action (e.g. `edited`,
+  # `labeled`) falls through to the normal authorization ladder below.
   case "${EVENT_NAME:-}" in
     workflow_dispatch) authz::allow_silent ;;
     pull_request)      authz::allow_silent ;;
+    schedule)          authz::allow_silent ;;
+    issues)
+      [[ "${EVENT_ACTION:-}" == "opened" ]] && authz::allow_silent
+      ;;
   esac
 
   # Fail-closed on missing env for the actual authorization path.

@@ -15,7 +15,7 @@ Full documentation lives at **<https://autoducks.openvibes.tech>**.
 
 The same `execute` comment routes to the right agent by issue state — you never have to know which workflow runs. On a raw issue it cascades through the whole pipeline automatically (Architect → Engineer → Maestro → Developers). You can also chain agents explicitly: `/architect #auto:engineer+execute`.
 
-Utility agents: `/review` (review a finished PR against its design and acceptance criteria — read-only, never merges), `/rework` (distill unresolved review feedback into one follow-up task and revert the PR to draft), `/defer` (capture unresolved review feedback as a follow-up issue so the PR can be merged/closed now), `/fix` (repair a failed task run), `/revert` (undo a feature, restore the human-authored issue), `/close` (tear everything down).
+Utility agents: `/review` (review a finished PR against its design and acceptance criteria — read-only, never merges), `/rework` (distill unresolved review feedback into one follow-up task and revert the PR to draft), `/defer` (capture unresolved review feedback as a follow-up issue so the PR can be merged/closed now), `/triage` (groom the backlog: assign priorities, propose duplicate groupings — scheduled, on issue open, or on demand), `/merge` (deterministically close one issue as a duplicate of another), `/fix` (repair a failed task run), `/revert` (undo a feature, restore the human-authored issue), `/close` (tear everything down).
 
 ## Command syntax
 
