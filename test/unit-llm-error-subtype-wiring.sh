@@ -15,8 +15,18 @@ fail() { echo "  ❌ $1"; FAIL=$((FAIL + 1)); }
 FILES=(
   ".autoducks/runtimes/github-actions/autoducks-developer.yml"
   ".autoducks/runtimes/github-actions/autoducks-fix.yml"
+  ".autoducks/runtimes/github-actions/autoducks-architect.yml"
+  ".autoducks/runtimes/github-actions/autoducks-engineer.yml"
+  ".autoducks/runtimes/github-actions/autoducks-reviewer.yml"
+  ".autoducks/runtimes/github-actions/autoducks-rework.yml"
+  ".autoducks/runtimes/github-actions/autoducks-defer.yml"
   ".github/workflows/autoducks-developer.yml"
   ".github/workflows/autoducks-fix.yml"
+  ".github/workflows/autoducks-architect.yml"
+  ".github/workflows/autoducks-engineer.yml"
+  ".github/workflows/autoducks-reviewer.yml"
+  ".github/workflows/autoducks-rework.yml"
+  ".github/workflows/autoducks-defer.yml"
 )
 
 # Prints the lines of the step starting at a "- name: <step_name>" line, up
@@ -43,6 +53,12 @@ for f in "${FILES[@]}"; do
     pass "$f: Post-execution env sets LLM_ERROR_SUBTYPE"
   else
     fail "$f: Post-execution env is missing LLM_ERROR_SUBTYPE"
+  fi
+
+  if step_block "$path" "Post-execution" | grep -qE 'MAX_TURNS: \$\{\{ steps\.(ctx|directive)\.outputs\.max_turns \|\| steps\.agent\.outputs\.max_turns \}\}'; then
+    pass "$f: Post-execution env sets MAX_TURNS"
+  else
+    fail "$f: Post-execution env is missing MAX_TURNS"
   fi
 done
 
