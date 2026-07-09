@@ -145,8 +145,7 @@ fi
 
 # ── Resolve the feature/bug issue this PR implements ────────────────────
 if [[ "${IS_PR:-false}" == "true" ]]; then
-  FEATURE_NUM=$(grep -oiP '\bcloses\s+#\K[0-9]+' <<< "$PR_BODY" | head -1 || true)
-  [[ -z "$FEATURE_NUM" ]] && FEATURE_NUM=$(pipeline_branch_number "$PR_HEAD")
+  FEATURE_NUM=$(resolve_feature_num_from_pr "$PR_HEAD" "$PR_BODY")
 else
   FEATURE_NUM="$ISSUE_NUM"
 fi
