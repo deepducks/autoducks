@@ -46,6 +46,10 @@ permissions:
   id-token: write
   repository-projects: write
 
+concurrency:
+  group: autoducks-product
+  cancel-in-progress: false
+
 jobs:
   product:
     if: >-
