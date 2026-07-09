@@ -124,6 +124,8 @@ jobs:
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           IS_PR: ${{ steps.ctx.outputs.is_pr }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           RUN_ID: ${{ github.run_id }}
@@ -155,5 +157,6 @@ jobs:
           OVERRIDE_MODEL: ${{ steps.ctx.outputs.model }}
           OVERRIDE_EFFORT: ${{ steps.ctx.outputs.effort }}
           OVERRIDE_MAX_TURNS: ${{ steps.ctx.outputs.max_turns }}
+          JOB_STATUS: ${{ job.status }}
           LLM_SKIPPED: ${{ steps.llm.outputs.skipped }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
