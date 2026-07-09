@@ -136,6 +136,7 @@ jobs:
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           IS_PR: ${{ steps.ctx.outputs.is_pr }}
+          EVENT_NAME: ${{ github.event_name }}
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           RUN_ID: ${{ github.run_id }}
@@ -161,7 +162,7 @@ jobs:
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
         id: llm
-        if: steps.authz.outcome == 'success'
+        if: steps.authz.outcome == 'success' && steps.pre.outputs.skip != 'true'
         uses: ./.autoducks/providers/llm/claude
         with:
           prompt_file: .autoducks/agents/reviewer/prompt.md
@@ -203,6 +204,7 @@ jobs:
           OVERRIDE_EFFORT: ${{ steps.ctx.outputs.effort }}
           OVERRIDE_MAX_TURNS: ${{ steps.ctx.outputs.max_turns }}
           JOB_STATUS: ${{ job.status }}
+          LLM_SKIPPED: ${{ steps.llm.outputs.skipped }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
           # Checks API is GitHub-App-only — the PAT above cannot conclude the
           # required check-run; check-run.sh routes those calls through this.
