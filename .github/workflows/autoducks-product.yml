@@ -76,6 +76,7 @@ jobs:
           ACTOR: ${{ github.event.comment.user.login || github.event.sender.login }}
           AUTHOR_ASSOC: ${{ github.event.comment.author_association || github.event.issue.author_association }}
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
           ISSUE_NUM: ${{ github.event.issue.number || inputs.issue_number }}
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           REPO: ${{ github.repository }}
@@ -91,6 +92,7 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
             echo "issue_num=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
+            echo "comment_issue_num=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
             echo "dry_run=${{ inputs.dry_run }}" >> "$GITHUB_OUTPUT"
             echo "model=${{ inputs.model }}" >> "$GITHUB_OUTPUT"
             echo "effort=${{ inputs.effort }}" >> "$GITHUB_OUTPUT"
@@ -99,16 +101,24 @@ jobs:
           elif [[ "${{ github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/merge') }}" == "true" ]]; then
             echo "mode=merge" >> "$GITHUB_OUTPUT"
             echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+            echo "comment_issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
             echo "dry_run=false" >> "$GITHUB_OUTPUT"
             echo "commenter=${{ github.event.comment.user.login }}" >> "$GITHUB_OUTPUT"
           elif [[ "${{ github.event_name }}" == "issues" ]]; then
             echo "mode=triage" >> "$GITHUB_OUTPUT"
             echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+            echo "comment_issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
             echo "dry_run=false" >> "$GITHUB_OUTPUT"
             echo "commenter=${{ github.event.sender.login }}" >> "$GITHUB_OUTPUT"
           else
+            # Human `/triage` comment: scope stays a full backlog sweep
+            # (issue_num empty — see the WARNING in
+            # scripts/smoke-test-product.sh), but comment_issue_num still
+            # carries the commented issue so pre.sh/post.sh can post the
+            # editable bot status comment there.
             echo "mode=triage" >> "$GITHUB_OUTPUT"
             echo "issue_num=" >> "$GITHUB_OUTPUT"
+            echo "comment_issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
             echo "dry_run=false" >> "$GITHUB_OUTPUT"
             echo "commenter=${{ github.event.comment.user.login || github.event.sender.login }}" >> "$GITHUB_OUTPUT"
           fi
@@ -120,6 +130,7 @@ jobs:
         run: bash .autoducks/agents/product/pre.sh
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          COMMENT_ISSUE_NUM: ${{ steps.ctx.outputs.comment_issue_num }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ steps.ctx.outputs.commenter }}
@@ -142,6 +153,7 @@ jobs:
         run: bash .autoducks/agents/product/post.sh
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          COMMENT_ISSUE_NUM: ${{ steps.ctx.outputs.comment_issue_num }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ steps.ctx.outputs.commenter }}
