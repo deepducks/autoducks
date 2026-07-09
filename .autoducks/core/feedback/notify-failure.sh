@@ -10,6 +10,21 @@ set -euo pipefail
 #   AUTODUCKS_FAIL_CATEGORY  — merge-conflict | no-changes | scope-missing | parse | max_turns | infra
 #                              (default: "infra")
 #   AUTODUCKS_FAIL_BRANCH    — pushed branch with preserved work (max_turns only)
+#   MAX_TURNS                — turn budget the failed run used; sizes the
+#                              suggested `turns=<n>` retry hint (max_turns only)
+
+# Suggested `turns=<n>` for a max_turns retry: double the budget the failed run
+# used, capped at the parser's ceiling (1000). Falls back to the provider
+# default (50, see providers/llm/claude/action.yml) when MAX_TURNS is unset or
+# malformed, so the hint is always a concrete, in-range integer.
+_max_turns_retry_budget() {
+  local cur="${MAX_TURNS:-}"
+  [[ "$cur" =~ ^[0-9]+$ ]] && (( cur >= 1 && cur <= 1000 )) || cur=50
+  local suggested=$(( cur * 2 ))
+  (( suggested > 1000 )) && suggested=1000
+  printf '%s' "$suggested"
+}
+
 notify_failure() {
   [[ -n "${_AUTODUCKS_NOTIFIED:-}" ]] && return 0
   _AUTODUCKS_NOTIFIED=1
@@ -67,7 +82,7 @@ notify_failure() {
       ;;
     max_turns)
       diagnosis="The agent hit its turn limit before finishing — **partial work has been preserved** (see the branch below)."
-      retry="\`$(autoducks_command_for fix)\` to resume from the partial branch"
+      retry="\`$(autoducks_command_for execute) turns=$(_max_turns_retry_budget)\` to resume from the partial branch with more turns"
       ;;
     *)
       category="infra"
