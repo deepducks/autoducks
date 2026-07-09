@@ -54,3 +54,22 @@ progress_labels::abort() {
   local issue_id="$1" in_progress="$2"
   its::remove_label "$issue_id" "$in_progress" 2>/dev/null || true
 }
+
+# The three terminal/in-progress review labels the Reviewer may leave on an
+# item (mirror-painted on both the feature/bug issue and its PR). Kept beside
+# AUTODUCKS_PROGRESS_LABELS so the two never drift.
+AUTODUCKS_REVIEW_LABELS=(
+  "Review:reviewing"
+  "Review:done"
+  "Review:changes"
+)
+
+# Remove every Review:* label from a target. Idempotent — labels that are
+# absent are silently ignored (its::remove_label already tolerates this).
+# Usage: progress_labels::clear_review ISSUE_OR_PR_NUM
+progress_labels::clear_review() {
+  local target="$1" label
+  for label in "${AUTODUCKS_REVIEW_LABELS[@]}"; do
+    its::remove_label "$target" "$label" 2>/dev/null || true
+  done
+}
