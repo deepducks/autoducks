@@ -4,6 +4,7 @@ export AUTODUCKS_AGENT="rework"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
@@ -35,6 +36,13 @@ if [[ "${JOB_STATUS:-}" == "cancelled" ]]; then
   progress_labels::abort "$FEATURE_NUM" "Work:orchestrating" 2>/dev/null || true
 fi
 cancellation::handle "$ISSUE_NUM" ""
+
+if [[ "${LLM_SKIPPED:-}" == "true" ]]; then
+  notify_skip "$ISSUE_NUM"
+  progress_labels::abort "$FEATURE_NUM" "Work:orchestrating"
+  # Do NOT react confused; do NOT call notify_failure.
+  exit 0
+fi
 
 # Nothing actionable — the LLM judged the feedback already resolved or
 # purely informational. Green finish: no sub-issue, no draft flip, no
@@ -185,6 +193,15 @@ fi
 # Revert the feature PR to draft — degrades gracefully if it's already a
 # draft (or merged/closed out from under us).
 git::mark_pr_draft "$PR_NUM" 2>/dev/null || true
+
+# The review verdict is now being reworked — strip any lingering Review:*
+# labels the Reviewer mirror-painted on the feature issue and its PR before
+# handing back to orchestration, so exactly one stage label is shown. Mirror
+# the Reviewer's target set (FEATURE_NUM + PR_NUM), de-duplicated.
+for _t in "$FEATURE_NUM" "$PR_NUM"; do
+  [[ -n "$_t" ]] || continue
+  progress_labels::clear_review "$_t"
+done
 
 # Hand off to the Maestro. Do NOT mark the PR ready — the Maestro flips it
 # back when the rework task merges.

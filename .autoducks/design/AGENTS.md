@@ -42,7 +42,7 @@ Every slash-command run follows the same skeleton (security first, feedback alwa
 
 1. **Security gate** — `authorize.sh`, before any observable side effect.
 2. **React** to the triggering comment with 👀 (`+1` on success, `confused` on failure — reactions always live on the *user's* comment).
-3. **Post a bot-owned status comment** — `<img loading.gif> **\`Agent\`**: running on [workflow #id](link)` — and **edit that same comment in place** as the run progresses (✅ finished / ⚠️ failed / 🔁 delegated). The user's comment is never edited, which keeps the revert agent's "delete bot comments, preserve human content" model intact. Module: [`core/feedback/status-comment.sh`](../core/feedback/status-comment.sh); requires `its::update_comment`.
+3. **Post a bot-owned status comment** — `<img loading.gif> **\`Agent\`**: running on [workflow #id](link)` — and **edit that same comment in place** as the run progresses (✅ finished / ⚠️ failed / 🔁 delegated). The user's comment is never edited, which keeps the revert agent's "delete bot comments, preserve human content" model intact. Module: [`core/feedback/status-comment.sh`](../core/feedback/status-comment.sh); requires `its::update_comment`. The Maestro extends this pattern across its event-driven re-runs: it maintains a single, marker-anchored **orchestration status comment** that it keeps editing in place as waves advance, rather than posting a fresh comment per re-run (see [Maestro (orchestration layer)](#maestro-orchestration-layer)).
 4. **Definition-of-Ready guards** — distinct from the security gate. When an agent is not ready, it **auto-dispatches its prerequisite agent** and re-queues itself (plus any pending `#auto:` chain) behind it via [`core/orchestration/dispatch-chain.sh`](../core/orchestration/dispatch-chain.sh). Chains are depth-capped and loop-protected.
 5. **Apply the layer's in-progress label** to the issue.
 6. **Run the agent's specific workflow** (LLM step for Architect/Engineer/Developer/Fix; pure orchestration for Maestro/Revert/Close).
@@ -110,8 +110,9 @@ The Engineer is **pure ITS** — it never touches git (D7).
 2. **Owns all pipeline git** (D7): ensures the pipeline branch — `feature/<slug>` for Features, `fix/<slug>` for Bugs (D10) — cut from `base_branch`, and the **draft PR** into `integration_branch`.
 3. Computes wave states from merged task PRs (`fixes #N` bodies), ticks the `## Progress` checkboxes, and dispatches the next eligible wave of Developers (`autoducks-developer.yml` via `workflow_dispatch`), propagating model/effort/turns overrides and the original actor. Three independent guards prevent duplicate dispatch (open-PR check, Developer pre-flight skip, per-task concurrency group).
 4. **Advancement is event-driven**: every PR merged into a `feature/*` or `fix/*` branch re-triggers the Maestro, which recomputes and continues. No polling.
-5. When every wave is done: rebuilds the final PR body (`Closes #…` + a `## Work Log` harvested from each task PR's Implementation Summary), marks the PR ready, requests review from the issue assignees, `Work:orchestrating` → `Work:done`, assigns the command author.
-6. Single-task fast path: dispatches the Developer on the feature issue itself.
+5. **Persistent orchestration comment**: instead of stacking a new comment on every re-run, the Maestro maintains a single, marker-anchored **orchestration status comment** that it edits in place to reflect current wave state — dispatched, skipped, and blocked tasks are rendered as clickable `#N` references, so the comment always shows the latest picture rather than a scrolling history.
+6. When every wave is done: rebuilds the final PR body (`Closes #…` + a `## Work Log` harvested from each task PR's Implementation Summary), marks the PR ready, requests review from the issue assignees, `Work:orchestrating` → `Work:done`, assigns the command author, and updates the orchestration comment in place with the completion summary.
+7. Single-task fast path: dispatches the Developer on the feature issue itself.
 
 ### Developer (build layer)
 
@@ -141,6 +142,17 @@ Utility agents handle recovery, cleanup, and lifecycle operations. They are not 
 ### Close Agent
 
 **Verb:** `close` — tears a finished pipeline down: closes child tasks and PRs, deletes task and pipeline branches (both prefixes), strips labels, closes the issue with a cleanup summary. Security default: `OWNER`, `MEMBER`.
+
+---
+
+## Reviewer Agent
+
+**Verb:** `review` — judges an already-implemented pull request against its design and task acceptance criteria. Read-only: never edits code, never runs `git`/`gh` write commands, never merges. No Definition-of-Ready cascade, invoked on demand; unlike the utility agents above it does carry its own stage labels (`Review:reviewing` → `Review:done`/`Review:changes`).
+
+1. Resolves the target PR (direct PR comment, or the open pipeline PR for the feature/bug issue) and gathers context: the design, task acceptance criteria, the unified diff, PR metadata, and — staged by `pre.sh` at `/tmp/security-guidelines.md` — the repository's optional security guidelines (`review.security_guidelines` in `.autoducks/autoducks.json`, default `.autoducks/security-guidelines.md`; the file left empty when absent).
+2. **[AGENT]** Explores the repo read-only and writes `/tmp/review.md`. **Security is a dedicated review dimension**, not a separate output: alongside correctness/consistency findings, the LLM checks the diff against `/tmp/security-guidelines.md` when non-empty, applying those rules with priority, and falls back to a built-in baseline checklist otherwise (AuthZ/AuthN, injection, secrets, SSRF/path traversal, deserialization/eval, crypto misuse, unsafe defaults, dependencies). Security findings land in the same **Findings** section as any other, tagged `security`.
+3. **Verdict mapping is unchanged** by the security dimension: `request-changes` iff at least one `blocker`/`major` finding (a security finding included) or any acceptance criterion `missing`; `approve` iff no finding above `nit` and every criterion `met`; `comment` otherwise. `approve` is never published as a formal GitHub `APPROVE` event.
+4. Submits the review via `git::submit_pr_review`; `Review:reviewing` → `Review:done` (approve/comment) or `Review:changes` (request-changes).
 
 ---
 

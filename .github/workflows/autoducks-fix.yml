@@ -54,6 +54,20 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ github.event.comment.user.login }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: User pre hook
+        if: >-
+          steps.authz.outcome == 'success' &&
+          hashFiles('.github/actions/autoducks/fix-pre/action.yml') != ''
+        uses: ./.github/actions/autoducks/fix-pre
+        env:
+          AUTODUCKS_AGENT: fix
+          AUTODUCKS_STAGE: pre
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
         id: llm
         if: steps.authz.outcome == 'success'
@@ -66,6 +80,21 @@ jobs:
           max_turns: ${{ steps.directive.outputs.max_turns || steps.agent.outputs.max_turns }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      - name: User post hook
+        if: >-
+          always() && steps.authz.outcome == 'success' &&
+          hashFiles('.github/actions/autoducks/fix-post/action.yml') != ''
+        uses: ./.github/actions/autoducks/fix-post
+        env:
+          AUTODUCKS_AGENT: fix
+          AUTODUCKS_STAGE: post
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          AGENT_OUTCOME: ${{ steps.llm.outcome }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Post-execution
         if: always() && steps.authz.outcome == 'success'
         run: bash .autoducks/agents/fix/post.sh
@@ -77,6 +106,8 @@ jobs:
           COMMENTER: ${{ github.event.comment.user.login }}
           MODEL: ${{ steps.directive.outputs.model || steps.agent.outputs.model }}
           EFFORT: ${{ steps.directive.outputs.effort || steps.agent.outputs.effort }}
+          MAX_TURNS: ${{ steps.directive.outputs.max_turns || steps.agent.outputs.max_turns }}
           JOB_STATUS: ${{ job.status }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
           LLM_ERROR_SUBTYPE: ${{ steps.llm.outputs.error_subtype }}
+          LLM_SKIPPED: ${{ steps.llm.outputs.skipped }}

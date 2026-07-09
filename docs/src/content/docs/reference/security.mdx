@@ -9,6 +9,20 @@ Every autoducks trigger — every `/<verb>` comment, every workflow dispatch —
 
 The gate is implemented by [`.autoducks/core/security/authorize.sh`](https://github.com/deepducks/autoducks/blob/main/.autoducks/core/security/authorize.sh). It is called at the top of every agent's `pre.sh` / `run.sh`. If it exits non-zero, the workflow stops before any LLM call, any comment, any branch, and any PR.
 
+## Security review vs. the Authorization Gate
+
+This page covers the Authorization Gate: **who is allowed to trigger an agent**. It is a separate concern from the [Reviewer](/agents/reviewer)'s **security review**: a dedicated dimension of `/review` that checks whether the *code in a pull request* introduces a vulnerability (injection, secrets, SSRF, authZ bypass, and the rest of the [baseline checklist](/agents/reviewer#security-review)).
+
+The two don't interact — a PR whose author cleanly passed the gate can still fail security review, and the gate's `security` config block (below) is unrelated to the Reviewer's `review.security_guidelines` field, documented in [Configuration](/reference/configuration#review).
+
+### The `.autoducks/security-guidelines.md` convention
+
+A repository can supply project-specific security expectations at `.autoducks/security-guidelines.md` (or a custom path via `review.security_guidelines`). When present, the Reviewer applies these rules with priority over its built-in baseline checklist; when absent, the Reviewer degrades gracefully to the baseline alone — the file is entirely optional. A copyable starter template ships at that default path, covering the Authorization Gate itself (rule 1) plus the secret-hygiene expectation below (rule 2) — adapt it to the repository's actual layout, or replace it with your own rules.
+
+### Secret hygiene
+
+Independent of the Reviewer, every autoducks agent and script must never write tokens or credentials (`GH_TOKEN`, `ANTHROPIC_API_KEY`, `AUTODUCKS_ORG_TOKEN`, `SOCK_PUPPET_TOKEN`, or any other secret-bearing environment variable) to stdout/stderr, workflow logs, `GITHUB_STEP_SUMMARY`, issue/PR comments, commit messages, or committed files — including indirect leaks like an `echo`'d command line or a token embedded in a URL. The Reviewer's baseline checklist flags violations of this rule as `security` findings; see the shipped `security-guidelines.md` template for the full rule with examples.
+
 ## Threat model
 
 autoducks is designed to run on **public repositories** where anyone can open issues and comment on them. Three attack shapes drive the gate's design.

@@ -4,6 +4,7 @@ export AUTODUCKS_AGENT="reviewer"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/branch-prefix.sh"
@@ -122,6 +123,8 @@ fi
 
 git::get_pr_diff "$PR_NUM" > /tmp/pr-diff.patch
 
+PR_CHANGED_FILES=$(gh pr view "$PR_NUM" --repo "$REPO" --json files --jq '.files[].path')
+
 {
   echo "# PR #$PR_NUM: $PR_TITLE"
   echo ""
@@ -131,8 +134,34 @@ git::get_pr_diff "$PR_NUM" > /tmp/pr-diff.patch
   echo ""
   echo "## Changed files"
   echo ""
-  gh pr view "$PR_NUM" --repo "$REPO" --json files --jq '.files[].path' | sed 's/^/- /'
+  echo "$PR_CHANGED_FILES" | sed 's/^/- /'
 } > /tmp/pr-meta.md
+
+# ── Layer 3: pre-detection short-circuit for workflow-touching PRs ─────
+# claude-code-action refuses to execute against repository secrets on PRs
+# that modify agent workflow files (an anti-tampering safeguard) — post.sh's
+# LLM_SKIPPED guard (Layer 1) catches this too, but only after burning an LLM
+# invocation. Detect it here instead, before the LLM step even runs. Only the
+# automatic `pull_request` trigger is affected — a human explicitly running
+# `/review` via `issue_comment` is not subject to this validation.
+if [[ "${EVENT_NAME:-}" == "pull_request" ]] \
+   && grep -qE '^\.github/workflows/autoducks-[^/]+\.yml$' <<< "$PR_CHANGED_FILES"; then
+  for _t in "${REVIEW_TARGETS[@]}"; do
+    notify_skip "$_t"
+    progress_labels::abort "$_t" "Review:reviewing"
+  done
+  { [[ -n "${CHECK_RUN_ID:-}" ]] && git::conclude_check_run "$CHECK_RUN_ID" neutral "Review skipped" "Auto-review unavailable on PRs that modify agent workflows; run /review manually or merge first." 2>/dev/null; } || true
+  touch "$AUTODUCKS_PRE_FAILED_MARKER"
+  [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "skip=true" >> "$GITHUB_OUTPUT"
+  exit 0
+fi
+
+# ── Optional repository security guidelines ────────────────────────────
+: > /tmp/security-guidelines.md
+_guidelines="${AUTODUCKS_REVIEW_SECURITY_GUIDELINES:-.autoducks/security-guidelines.md}"
+if [[ -n "$_guidelines" && -f "$_guidelines" ]]; then
+  cat "$_guidelines" > /tmp/security-guidelines.md
+fi
 
 # ── Nothing to review: empty diff or the PR is no longer open ──────────
 if [[ ! -s /tmp/pr-diff.patch ]]; then

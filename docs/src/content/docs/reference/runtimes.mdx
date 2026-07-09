@@ -33,6 +33,8 @@ For GitHub Actions:
 
 The `setup.sh` script verifies that the deployed workflow files stay in sync with the canonical definitions in `.autoducks/runtimes/`.
 
+Because these files are managed mirrors, editing them directly doesn't stick — the next update overwrites them, and `setup.sh` flags drift in the meantime. To extend or override how an agent runs without touching a mirror, see the [Customization guide](/guides/customization).
+
 ## Adding a new runtime
 
 To support a new CI/CD platform, create a new directory under `.autoducks/runtimes/{runtime}/` with workflow files that:
