@@ -29,6 +29,13 @@ for f in setup.sh install.sh update-triggers.sh smoke-test.sh smoke-test-plan.sh
   cp "$REPO_ROOT/scripts/$f" "$SOURCE_DIR/scripts/$f"
 done
 
+# Seed dev-only artifacts that MUST NOT ship to consumers: the unit-test suite
+# (top-level test/) and the repo's own CI workflow (a non-autoducks-*.yml file).
+# install.sh must filter both out. Regression guard for #784.
+mkdir -p "$SOURCE_DIR/test" "$SOURCE_DIR/.github/workflows"
+printf '#!/usr/bin/env bash\necho canary\n' > "$SOURCE_DIR/test/unit-canary.sh"
+printf 'name: CI — unit tests\n' > "$SOURCE_DIR/.github/workflows/ci-unit-tests.yml"
+
 mkdir -p "$CONSUMER"
 
 run_install() { # runs the real install.sh, offline seam pointed at SOURCE_DIR
@@ -71,6 +78,19 @@ if diff -r "$SOURCE_DIR" "$SOURCE_SNAPSHOT" >/dev/null; then
   pass "fresh install: source dir untouched (CLEANUP_TMP guard)"
 else
   fail "fresh install: source dir was mutated"
+fi
+
+# Dev-only artifacts must never reach a consumer repo (#784): the unit-test
+# suite and the repo's own CI workflow stay in the autoducks source repo only.
+if [[ ! -e "$CONSUMER/test/unit-canary.sh" ]]; then
+  pass "fresh install: unit-test suite (test/) NOT shipped to consumer"
+else
+  fail "fresh install: test/ leaked into the consumer repo"
+fi
+if [[ ! -e "$CONSUMER/.github/workflows/ci-unit-tests.yml" ]]; then
+  pass "fresh install: CI workflow (ci-unit-tests.yml) NOT shipped to consumer"
+else
+  fail "fresh install: ci-unit-tests.yml leaked into the consumer repo"
 fi
 
 echo "$FRESH_OUT" | grep -q "Installing autoducks" \
