@@ -7,6 +7,7 @@ source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
+source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/dispatch-chain.sh"
 
 # The reviewer mirrors progress feedback to both the feature issue and its PR
@@ -32,6 +33,20 @@ if [[ -f "$AUTODUCKS_PRE_FAILED_MARKER" ]]; then
 fi
 
 cancellation::handle "$ISSUE_NUM" "Review:reviewing" "${CHECK_RUN_ID:-}"
+
+# A validation-skipped LLM run (claude-code-action refused to start on a
+# workflow-touching PR) is neither success nor agent failure: report it as
+# "not evaluated" and route to the manual /review fallback, without a 😕 or a
+# failing Check-run.
+if [[ "${LLM_SKIPPED:-}" == "true" ]]; then
+  for _t in "${REVIEW_TARGETS[@]}"; do
+    notify_skip "$_t"
+    progress_labels::abort "$_t" "Review:reviewing"
+  done
+  { [[ -n "${CHECK_RUN_ID:-}" ]] && git::conclude_check_run "$CHECK_RUN_ID" neutral "Review skipped" "Auto-review unavailable on PRs that modify agent workflows; run /review manually or merge first." 2>/dev/null; } || true
+  # Do NOT react confused; do NOT call notify_failure.
+  exit 0
+fi
 
 # Check the review was produced
 if [[ ! -f /tmp/review.md ]]; then

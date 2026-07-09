@@ -4,6 +4,7 @@ export AUTODUCKS_AGENT="fix"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
+source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/robustness/assert-changes.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/trigger-loop-closure.sh"
@@ -34,6 +35,13 @@ if [[ -f "$AUTODUCKS_PRE_FAILED_MARKER" ]]; then
 fi
 
 cancellation::handle "$ISSUE_NUM" "Work:coding"
+
+if [[ "${LLM_SKIPPED:-}" == "true" ]]; then
+  notify_skip "$ISSUE_NUM"
+  progress_labels::abort "$ISSUE_NUM" "Work:coding"
+  # Do NOT react confused; do NOT call notify_failure.
+  exit 0
+fi
 
 # Agent hit its turn limit — preserve the partial branch instead of running
 # the normal assert/PR/merge flow, which assumes a finished implementation.
