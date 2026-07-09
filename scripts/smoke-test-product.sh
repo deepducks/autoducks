@@ -18,15 +18,17 @@
 # ------------------------------------
 # `/triage` always runs a **full backlog sweep** (see `pre.sh`/the product
 # workflow's `Set context` step — a `/triage` comment never scopes to just
-# the issue it was posted on). With the default config
-# (`auto_merge_duplicates: true`), the same sweep also lets the LLM propose
-# duplicate closures across your *entire* open backlog, up to
-# `product.max_closes_per_run` (default 5). This is identical to what the
-# daily cron sweep already does — this script just triggers it on demand —
-# but it means running this test against a repo with a real backlog may
-# apply `Priority:*` labels to real issues and close up to 5 real
-# duplicate groups. Prefer running against a disposable/staging repo, or a
-# repo whose backlog is already groomed.
+# the issue it was posted on). The bot's editable status comment still
+# lands on the issue the `/triage` comment was posted on (pre.sh tracks
+# that separately from the sweep scope), but it does not narrow what gets
+# triaged. With the default config (`auto_merge_duplicates: true`), the
+# same sweep also lets the LLM propose duplicate closures across your
+# *entire* open backlog, up to `product.max_closes_per_run` (default 5).
+# This is identical to what the daily cron sweep already does — this
+# script just triggers it on demand — but it means running this test
+# against a repo with a real backlog may apply `Priority:*` labels to real
+# issues and close up to 5 real duplicate groups. Prefer running against a
+# disposable/staging repo, or a repo whose backlog is already groomed.
 #
 # COST
 # ----

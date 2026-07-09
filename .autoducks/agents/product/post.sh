@@ -8,9 +8,14 @@ source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/delivery-phase.sh"
 
 ISSUE_NUM="${ISSUE_NUM:-}"
+COMMENT_ISSUE_NUM="${COMMENT_ISSUE_NUM:-}"
 COMMENT_ID="${COMMENT_ID:-0}"
 EVENT_NAME="${EVENT_NAME:-}"
 DRY_RUN="${DRY_RUN:-false}"
+
+# See pre.sh for why STATUS_ISSUE_NUM (where the status comment lands) is
+# tracked separately from ISSUE_NUM (which drives scope).
+STATUS_ISSUE_NUM="${ISSUE_NUM:-$COMMENT_ISSUE_NUM}"
 
 HUMAN_INITIATED=0
 [[ -n "$COMMENT_ID" && "$COMMENT_ID" != "0" ]] && HUMAN_INITIATED=1
@@ -25,8 +30,8 @@ job_summary() {
 # narrate_finish DETAILS — status-comment edit for a human-initiated /triage,
 # a plain job-summary entry for event-driven runs (schedule, issues.opened).
 narrate_finish() {
-  if [[ "$HUMAN_INITIATED" -eq 1 && -n "$ISSUE_NUM" ]]; then
-    status_comment::finish "$ISSUE_NUM" "$1"
+  if [[ "$HUMAN_INITIATED" -eq 1 && -n "$STATUS_ISSUE_NUM" ]]; then
+    status_comment::finish "$STATUS_ISSUE_NUM" "$1"
   else
     job_summary "### 🦆 Product agent — triage run finished (event: \`${EVENT_NAME:-unknown}\`)"
     job_summary "$1"
@@ -34,8 +39,8 @@ narrate_finish() {
 }
 
 narrate_fail() {
-  if [[ "$HUMAN_INITIATED" -eq 1 && -n "$ISSUE_NUM" ]]; then
-    status_comment::fail "$ISSUE_NUM" "$1"
+  if [[ "$HUMAN_INITIATED" -eq 1 && -n "$STATUS_ISSUE_NUM" ]]; then
+    status_comment::fail "$STATUS_ISSUE_NUM" "$1"
   else
     job_summary "### ⚠️ Product agent — triage run failed (event: \`${EVENT_NAME:-unknown}\`)"
     job_summary "$1"
@@ -44,8 +49,8 @@ narrate_fail() {
 
 # pre.sh already reacted/failed/notified for its own failure — don't
 # double-notify.
-if [[ -f /tmp/autoducks-pre-failed ]]; then
-  rm -f /tmp/autoducks-pre-failed
+if [[ -f "$AUTODUCKS_PRE_FAILED_MARKER" ]]; then
+  rm -f "$AUTODUCKS_PRE_FAILED_MARKER"
   exit 0
 fi
 
@@ -260,11 +265,12 @@ fi
 
 # Cross-reference comment on each canonical, folding in whichever of its
 # duplicates were actually closed (delivery-phase locks may have skipped
-# some of the group).
+# some of the group). Wording matches merge.sh's "Folding in #N ..." so the
+# two close paths read the same regardless of which one produced them.
 echo "$CLOSED_DUPLICATES_JSON" | jq -c 'group_by(.canonical) | .[]' | while IFS= read -r fold; do
   canonical=$(echo "$fold" | jq -r '.[0].canonical')
   ids=$(echo "$fold" | jq -r '[.[].duplicate] | map("#" + (. | tostring)) | join(", ")')
-  its::comment_issue "$canonical" "Folded in duplicate(s) $ids as \`not_planned\`." 2>/dev/null || true
+  its::comment_issue "$canonical" "Folding in $ids as duplicate(s) of this issue (closed as \`not_planned\`)." 2>/dev/null || true
 done
 
 CLOSED_COUNT=$(echo "$CLOSED_DUPLICATES_JSON" | jq 'length')
