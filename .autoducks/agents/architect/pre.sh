@@ -76,7 +76,7 @@ if body_has_markers /tmp/issue-body-raw.md; then
   # close the superseded task issues.
   YAML_BLOCK=$(awk '/^```yaml[[:space:]]*$/{flag=1;next}/^```[[:space:]]*$/{flag=0}flag' /tmp/tactical-zone-discard.md)
   if [[ -n "$YAML_BLOCK" ]]; then
-    echo "$YAML_BLOCK" | yq '.waves[].tasks[]' 2>/dev/null | grep -E '^[0-9]+$' > /tmp/architect-dropped-tasks.txt || true
+    tactical_zone::task_refs "$YAML_BLOCK" > /tmp/architect-dropped-tasks.txt || true
   fi
   touch /tmp/architect-strip-tactical.flag
 

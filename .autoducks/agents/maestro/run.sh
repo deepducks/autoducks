@@ -121,7 +121,7 @@ if [[ "$IS_SINGLE" == "true" ]]; then
   MERGED_PRS=$(git::list_merged_prs "$FEATURE_BRANCH")
   FEATURE_DONE=$(echo "$MERGED_PRS" \
     | jq -r '.[].body + " " + .[].title' \
-    | grep -oiP '(?:fixes|closes|resolves)\s+#\K\d+' \
+    | grep -oiE '(fixes|closes|resolves)[[:space:]]+#[0-9]+' | grep -oE '[0-9]+' \
     | grep -qx "$FEATURE" && echo true || echo false)
 
   if [[ "$FEATURE_DONE" == "false" ]]; then
@@ -171,7 +171,7 @@ declare -a DONE_TASKS=()
 
 while IFS= read -r num; do
   [[ -n "$num" ]] && DONE_TASKS+=("$num")
-done < <(echo "$MERGED_PRS" | jq -r '.[].body + " " + .[].title' | grep -oiP '(?:fixes|closes|resolves)\s+#\K\d+' | sort -u)
+done < <(echo "$MERGED_PRS" | jq -r '.[].body + " " + .[].title' | grep -oiE '(fixes|closes|resolves)[[:space:]]+#[0-9]+' | grep -oE '[0-9]+' | sort -u)
 
 is_done() {
   local t="$1"

@@ -110,3 +110,29 @@ body_has_markers() {
   grep -qE '^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$' "$body_file" && \
   grep -qE '^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$'   "$body_file"
 }
+
+# tactical_zone::task_refs <yaml_block>
+# Prints the integer task refs from a plan YAML block's waves[].tasks arrays,
+# one per line. T-prefixed placeholder refs (new tasks not yet minted) are
+# skipped — only pre-existing integer issue numbers are emitted.
+#
+# yq-free by design: the mikefarah `yq` binary is not guaranteed on every
+# runner or in the unit-test harness (CI only ensures `jq`), whereas awk/grep
+# always are. Handles both inline (`tasks: [1, 2]`) and block-sequence
+# (`tasks:` / `  - 1`) forms, matching what `yq '.waves[].tasks[]'` did.
+# Always exits 0 (empty output when there are no integer refs) so callers
+# running under `set -euo pipefail` don't abort on an empty plan.
+tactical_zone::task_refs() {
+  awk '
+    /^[[:space:]]*tasks:[[:space:]]*\[/ {
+      s=$0; sub(/^[^[]*\[/,"",s); sub(/\].*/,"",s)
+      n=split(s,a,","); for(i=1;i<=n;i++){gsub(/[[:space:]]/,"",a[i]); if(a[i]!="") print a[i]}
+      intasks=0; next
+    }
+    /^[[:space:]]*tasks:[[:space:]]*$/ { intasks=1; next }
+    intasks && /^[[:space:]]*-[[:space:]]*[^[:space:]]/ {
+      v=$0; sub(/^[[:space:]]*-[[:space:]]*/,"",v); gsub(/[[:space:]]/,"",v); if(v!="") print v; next
+    }
+    intasks { intasks=0 }
+  ' <<< "$1" | grep -E '^[0-9]+$' || true
+}

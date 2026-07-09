@@ -112,7 +112,7 @@ if [[ "$IS_REVISION" == "true" ]]; then
   YAML_BLOCK=$(awk '/^```yaml[[:space:]]*$/{flag=1;next}/^```[[:space:]]*$/{flag=0}flag' /tmp/tactical-zone-current.md)
   OLD_NUMBERS=""
   if [[ -n "$YAML_BLOCK" ]]; then
-    OLD_NUMBERS=$(echo "$YAML_BLOCK" | yq '.waves[].tasks[]' 2>/dev/null | grep -E '^[0-9]+$' | tr '\n' ' ')
+    OLD_NUMBERS=$(tactical_zone::task_refs "$YAML_BLOCK" | tr '\n' ' ')
   fi
 
   build_revision_context "$ISSUE_NUM" "$OLD_NUMBERS" /tmp/conversation.md

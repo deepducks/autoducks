@@ -420,7 +420,7 @@ D1_CREATE_COUNT=$(grep -cE 'repos/[^ ]*/issues["'"'"']? --method POST' "$GH_LOG"
   && pass "round 1: exactly one issue-create call (new deferral issue minted)" \
   || fail "round 1: expected exactly one issue-create call, got $D1_CREATE_COUNT"
 
-DEFER_ISSUE_NUM=$(grep -oP 'Deferred \d+ review comments? to #\K[0-9]+' "$GH_LOG" | head -1)
+DEFER_ISSUE_NUM=$(sed -nE 's/.*Deferred [0-9]+ review comments? to #([0-9]+).*/\1/p' "$GH_LOG" | head -1)
 if [[ "$DEFER_ISSUE_NUM" =~ ^[0-9]+$ ]]; then
   pass "round 1: deferral issue #$DEFER_ISSUE_NUM created"
 else
@@ -463,7 +463,7 @@ else
   fail "round 2: expected deferral issue #$DEFER_ISSUE_NUM to be edited in place"
 fi
 
-DEFER_ISSUE_NUM_R2=$(grep -oP 'Deferred \d+ review comments? to #\K[0-9]+' "$GH_LOG" | head -1)
+DEFER_ISSUE_NUM_R2=$(sed -nE 's/.*Deferred [0-9]+ review comments? to #([0-9]+).*/\1/p' "$GH_LOG" | head -1)
 [[ "$DEFER_ISSUE_NUM_R2" == "$DEFER_ISSUE_NUM" ]] \
   && pass "round 2: status comment still points at the single deferral issue #$DEFER_ISSUE_NUM" \
   || fail "round 2: status comment pointed at #$DEFER_ISSUE_NUM_R2, expected #$DEFER_ISSUE_NUM"
