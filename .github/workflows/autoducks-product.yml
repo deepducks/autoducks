@@ -5,10 +5,6 @@ on:
     - cron: '0 9 * * *'
   workflow_dispatch:
     inputs:
-      mode:
-        required: false
-        type: string
-        default: 'triage'
       issue_number:
         required: false
         type: string
@@ -73,8 +69,8 @@ jobs:
         env:
           AUTODUCKS_AGENT: >-
             ${{
-              ((github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/merge')) ||
-               (github.event_name == 'workflow_dispatch' && inputs.mode == 'merge'))
+              (github.event_name == 'issue_comment' &&
+               startsWith(github.event.comment.body, '/merge'))
               && 'merge' || 'triage'
             }}
           ACTOR: ${{ github.event.comment.user.login || github.event.sender.login }}
@@ -94,7 +90,7 @@ jobs:
         if: steps.authz.outcome == 'success'
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+            echo "mode=triage" >> "$GITHUB_OUTPUT"
             echo "issue_num=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
             echo "comment_issue_num=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
             echo "dry_run=${{ inputs.dry_run }}" >> "$GITHUB_OUTPUT"
@@ -199,6 +195,9 @@ jobs:
           COMMENTER: ${{ steps.ctx.outputs.commenter }}
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           DRY_RUN: ${{ steps.ctx.outputs.dry_run }}
+          JOB_STATUS: ${{ job.status }}
+          LLM_SKIPPED: ${{ steps.llm.outputs.skipped }}
+          LLM_ERROR_SUBTYPE: ${{ steps.llm.outputs.error_subtype }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Merge
         if: steps.authz.outcome == 'success' && steps.ctx.outputs.mode == 'merge'
