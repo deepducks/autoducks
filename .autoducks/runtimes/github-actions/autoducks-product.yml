@@ -137,6 +137,23 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           DRY_RUN: ${{ steps.ctx.outputs.dry_run }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: User pre hook
+        if: >-
+          steps.authz.outcome == 'success' &&
+          steps.ctx.outputs.mode == 'triage' &&
+          hashFiles('.github/actions/autoducks/product-pre/action.yml') != ''
+        uses: ./.github/actions/autoducks/product-pre
+        env:
+          AUTODUCKS_AGENT: product
+          AUTODUCKS_STAGE: pre
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          COMMENT_ISSUE_NUM: ${{ steps.ctx.outputs.comment_issue_num }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          DRY_RUN: ${{ steps.ctx.outputs.dry_run }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
         id: llm
         if: steps.authz.outcome == 'success' && steps.ctx.outputs.mode == 'triage'
@@ -149,6 +166,24 @@ jobs:
           max_turns: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      - name: User post hook
+        if: >-
+          always() && steps.authz.outcome == 'success' &&
+          steps.ctx.outputs.mode == 'triage' &&
+          hashFiles('.github/actions/autoducks/product-post/action.yml') != ''
+        uses: ./.github/actions/autoducks/product-post
+        env:
+          AUTODUCKS_AGENT: product
+          AUTODUCKS_STAGE: post
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          COMMENT_ISSUE_NUM: ${{ steps.ctx.outputs.comment_issue_num }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          DRY_RUN: ${{ steps.ctx.outputs.dry_run }}
+          AGENT_OUTCOME: ${{ steps.llm.outcome }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Post-execution
         if: always() && steps.authz.outcome == 'success' && steps.ctx.outputs.mode == 'triage'
         run: bash .autoducks/agents/product/post.sh

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Static hook-contract test for the 8 workflow templates + their 8
-# .github/workflows/ mirrors (16 files total).
+# Static hook-contract test for the 12 workflow templates + their 12
+# .github/workflows/ mirrors (24 files total).
 # Run: bash test/unit-hook-steps.sh
 set -euo pipefail
 
@@ -21,8 +21,8 @@ cp -R "$REPO_ROOT/.github/workflows" "$SCRATCH/.github/"
 RUNTIME_DIR="$SCRATCH/.autoducks/runtimes/github-actions"
 WORKFLOW_DIR="$SCRATCH/.github/workflows"
 
-AGENTS=(architect close developer engineer fix maestro revert reviewer)
-LLM_AGENTS=(architect developer engineer fix reviewer)
+AGENTS=(architect close defer developer engineer fix maestro product resolver revert reviewer rework)
+LLM_AGENTS=(architect defer developer engineer fix product resolver reviewer rework)
 BASH_AGENTS=(close maestro revert)
 
 # get_block FILE STEP_NAME — print the lines of the named step (from its
@@ -99,6 +99,9 @@ for agent in "${AGENTS[@]}"; do
     fi
     if [[ "$agent" == "reviewer" ]]; then
       grep -q "IS_PR:" "$file" && pass "$label: reviewer has IS_PR:" || fail "$label: reviewer missing IS_PR:"
+    fi
+    if [[ "$agent" == "product" ]]; then
+      echo "$hooks_region" | grep -q "steps.ctx.outputs.mode == 'triage'" && pass "$label: product hooks gate on mode == triage" || fail "$label: product hooks missing mode == triage gate"
     fi
 
     if [[ " ${LLM_AGENTS[*]} " == *" $agent "* ]]; then
