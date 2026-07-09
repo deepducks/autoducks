@@ -7,6 +7,7 @@ source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
+source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 
 trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
       status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
@@ -21,6 +22,8 @@ if [[ -f "$AUTODUCKS_PRE_FAILED_MARKER" ]]; then
   rm -f "$AUTODUCKS_PRE_FAILED_MARKER"
   exit 0
 fi
+
+cancellation::handle "$ISSUE_NUM" "Resolve:resolving"
 
 if [[ "${LLM_SKIPPED:-}" == "true" ]]; then
   notify_skip "$ISSUE_NUM"
