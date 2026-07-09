@@ -34,6 +34,18 @@ if [[ "${LLM_SKIPPED:-}" == "true" ]]; then
   exit 0
 fi
 
+# Agent hit its turn limit before producing its output — report the
+# max_turns category (with a `turns=<n>` retry hint) rather than
+# mislabeling a turn-limit cutoff as scope-missing.
+if [[ "${LLM_ERROR_SUBTYPE:-}" == "error_max_turns" ]]; then
+  export AUTODUCKS_FAIL_CATEGORY="max_turns" AUTODUCKS_FAIL_PHASE="llm"
+  notify_failure "$ISSUE_NUM" "$RUN_ID"
+  status_comment::fail "$ISSUE_NUM"
+  react_to_comment "$COMMENT_ID" "confused"
+  progress_labels::abort "$ISSUE_NUM" "Design:draft"
+  exit 1
+fi
+
 # Check design spec was produced
 if [[ ! -f /tmp/design-spec.md ]]; then
   export AUTODUCKS_FAIL_CATEGORY="scope-missing"

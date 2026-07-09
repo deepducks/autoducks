@@ -6,6 +6,7 @@ source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/delivery-phase.sh"
+source "$AUTODUCKS_ROOT/core/orchestration/fold-duplicate.sh"
 
 # `/merge #M` on issue N: closes N as a duplicate of M. Deterministic —
 # no LLM involved. Idempotent: re-running on an already-closed N is a
@@ -74,16 +75,7 @@ if [[ -n "$(printf '%s' "$N_BODY" | tr -d '[:space:]')" ]]; then
 fi
 its::comment_issue "$TARGET" "$TARGET_COMMENT"
 
-# Lazily create the Duplicate label, then close N with the cross-reference
-# comment in the same call.
-gh label create "Duplicate" --repo "$REPO" --color "CFD3D7" --description "Closed as a duplicate of another issue" 2>/dev/null || true
-its::add_label "$ISSUE_NUM" "Duplicate"
-its::close_issue "$ISSUE_NUM" "Duplicate of #$TARGET." "not_planned" \
-  2>/dev/null || echo "::debug::#$ISSUE_NUM already closed; skipping close comment"
-
-# Best-effort cross-link — never blocks the merge on sub-issues being
-# unavailable/forbidden on this repo.
-its::link_sub_issue "$ISSUE_NUM" "$TARGET" >/dev/null 2>&1 || true
+fold_duplicate::close "$ISSUE_NUM" "$TARGET"
 
 react_to_comment "${COMMENT_ID:-}" "+1"
 status_comment::finish "$ISSUE_NUM" "Merged into #$TARGET; closed as \`not_planned\`."

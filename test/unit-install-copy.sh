@@ -61,6 +61,12 @@ else
   fail "fresh install: workflows mirror out of sync with runtime templates"
 fi
 
+if cmp -s "$CONSUMER/.autoducks/core/orchestration/fold-duplicate.sh" "$REPO_ROOT/.autoducks/core/orchestration/fold-duplicate.sh"; then
+  pass "fresh install: core/orchestration/fold-duplicate.sh vendored byte-identical"
+else
+  fail "fresh install: core/orchestration/fold-duplicate.sh missing or out of sync"
+fi
+
 if diff -r "$SOURCE_DIR" "$SOURCE_SNAPSHOT" >/dev/null; then
   pass "fresh install: source dir untouched (CLEANUP_TMP guard)"
 else
@@ -161,10 +167,10 @@ else
 fi
 
 HOOK_USES_COUNT=$(grep -rc "uses: \./\.github/actions/autoducks/" "$CONSUMER/.github/workflows/"*.yml | awk -F: '{sum += $2} END {print sum}')
-if [[ "$HOOK_USES_COUNT" -eq 16 ]]; then
-  pass "update: hook 'uses:' lines survived across all 8 workflow templates"
+if [[ "$HOOK_USES_COUNT" -eq 24 ]]; then
+  pass "update: hook 'uses:' lines survived across all 12 workflow templates"
 else
-  fail "update: expected 16 hook 'uses:' lines, found $HOOK_USES_COUNT"
+  fail "update: expected 24 hook 'uses:' lines, found $HOOK_USES_COUNT"
 fi
 
 # ═══ Idempotence ═══

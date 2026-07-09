@@ -113,11 +113,12 @@ fi
 echo "[4] category → diagnosis/retry mapping"
 
 assert_category() {
-  local category="$1" expect_diagnosis="$2" expect_retry="$3"
+  local category="$1" expect_diagnosis="$2" expect_retry="$3" extra_env="${4:-}"
   reset_log
   (
     unset _AUTODUCKS_NOTIFIED
     export AUTODUCKS_FAIL_CATEGORY="$category"
+    [[ -n "$extra_env" ]] && eval "$extra_env"
     notify_failure "200" "600"
   )
   local body
@@ -148,20 +149,58 @@ assert_category "no-changes" \
   '`/fix` (or refine the issue spec and re-run)'
 
 assert_category "scope-missing" \
-  "The agent did not produce the expected output file" \
-  're-run `/architect` or `/engineer`'
+  "The agent did not produce the expected design spec." \
+  're-run `/architect`' \
+  'export AUTODUCKS_AGENT=architect'
 
 assert_category "parse" \
   "The tactical plan could not be parsed into tasks." \
-  're-run `/engineer`'
+  're-run `/engineer`' \
+  'export AUTODUCKS_AGENT=engineer'
 
 assert_category "max_turns" \
   "partial work has been preserved" \
-  '`/execute turns=100` to resume from the partial branch'
+  '`/execute turns=100` to resume from the partial branch' \
+  'export AUTODUCKS_FAIL_BRANCH="feature/200-task-x"'
 
 assert_category "infra" \
   "The run hit an unexpected error before it could finish" \
   '`/fix` to retry'
+
+# ---------------------------------------------------------------------------
+# Test 4a: max_turns is agent-aware — per-agent retry command, no preserved
+# branch ⇒ "nothing was committed" diagnosis (mirrors the scope-missing switch)
+# ---------------------------------------------------------------------------
+echo "[4a] max_turns per-agent retry (no preserved branch)"
+
+assert_max_turns_agent() {
+  local agent="$1" expect_retry="$2"
+  reset_log
+  (
+    unset _AUTODUCKS_NOTIFIED AUTODUCKS_FAIL_BRANCH MAX_TURNS
+    export AUTODUCKS_FAIL_CATEGORY="max_turns"
+    export AUTODUCKS_AGENT="$agent"
+    notify_failure "210" "610"
+  )
+  local body
+  body=$(cat "$SCRATCH/comment_1_body.txt")
+  if echo "$body" | grep -qF "nothing was committed"; then
+    pass "$agent: no-branch diagnosis present"
+  else
+    fail "$agent: no-branch diagnosis missing: $body"
+  fi
+  if echo "$body" | grep -qF "$expect_retry"; then
+    pass "$agent: retry command present"
+  else
+    fail "$agent: retry command missing: $body"
+  fi
+}
+
+assert_max_turns_agent "architect" 're-run `/architect turns=100`'
+assert_max_turns_agent "engineer"  're-run `/engineer turns=100`'
+assert_max_turns_agent "reviewer"  're-run `/review turns=100`'
+assert_max_turns_agent "rework"    're-run `/rework turns=100`'
+assert_max_turns_agent "defer"     're-run `/defer turns=100`'
 
 # ---------------------------------------------------------------------------
 # Test 4b: max_turns retry budget derives from MAX_TURNS (double + cap + fallback)

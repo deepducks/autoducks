@@ -203,8 +203,10 @@ jobs:
           OVERRIDE_MODEL: ${{ steps.ctx.outputs.model }}
           OVERRIDE_EFFORT: ${{ steps.ctx.outputs.effort }}
           OVERRIDE_MAX_TURNS: ${{ steps.ctx.outputs.max_turns }}
+          MAX_TURNS: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
           JOB_STATUS: ${{ job.status }}
           LLM_SKIPPED: ${{ steps.llm.outputs.skipped }}
+          LLM_ERROR_SUBTYPE: ${{ steps.llm.outputs.error_subtype }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
           # Checks API is GitHub-App-only — the PAT above cannot conclude the
           # required check-run; check-run.sh routes those calls through this.

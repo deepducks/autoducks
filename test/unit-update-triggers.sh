@@ -33,7 +33,14 @@ if diff -r "$SCRATCH/wf-before" "$SCRATCH/.github/workflows" >/dev/null; then
 else
   fail "second run changed files"
 fi
-if diff -r "$SCRATCH/.github/workflows" "$SCRATCH/.autoducks/runtimes/github-actions" >/dev/null; then
+# Mirror invariant covers the installable autoducks-*.yml templates only; the
+# repo may carry its own non-autoducks workflows (e.g. ci-*.yml) that have no
+# runtime counterpart.
+_mirror_ok=1
+for _wf in "$SCRATCH/.autoducks/runtimes/github-actions/"autoducks-*.yml; do
+  cmp -s "$_wf" "$SCRATCH/.github/workflows/$(basename "$_wf")" || _mirror_ok=0
+done
+if [[ "$_mirror_ok" -eq 1 ]]; then
   pass "workflows mirror runtime templates"
 else
   fail "mirror out of sync"

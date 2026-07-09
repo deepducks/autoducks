@@ -44,6 +44,7 @@ run_pre() { # $1 = issue json file; env passthrough via TEST_* vars
     GITHUB_ACTIONS=true \
     ISSUE_NUM=10 REPO=x/y RUN_ID=999 COMMENT_ID=555 COMMENTER=alice \
     GITHUB_OUTPUT="$SCRATCH/gh_output" \
+    RUNNER_TEMP="$SCRATCH" GITHUB_RUN_ID=dortest \
     AUTO_CHAIN="${TEST_AUTO_CHAIN:-}" COMMAND="${TEST_COMMAND:-}" \
     GH_TOKEN=t \
     bash "$REPO_ROOT/.autoducks/agents/engineer/pre.sh"
@@ -66,7 +67,7 @@ grep -q 'actor=alice' "$GH_LOG" \
   && pass "actor forwarded for the done-assignee" || fail "actor missing"
 grep -q 'dor_skip=true' "$SCRATCH/gh_output" \
   && pass "dor_skip output set (LLM step will be skipped)" || fail "dor_skip missing"
-[[ -f /tmp/autoducks-dor-delegated ]] \
+[[ -f "$SCRATCH/autoducks-dortest/dor-delegated" ]] \
   && pass "delegation marker written for post.sh" || fail "marker missing"
 
 echo "── execute-routed run preserves the user's intent through delegation ──"

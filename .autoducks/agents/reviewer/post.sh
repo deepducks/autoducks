@@ -32,7 +32,7 @@ if [[ -f "$AUTODUCKS_PRE_FAILED_MARKER" ]]; then
   exit 0
 fi
 
-cancellation::handle "$ISSUE_NUM" "Review:reviewing" "${CHECK_RUN_ID:-}"
+cancellation::handle_targets "Review:reviewing" "${CHECK_RUN_ID:-}" "${REVIEW_TARGETS[@]}"
 
 # A validation-skipped LLM run (claude-code-action refused to start on a
 # workflow-touching PR) is neither success nor agent failure: report it as
@@ -46,6 +46,21 @@ if [[ "${LLM_SKIPPED:-}" == "true" ]]; then
   { [[ -n "${CHECK_RUN_ID:-}" ]] && git::conclude_check_run "$CHECK_RUN_ID" neutral "Review skipped" "Auto-review unavailable on PRs that modify agent workflows; run /review manually or merge first." 2>/dev/null; } || true
   # Do NOT react confused; do NOT call notify_failure.
   exit 0
+fi
+
+# Agent hit its turn limit before producing its output — report the
+# max_turns category (with a `turns=<n>` retry hint) rather than
+# mislabeling a turn-limit cutoff as scope-missing.
+if [[ "${LLM_ERROR_SUBTYPE:-}" == "error_max_turns" ]]; then
+  export AUTODUCKS_FAIL_CATEGORY="max_turns" AUTODUCKS_FAIL_PHASE="llm"
+  notify_failure "$ISSUE_NUM" "$RUN_ID"
+  react_to_comment "${COMMENT_ID:-}" "confused"
+  for _t in "${REVIEW_TARGETS[@]}"; do
+    status_comment::fail "$_t"
+    progress_labels::abort "$_t" "Review:reviewing"
+  done
+  { [[ -n "${CHECK_RUN_ID:-}" ]] && git::conclude_check_run "$CHECK_RUN_ID" failure "Review incomplete" "The reviewer hit its turn limit before producing a review." 2>/dev/null; } || true
+  exit 1
 fi
 
 # Check the review was produced
