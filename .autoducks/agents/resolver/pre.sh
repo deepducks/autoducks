@@ -85,7 +85,7 @@ if [[ "${EVENT_NAME:-}" == "pull_request" && "${ACTION:-}" == "synchronize" ]]; 
 fi
 
 if [[ "$IS_AUTOMATIC" == "true" ]]; then
-  RESOLVER_AUTO=$(jq -r '.resolver.auto // true' "$AUTODUCKS_ROOT/autoducks.json")
+  RESOLVER_AUTO=$(jq -r 'if .resolver.auto == null then true else .resolver.auto end' "$AUTODUCKS_ROOT/autoducks.json")
   if [[ "$RESOLVER_AUTO" == "false" ]]; then
     skip_resolve "Automatic conflict resolution is disabled (\`resolver.auto\` is \`false\`)."
   fi
