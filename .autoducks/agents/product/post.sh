@@ -6,6 +6,9 @@ source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/delivery-phase.sh"
+source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
+source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
+source "$AUTODUCKS_ROOT/core/orchestration/fold-duplicate.sh"
 
 ISSUE_NUM="${ISSUE_NUM:-}"
 COMMENT_ISSUE_NUM="${COMMENT_ISSUE_NUM:-}"
@@ -58,6 +61,22 @@ trap '_rc=$?; notify_failure "${ISSUE_NUM:-0}" "$RUN_ID" "" 2>/dev/null || true;
       narrate_fail "See the run log for details." 2>/dev/null || true; \
       [[ "$HUMAN_INITIATED" -eq 1 ]] && react_to_comment "$COMMENT_ID" "confused" 2>/dev/null || true; \
       exit $_rc' ERR
+
+# A cancelled run is not a triage failure — neutral status, clean exit,
+# no notify_failure / no 😕 reaction. product has no in-progress work
+# label and no Check-run, so pass an empty label and no run id.
+cancellation::handle "$STATUS_ISSUE_NUM" ""
+
+# Parity with every other agent's post step. In practice LLM_SKIPPED
+# never fires for product (it runs on issues/schedule/comments, not on
+# workflow-editing PRs), but the gate keeps the post-step contract
+# uniform. Only narrate when we actually have an issue to comment on.
+if [[ "${LLM_SKIPPED:-}" == "true" ]]; then
+  [[ -n "$STATUS_ISSUE_NUM" ]] && notify_skip "$STATUS_ISSUE_NUM" \
+    "The product agent's auto-triggered run was skipped."
+  [[ "$HUMAN_INITIATED" -eq 1 ]] && react_to_comment "$COMMENT_ID" "+1"
+  exit 0
+fi
 
 CONFIDENCE_THRESHOLD=$(jq -r '.product.confidence_threshold // "high"' "$AUTODUCKS_ROOT/autoducks.json")
 [[ -z "$CONFIDENCE_THRESHOLD" || "$CONFIDENCE_THRESHOLD" == "null" ]] && CONFIDENCE_THRESHOLD="high"
@@ -251,11 +270,7 @@ if [[ "$DUPLICATE_GROUP_COUNT" -gt 0 ]]; then
           continue
         fi
 
-        gh label create "Duplicate" --repo "$REPO" --color "CFD3D7" \
-          --description "Closed as a duplicate of another issue" 2>/dev/null || true
-        its::add_label "$dup" "Duplicate" 2>/dev/null || true
-        its::close_issue "$dup" "Duplicate of #$canonical." "not_planned" 2>/dev/null || true
-        its::link_sub_issue "$dup" "$canonical" >/dev/null 2>&1 || true
+        fold_duplicate::close "$dup" "$canonical"
 
         jq -n --argjson canonical "$canonical" --argjson duplicate "$dup" '{canonical: $canonical, duplicate: $duplicate}'
       done < <(echo "$group" | jq -r '.duplicates[]')
