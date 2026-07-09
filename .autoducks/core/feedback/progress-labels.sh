@@ -17,6 +17,7 @@ AUTODUCKS_PROGRESS_LABELS=(
   "Resolve:resolving|FBCA04|Resolver agent is resolving conflicts"
   "Resolve:done|0E8A16|Conflicts resolved"
   "Resolve:conflict|D93F0B|Conflicts could not be auto-resolved"
+  "auto-resolved|0052CC|Conflicts auto-resolved by the resolver agent"
 )
 
 # Ensure all labels in AUTODUCKS_PROGRESS_LABELS exist on $REPO. Idempotent; ignores "already exists".
