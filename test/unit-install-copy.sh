@@ -167,10 +167,10 @@ else
 fi
 
 HOOK_USES_COUNT=$(grep -rc "uses: \./\.github/actions/autoducks/" "$CONSUMER/.github/workflows/"*.yml | awk -F: '{sum += $2} END {print sum}')
-if [[ "$HOOK_USES_COUNT" -eq 16 ]]; then
-  pass "update: hook 'uses:' lines survived across all 8 workflow templates"
+if [[ "$HOOK_USES_COUNT" -eq 24 ]]; then
+  pass "update: hook 'uses:' lines survived across all 12 workflow templates"
 else
-  fail "update: expected 16 hook 'uses:' lines, found $HOOK_USES_COUNT"
+  fail "update: expected 24 hook 'uses:' lines, found $HOOK_USES_COUNT"
 fi
 
 # ═══ Idempotence ═══

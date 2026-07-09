@@ -149,12 +149,14 @@ assert_category "no-changes" \
   '`/fix` (or refine the issue spec and re-run)'
 
 assert_category "scope-missing" \
-  "The agent did not produce the expected output file" \
-  're-run `/architect` or `/engineer`'
+  "The agent did not produce the expected design spec." \
+  're-run `/architect`' \
+  'export AUTODUCKS_AGENT=architect'
 
 assert_category "parse" \
   "The tactical plan could not be parsed into tasks." \
-  're-run `/engineer`'
+  're-run `/engineer`' \
+  'export AUTODUCKS_AGENT=engineer'
 
 assert_category "max_turns" \
   "partial work has been preserved" \
