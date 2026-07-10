@@ -1,0 +1,33 @@
+---
+import { AGENT_CARDS } from '../../lib/home/agents';
+import AgentCard from './AgentCard.astro';
+---
+
+<section class="agent-grid not-content">
+  <ul class="agent-grid__list">
+    {
+      AGENT_CARDS.map((agent) => (
+        <li>
+          <AgentCard agent={agent} />
+        </li>
+      ))
+    }
+  </ul>
+</section>
+
+<style>
+  .agent-grid {
+    margin: 2.5rem auto;
+    max-width: 72rem;
+    padding-inline: 1rem;
+  }
+
+  .agent-grid__list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 1rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+</style>
