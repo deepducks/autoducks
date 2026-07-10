@@ -86,9 +86,9 @@ The same `execute` comment is claimed by exactly **one** workflow via label/type
 ### Architect (design layer)
 
 1. Preserve the tactical zone byte-for-byte if the body already has one (abort loudly on malformed markers).
-2. **[AGENT]** Create the specification — or **revise/structure an existing design** — with sections: Problem Statement / Proposed Solution / Technical Design / Dependencies / Constraints / Out of Scope. Classify the issue as `Feature` or `Bug`.
+2. **[AGENT]** Create the specification — or **revise/structure an existing design** — with sections: Problem Statement / Proposed Solution / Technical Design / Dependencies / Constraints / Out of Scope. Classify the issue as `Feature` or `Bug` — the Architect is the **sole authoritative source** of this classification; any `Intake:Feature`/`Intake:Bug` label from the Product Owner is a provisional hint only, confirmed or overridden here.
 3. Publish the new design zone (+ preserved tactical zone) to the issue body.
-4. Set the native issue type and label to `Feature` or `Bug` (label is route-critical; type is best-effort, org-only). Remove `Draft` if present.
+4. Set the native issue type and label to `Feature` or `Bug` (label is route-critical; type is best-effort, org-only). Remove `Draft` if present, and strip any `Intake:Feature`/`Intake:Bug` label now that classification is authoritative.
 5. `Design:draft` → `Design:done`; assign the command author; continue the `#auto:` chain.
 
 There is **no** auto-trigger by the `Draft` label (D13) — entry is by command or cascade only.
@@ -190,7 +190,8 @@ The Maestro's PR-merged re-trigger listens on both `feature/*` and `fix/*`. The 
 | Label | Meaning |
 |-------|---------|
 | `Draft` | Optional human marker: issue still needs design work (removed by the Architect) |
-| `Feature` / `Bug` | Routing + classification — set as a label (route-critical) and as the native issue type (best-effort, org-only) |
+| `Feature` / `Bug` | Routing + classification — set as a label (route-critical) and as the native issue type (best-effort, org-only). Authoritative — set solely by the Architect |
+| `Intake:Feature` / `Intake:Bug` | Product — provisional, overridden by the Architect. Applied at intake as a non-authoritative triage hint; stripped by the Architect on classify |
 | `Task` | Marks a task issue split from a plan — label + best-effort native type |
 | `Design:draft` | Architect is writing the design |
 | `Design:done` | Design complete (Engineer's Definition of Ready) |

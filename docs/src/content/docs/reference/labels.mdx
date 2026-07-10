@@ -53,12 +53,14 @@ When `product.priority_backend` resolves to `project` instead, priority lives on
 
 | Label | Applied by | Meaning |
 |-------|-----------|---------|
-| `Feature` | Architect / Engineer | Routing + classification; pipeline branch `feature/…` |
+| `Feature` | Architect | Routing + classification; pipeline branch `feature/…` |
 | `Bug` | Architect | Same pipeline as features; pipeline branch `fix/…` |
+| `Intake:Feature` | Product Owner | Provisional triage hint proposed at intake — **not** route-critical, does not affect branch naming; the Architect confirms or overrides it when classifying and strips the label |
+| `Intake:Bug` | Product Owner | Same as `Intake:Feature`, proposing `Bug` instead |
 | `Task` | Engineer | A task issue split from a plan — routes `execute` to the Developer |
 | `Draft` | you (optional) | Human marker for "still needs design"; removed by the Architect |
 
-Labels are the route-critical signal on every repository kind; the native issue *types* (Feature/Task/Bug) are a best-effort visual enhancement on organization repos.
+Labels are the route-critical signal on every repository kind; the native issue *types* (Feature/Task/Bug) are a best-effort visual enhancement on organization repos. `Intake:*` is the one exception — it is a non-authoritative hint, never consulted for routing.
 
 ## Retired labels
 

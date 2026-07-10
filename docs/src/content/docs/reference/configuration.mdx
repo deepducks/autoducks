@@ -38,7 +38,8 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
     "auto_merge_duplicates": true,
     "max_closes_per_run": 5,
     "confidence_threshold": "high",
-    "max_issues_per_run": 100
+    "max_issues_per_run": 100,
+    "provisional_classification": true
   },
   "triggers": {
     "architect": [],
@@ -230,6 +231,12 @@ The minimum confidence (`high`, `medium`, `low`) a proposed duplicate group must
 Caps how many open issues a full backlog sweep pulls into the inbox. **Default:** `100`
 
 When the open backlog exceeds this, the run is bounded and the excess is reported in the job summary rather than silently dropped.
+
+### `product.provisional_classification`
+
+Whether `/triage` proposes a provisional `Intake:Feature`/`Intake:Bug` label on un-classified issues. **Default:** `true`
+
+The label is a non-authoritative triage hint only — it is never route-critical and never affects branch naming. The [Architect](/agents/architect) is the sole authoritative source of the `Feature`/`Bug` classification; it confirms or overrides the hint on classify and strips the `Intake:*` label. Setting this to `false` disables the hint entirely — `/triage` still assigns priorities and proposes duplicates.
 
 ## `triggers` — custom trigger aliases
 
