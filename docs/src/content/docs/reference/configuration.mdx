@@ -25,6 +25,9 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
     "integration_branch": "main",
     "merge_method": "auto"
   },
+  "orchestrator": {
+    "mode": "waves"
+  },
   "reviewer": {
     "required_check": false,
     "check_name": "Autoducks: Reviewer"
@@ -158,6 +161,21 @@ Method for auto-merging task/fix PRs into the pipeline branch. **Default:** `aut
 | `merge` / `squash` / `rebase` | Force one method |
 
 `auto` keeps autoducks working on squash-only or rebase-only repos without configuration.
+
+## `orchestrator`
+
+Controls how the [Maestro](/agents/maestro) dispatches tasks from the tactical plan.
+
+### `orchestrator.mode`
+
+The dispatch topology: `waves` or `sequential`. **Default:** `waves`
+
+| Value | Behavior |
+|-------|----------|
+| `waves` | Dispatch every unfinished task in the current wave to its own Developer in parallel; advance to the next wave only once the whole wave is done |
+| `sequential` | Dispatch one task at a time, in dependency order — wave grouping in the tactical plan is ignored, and only one Developer runs at a time |
+
+This is the lowest-priority tier in the topology resolution order — a `mode:` directive on the triggering comment or a `Mode:*` label on the issue both take precedence over it. See [Maestro → Topology](/agents/maestro#topology) for the full resolution order.
 
 ## `reviewer`
 
