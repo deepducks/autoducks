@@ -12,5 +12,9 @@
     "@astrojs/starlight": "^0.38.1",
     "astro": "^6.0.4",
     "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@astrojs/svelte": "^9.0.1",
+    "svelte": "^5.56.4"
   }
 }

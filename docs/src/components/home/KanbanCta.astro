@@ -1,6 +1,6 @@
 ---
-import { Image } from 'astro:assets';
-import kanbanPreview from '../../assets/home/kanban-preview.svg';
+import boardDark from '../../assets/home/board-cta-dark.png';
+import boardLight from '../../assets/home/board-cta-light.png';
 ---
 
 <section class="kanban-cta not-content">
@@ -29,10 +29,24 @@ import kanbanPreview from '../../assets/home/kanban-preview.svg';
   </div>
 
   <figure class="kanban-cta__figure">
-    <Image
-      class="kanban-cta__image"
-      src={kanbanPreview}
-      alt="Example autoducks Kanban board — placeholder"
+    <img
+      class="kanban-cta__image kanban-cta__image--dark"
+      src={boardDark.src}
+      width={boardDark.width}
+      height={boardDark.height}
+      alt="An autoducks board with example issues across Design, Tactics, Delivery and Review columns"
+      loading="lazy"
+      decoding="async"
+    />
+    <img
+      class="kanban-cta__image kanban-cta__image--light"
+      src={boardLight.src}
+      width={boardLight.width}
+      height={boardLight.height}
+      alt=""
+      aria-hidden="true"
+      loading="lazy"
+      decoding="async"
     />
     <figcaption class="kanban-cta__caption">Preview shown with example data, not your live board</figcaption>
   </figure>
@@ -184,10 +198,19 @@ import kanbanPreview from '../../assets/home/kanban-preview.svg';
     width: 100%;
     height: auto;
     max-width: 100%;
-    border-radius: 0.5rem;
-    mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
-    transition: opacity 0.15s ease;
+    border-radius: 0.6rem;
+    border: 1px solid var(--sl-color-gray-5);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+  }
+  /* Show the variant matching the active theme. */
+  .kanban-cta__image--light {
+    display: none;
+  }
+  :global(:root[data-theme='light']) .kanban-cta__image--dark {
+    display: none;
+  }
+  :global(:root[data-theme='light']) .kanban-cta__image--light {
+    display: block;
   }
 
   .kanban-cta__caption {

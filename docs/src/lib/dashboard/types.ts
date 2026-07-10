@@ -1,46 +1,69 @@
-export interface RepoView {
-  id: number;
+// Data model for the phase-based dashboard.
+
+export interface Label {
   name: string;
-  color: string; // hex, e.g. "#0075ca"
-  icon: string; // icon identifier, e.g. "rocket" or "label"
-  filter: string; // GitHub filter query, e.g. "is:open label:Work:progress"
+  color: string; // hex without '#', e.g. "0E8A16"
 }
 
-export interface IssueCard {
+export type PullRequestState = 'OPEN' | 'CLOSED' | 'MERGED';
+
+export interface PullRequestRef {
+  number: number;
+  url: string;
+  state: PullRequestState;
+  isDraft: boolean;
+  headRefName: string | null;
+}
+
+export interface SubtaskSummary {
+  total: number;
+  completed: number;
+}
+
+export interface Priority {
+  value: string; // Critical | High | Medium | Low (or custom)
+  color: string; // hex without '#'
+}
+
+export interface WorkflowRun {
+  id: number;
+  url: string;
+  status: string; // queued | in_progress | completed
+  conclusion: string | null; // success | failure | cancelled | ...
+}
+
+/** One open, board-relevant issue after normalization + enrichment. */
+export interface BoardIssue {
   number: number;
   title: string;
-  bodyExcerpt: string; // first 120 chars of body, Markdown stripped
-  labels: Array<{ name: string; color: string }>;
-  htmlUrl: string;
+  url: string;
+  body: string;
+  type: string | null; // native issue type name, lowercased
+  labels: Label[];
+  isTask: boolean; // excluded from the board (aggregated into parent donut)
+  pr: PullRequestRef | null;
+  subtasks: SubtaskSummary | null;
+  priority: Priority | null;
+  branch: string | null; // head branch (from PR) for workflow-run matching
+  run: WorkflowRun | null; // filled after runs are matched
 }
 
-export interface BoardColumn {
-  view: RepoView;
-  issues: IssueCard[];
-  totalCount: number;
-  loading: boolean;
-  error: string | null;
+export type PanelId = 'inbox' | 'design' | 'tactics' | 'delivery' | 'review';
+export type LaneId = 'progress' | 'done';
+
+export interface Classification {
+  panel: PanelId;
+  lane: LaneId;
 }
 
-// Handle returned by createColumn (313) and driven by the board (314).
-export interface ColumnHandle {
-  root: HTMLElement; // board appends this
-  setLoading(): void; // show skeleton shimmer
-  setIssues(cards: HTMLElement[], totalCount: number): void; // [] → empty state
-  setError(message: string, onRetry: () => void): void;
-  setPulsing(on: boolean): void; // refresh indicator dot
+export interface PanelData {
+  id: PanelId;
+  title: string;
+  progress: BoardIssue[];
+  done: BoardIssue[];
 }
-
-// Factory signatures the board (314) imports — implemented in 312 / 313.
-export type CreateIssueCard = (issue: IssueCard) => HTMLElement;
-export type CreateColumn = (view: RepoView) => ColumnHandle;
 
 export interface RateLimit {
   remaining: number | null;
   resetAt: Date | null;
-}
-
-export interface FetchResult<T> {
-  data: T;
-  rateLimit: RateLimit;
 }

@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import svelte from '@astrojs/svelte';
 
 export default defineConfig({
   site: 'https://autoducks.dev',
@@ -111,5 +112,6 @@ export default defineConfig({
         },
       ],
     }),
+    svelte(),
   ],
 });
