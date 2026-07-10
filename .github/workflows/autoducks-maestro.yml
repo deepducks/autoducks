@@ -96,9 +96,12 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.feature_number != ''
     runs-on: ubuntu-latest
-    concurrency:
-      group: autoducks-maestro-${{ needs.resolve.outputs.feature_number }}
-      cancel-in-progress: false
+    # NOTE: no job-level `concurrency` here. The workflow-level concurrency
+    # group above already serializes per feature. Re-declaring the same group
+    # at the job level makes GitHub detect a deadlock (a job cannot wait on the
+    # concurrency group its own workflow holds), which fails `orchestrate`
+    # instantly with no runner — breaking `/execute`, `/run`, `/work` and
+    # manual dispatch. See regression from "Serialize Maestro wave dispatch".
     steps:
       - uses: actions/checkout@v4
       - name: Authorize
