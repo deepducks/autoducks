@@ -3,7 +3,7 @@ title: autoducks
 description: One comment runs design → plan → build on your own CI/CD, with your own LLM.
 template: splash
 hero:
-  tagline: 'One comment — <code>/execute</code> — designs, plans, and builds. Agents run on your CI/CD platform, coordinate through your issue tracker, and call your own LLM.'
+  tagline: 'Remote agents on GitHub Actions, powered by Claude. One comment — <code>/execute</code> — runs spec-driven design → plan → build on your own CI/CD.'
   actions:
     - text: Run your first issue
       link: /getting-started/first-run
@@ -17,10 +17,15 @@ hero:
       icon: external
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import Hero from '../../components/home/Hero.astro';
+import AgentGrid from '../../components/home/AgentGrid.astro';
+import KanbanCta from '../../components/home/KanbanCta.astro';
+import ValueProps from '../../components/home/ValueProps.astro';
 import Mermaid from '../../components/Mermaid.astro';
 
-## The pipeline
+<Hero />
+
+## How it works
 
 Four agents, one command. Each agent checks its own **Definition of Ready** and automatically dispatches the missing prerequisite — so `/execute` on a raw issue cascades through the whole pipeline.
 
@@ -46,17 +51,10 @@ flowchart LR
     classDef executionBlue fill:#cfe8ff,stroke:#0366d6,color:#0366d6
 `} />
 
-<CardGrid>
-  <Card title="Run your first issue" icon="rocket">
-    From a rough idea to a reviewed PR with one comment.
-    [Start here →](/getting-started/first-run)
-  </Card>
-  <Card title="Command reference" icon="open-book">
-    Every verb, override, and `#auto:` chain in one table.
-    [Slash commands →](/reference/slash-commands)
-  </Card>
-  <Card title="When things fail" icon="warning">
-    Status states, failure categories, and how to resume.
-    [Recovery guide →](/guides/when-things-fail)
-  </Card>
-</CardGrid>
+## Meet the agents
+
+<AgentGrid />
+
+<KanbanCta />
+
+<ValueProps />
