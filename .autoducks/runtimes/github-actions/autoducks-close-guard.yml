@@ -14,9 +14,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Authorize
+        id: authz
+        run: bash .autoducks/core/security/authorize.sh
+        env:
+          AUTODUCKS_AGENT: close-guard
+          ACTOR: ${{ github.event.sender.login }}
+          AUTHOR_ASSOC: ${{ github.event.issue.author_association }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Ensure jq
+        if: steps.authz.outcome == 'success'
         run: sudo apt-get update -y && sudo apt-get install -y jq
       - name: Run close guard
+        if: steps.authz.outcome == 'success'
         run: bash .autoducks/agents/close-guard/run.sh
         env:
           CLOSED_ISSUE: ${{ github.event.issue.number }}

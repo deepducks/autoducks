@@ -32,7 +32,7 @@ commit_lint::collect_commits() {
 # closing keyword. A non-closing reference (`refs #N`, `re #N`) never matches.
 commit_lint::extract_refs() {
   local messages="$1"
-  { grep -oiE '(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed)) +#[0-9]+' <<<"$messages" \
+  { grep -oiE '(^|[^[:alnum:]])(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed)) +#[0-9]+' <<<"$messages" \
       | grep -oE '#[0-9]+' \
       | sort -u; } || true
 }
@@ -48,7 +48,7 @@ commit_lint::has_open_delivery_pr() {
   count="$(jq 'length' <<<"$prs")"
   for ((i = 0; i < count; i++)); do
     head_ref="$(jq -r ".[$i].headRefName" <<<"$prs")"
-    body="$(jq -r ".[$i].body" <<<"$prs")"
+    body="$(jq -r ".[$i].body // \"\"" <<<"$prs")"
     resolved="$(resolve_feature_num_from_pr "$head_ref" "$body")"
     if [[ -n "$resolved" && "$resolved" == "$num" ]]; then
       return 0
