@@ -11,11 +11,11 @@ set -euo pipefail
 # chain::dispatch_prerequisite refuses to prepend an agent that already
 # appears in current+chain. Chains are capped at 5 verbs at parse time.
 #
-# Env: REPO (gh); OVERRIDE_MODEL/OVERRIDE_EFFORT/OVERRIDE_MAX_TURNS forwarded
-#      only when the USER explicitly set them in the directive (never the
-#      current agent's own defaults — each agent resolves its own);
-#      COMMENTER forwarded as `actor` so the done-assignee (D15) stays the
-#      human who issued the original command.
+# Env: REPO (gh); OVERRIDE_MODEL/OVERRIDE_EFFORT/OVERRIDE_MAX_TURNS/
+#      OVERRIDE_MODE forwarded only when the USER explicitly set them in the
+#      directive (never the current agent's own defaults — each agent
+#      resolves its own); COMMENTER forwarded as `actor` so the
+#      done-assignee (D15) stays the human who issued the original command.
 
 _CHAIN_MAX_LEN=5
 
@@ -50,6 +50,7 @@ chain::_dispatch() {
   [[ -n "${OVERRIDE_MODEL:-}" ]]     && args+=(-f "model=$OVERRIDE_MODEL")
   [[ -n "${OVERRIDE_EFFORT:-}" ]]    && args+=(-f "effort=$OVERRIDE_EFFORT")
   [[ -n "${OVERRIDE_MAX_TURNS:-}" ]] && args+=(-f "max_turns=$OVERRIDE_MAX_TURNS")
+  [[ -n "${OVERRIDE_MODE:-}" ]]      && args+=(-f "mode=$OVERRIDE_MODE")
 
   git::dispatch_workflow "$workflow" "${args[@]}"
 }

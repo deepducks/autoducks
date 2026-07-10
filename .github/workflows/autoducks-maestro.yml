@@ -26,6 +26,10 @@ on:
         required: false
         type: string
         default: ''
+      mode:
+        required: false
+        type: string
+        default: ''
   pull_request:
     types: [closed]
   issue_comment:
@@ -153,6 +157,7 @@ jobs:
           OVERRIDE_MODEL: ${{ steps.directive.outputs.model || inputs.model || '' }}
           OVERRIDE_EFFORT: ${{ steps.directive.outputs.effort || inputs.effort || '' }}
           OVERRIDE_MAX_TURNS: ${{ steps.directive.outputs.max_turns || inputs.max_turns || '' }}
+          OVERRIDE_MODE: ${{ steps.directive.outputs.mode || inputs.mode || '' }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: User post hook
         if: >-
