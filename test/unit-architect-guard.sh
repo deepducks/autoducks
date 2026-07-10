@@ -46,6 +46,7 @@ chmod +x "$SCRATCH/bin/gh"
 clean_tmp() {
   rm -f /tmp/autoducks-pre-failed /tmp/autoducks-status-comment-id \
         /tmp/architect-strip-tactical.flag /tmp/architect-dropped-tasks.txt \
+        /tmp/architect-clear-tactics.flag \
         /tmp/design-spec.md /tmp/issue-request.md /tmp/issue-body-raw.md \
         /tmp/steering-prompt.md /tmp/design-zone-discard.md /tmp/tactical-zone-discard.md \
         /tmp/issue-type
@@ -223,6 +224,60 @@ grep -q '⚠️' "$GH_LOG" \
 grep -q 'workflow run autoducks-engineer.yml --repo x/y -f issue_number=10' "$GH_LOG" \
   && pass "chain::dispatch_next reached the end of post.sh (single-task)" \
   || fail "chain dispatch not reached"
+clean_tmp
+
+# ---------------------------------------------------------------------------
+echo "── Architect clear-tactics: Tactics:done survives a desynced body (no/partial markers) ──"
+clean_tmp
+DESYNCED_BODY=$(cat <<'MD'
+## Problem Statement
+
+Some existing design whose tactical markers were manually damaged.
+
+## Plan
+
+```yaml
+waves:
+  - name: Wave 1
+    tasks: [301]
+```
+
+## Progress
+
+- [ ] #301 Orphaned task `P0`
+<!-- autoducks:tactical:end -->
+MD
+)
+jq -n --arg title "Add search" --arg body "$DESYNCED_BODY" \
+  --argjson labels '["Design:done", "Tactics:done"]' --arg author alice \
+  '{title: $title, body: $body, labels: $labels, author: $author}' \
+  > "$SCRATCH/issue-desynced.json"
+
+run_pre "$SCRATCH/issue-desynced.json"
+[[ "$RC" -eq 0 ]] && pass "pre exits 0 on a desynced-marker re-run" || fail "rc=$RC"
+[[ ! -f /tmp/architect-strip-tactical.flag ]] \
+  && pass "strip flag NOT set (only one marker present)" || fail "strip flag unexpectedly set"
+[[ ! -s /tmp/architect-dropped-tasks.txt ]] \
+  && pass "no dropped tasks recorded (no parseable zone)" || fail "dropped tasks unexpectedly recorded"
+[[ -f /tmp/architect-clear-tactics.flag ]] && grep -q '^Tactics:done$' /tmp/architect-clear-tactics.flag \
+  && pass "clear-tactics marker records Tactics:done" || fail "clear-tactics marker missing Tactics:done"
+
+echo "## Problem Statement
+
+Revised design after a desynced body." > /tmp/design-spec.md
+
+run_post "engineer"
+[[ "$RC" -eq 0 ]] && pass "post exits 0 (desynced)" || fail "rc=$RC"
+grep -q 'issue edit 10 --repo x/y --body-file /tmp/design-spec.md' "$GH_LOG" \
+  && pass "design-only body published (desynced)" || fail "body not published: $(cat "$GH_LOG")"
+if grep -q '^gh issue close' "$GH_LOG"; then
+  fail "no child task should have been closed (no parseable tactical zone): $(grep '^gh issue close' "$GH_LOG")"
+else
+  pass "no child task closed (desynced, no parseable zone)"
+fi
+grep -q 'issue edit 10 --repo x/y --remove-label Tactics:done' "$GH_LOG" \
+  && pass "Tactics:done removed even though the strip flag was never set" \
+  || fail "Tactics:done not removed: $(cat "$GH_LOG")"
 clean_tmp
 
 echo ""

@@ -71,10 +71,20 @@ if [[ -f /tmp/architect-strip-tactical.flag ]]; then
         "not_planned" 2>/dev/null || true
     done < /tmp/architect-dropped-tasks.txt
   fi
-  # Drop the planning state so the issue is back in "design done, needs plan".
-  its::remove_label "$ISSUE_NUM" "Tactics:done"     2>/dev/null || true
-  its::remove_label "$ISSUE_NUM" "Tactics:crafting" 2>/dev/null || true
   ARCHITECT_STRIPPED=1
+fi
+
+# The published body is design-only, so any completed tactical plan is now
+# invalidated — drop its routing/revision labels. Driven by the presence check
+# recorded in pre.sh, NOT by the tactical-strip flag, so the label never lingers
+# even when the old body's markers were missing or damaged. Idempotent and only
+# emits calls for labels that were actually present (keeps first-design runs
+# from touching Tactics:* labels).
+if [[ -s /tmp/architect-clear-tactics.flag ]]; then
+  while IFS= read -r _lbl; do
+    [[ -n "$_lbl" ]] || continue
+    its::remove_label "$ISSUE_NUM" "$_lbl" 2>/dev/null || true
+  done < /tmp/architect-clear-tactics.flag
 fi
 
 # Issue classification (D10): the LLM writes "Feature" or "Bug" to
