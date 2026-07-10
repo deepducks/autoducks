@@ -14,6 +14,8 @@ branch_prefix_for_issue() {
   local data type labels
   data=$(its::get_issue "$issue_id")
   type=$(echo "$data" | jq -r '.type // empty')
+  type="${type#"${type%%[![:space:]]*}"}"
+  type="${type%"${type##*[![:space:]]}"}"
   labels=$(echo "$data" | jq -r '.labels[]? // empty')
   if [[ "$type" == "Bug" ]] || echo "$labels" | grep -qx 'Bug'; then
     echo "fix"
