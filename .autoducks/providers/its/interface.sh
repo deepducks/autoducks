@@ -27,6 +27,7 @@ done
 #   its::get_issue(issue_id)                         → JSON {title, body, labels, type, author}
 #   its::create_issue(title, body, labels, type, parent_id?)  → issue_id
 #   its::close_issue(issue_id, comment?, reason?)
+#   its::reopen_issue(issue_id, comment?)
 #   its::update_issue_body(issue_id, body)
 #   its::comment_issue(issue_id, body)
 #   its::react_to_comment(comment_id, reaction)
@@ -50,6 +51,7 @@ REQUIRED_FUNCTIONS=(
   "its::get_issue"
   "its::create_issue"
   "its::close_issue"
+  "its::reopen_issue"
   "its::update_issue_body"
   "its::comment_issue"
   "its::react_to_comment"
