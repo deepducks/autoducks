@@ -198,20 +198,24 @@ authz::main() {
   # 1 & 2 — event-level bypasses (checked BEFORE env-var validation because
   # workflow_dispatch, PR-closure, and schedule events legitimately have
   # empty AUTHOR_ASSOC / ACTOR — a schedule event has no actor and is
-  # write-access-gated by construction). `issues` is bypassed only for the
-  # `opened` action (EVENT_ACTION, passed alongside EVENT_NAME): an
-  # externally-opened issue still gets its single-issue priority pass
-  # instead of being denied on AUTHOR_ASSOC and silently falling back to
-  # the next daily sweep. This mirrors the workflow's job-level `if:`
-  # (which also excludes bot-authored Task issues) but isn't relying on it
-  # as the sole backstop — any other `issues` action (e.g. `edited`,
-  # `labeled`) falls through to the normal authorization ladder below.
+  # write-access-gated by construction). `issues` is bypassed for the
+  # `opened` and `closed` actions (EVENT_ACTION, passed alongside
+  # EVENT_NAME): an externally-opened issue still gets its single-issue
+  # priority pass instead of being denied on AUTHOR_ASSOC and silently
+  # falling back to the next daily sweep, and a `closed` action must reach
+  # the close-guard agent even when the closer is untrusted — otherwise the
+  # guard's own invariant (an issue is never closed while its delivery PR
+  # is open) could be defeated by denying the very check meant to catch an
+  # untrusted premature close. This mirrors the workflows' job-level `if:`
+  # but isn't relying on it as the sole backstop — any other `issues`
+  # action (e.g. `edited`, `labeled`) falls through to the normal
+  # authorization ladder below.
   case "${EVENT_NAME:-}" in
     workflow_dispatch) authz::allow_silent ;;
     pull_request)      authz::allow_silent ;;
     schedule)          authz::allow_silent ;;
     issues)
-      [[ "${EVENT_ACTION:-}" == "opened" ]] && authz::allow_silent
+      [[ "${EVENT_ACTION:-}" == "opened" || "${EVENT_ACTION:-}" == "closed" ]] && authz::allow_silent
       ;;
   esac
 
