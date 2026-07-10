@@ -87,6 +87,10 @@ MAX_CLOSES_PER_RUN=$(jq -r '.product.max_closes_per_run // 5' "$AUTODUCKS_ROOT/a
 AUTO_MERGE_DUPLICATES=$(jq -r '.product.auto_merge_duplicates // true' "$AUTODUCKS_ROOT/autoducks.json")
 [[ -z "$AUTO_MERGE_DUPLICATES" || "$AUTO_MERGE_DUPLICATES" == "null" ]] && AUTO_MERGE_DUPLICATES="true"
 
+# `//` can't be used here (same reasoning as auto_merge_duplicates in
+# pre.sh): a literal `false` must be honored, not treated as "unset".
+PROVISIONAL_CLASSIFICATION=$(jq -r 'if .product.provisional_classification == null then true else .product.provisional_classification end' "$AUTODUCKS_ROOT/autoducks.json")
+
 BACKEND=$(its::priority_backend)
 
 # ── Validate the LLM's decision file ────────────────────────────────────
@@ -106,6 +110,7 @@ fi
 
 PRIORITIES_JSON=$(jq -c '.priorities' "$VALID_OUT")
 DUPLICATES_JSON=$(jq -c '.duplicates' "$VALID_OUT")
+CLASSIFICATIONS_JSON=$(jq -c '.classifications' "$VALID_OUT")
 
 DROPPED_COUNT=$(jq '.dropped | length' "$REPORT_FILE" 2>/dev/null || echo 0)
 if [[ "$DROPPED_COUNT" -gt 0 ]]; then
@@ -124,10 +129,14 @@ fi
 if [[ "$BACKEND" == "off" ]]; then
   PRIORITIES_JSON="[]"
 fi
+if [[ "$PROVISIONAL_CLASSIFICATION" != "true" ]]; then
+  CLASSIFICATIONS_JSON="[]"
+fi
 
 PRIORITY_COUNT=$(echo "$PRIORITIES_JSON" | jq 'length')
 DUPLICATE_GROUP_COUNT=$(echo "$DUPLICATES_JSON" | jq 'length')
 DUPLICATE_CLOSE_COUNT=$(echo "$DUPLICATES_JSON" | jq '[.[].duplicates[]] | length')
+CLASSIFICATION_COUNT=$(echo "$CLASSIFICATIONS_JSON" | jq 'length')
 
 # ── dry_run: describe, don't do ─────────────────────────────────────────
 if [[ "$DRY_RUN" == "true" ]]; then
@@ -145,7 +154,12 @@ if [[ "$DRY_RUN" == "true" ]]; then
         echo "$DUPLICATES_JSON" | jq -r '.[] | "- #\(.canonical) ← " + (.duplicates | map("#" + (. | tostring)) | join(", ")) + " (confidence: \(.confidence)) — \(.rationale)"'
         echo
       fi
-      if [[ "$PRIORITY_COUNT" -eq 0 && "$DUPLICATE_GROUP_COUNT" -eq 0 ]]; then
+      if [[ "$CLASSIFICATION_COUNT" -gt 0 ]]; then
+        echo "**Proposed provisional classifications ($CLASSIFICATION_COUNT):**"
+        echo "$CLASSIFICATIONS_JSON" | jq -r '.[] | "- #\(.issue) → `Intake:\(.kind)` — \(.rationale)"'
+        echo
+      fi
+      if [[ "$PRIORITY_COUNT" -eq 0 && "$DUPLICATE_GROUP_COUNT" -eq 0 && "$CLASSIFICATION_COUNT" -eq 0 ]]; then
         echo "Nothing to propose — the backlog in scope is already groomed."
       fi
     }
@@ -290,6 +304,50 @@ done
 
 CLOSED_COUNT=$(echo "$CLOSED_DUPLICATES_JSON" | jq 'length')
 
+# ── Apply classifications: provisional Intake:<kind> labels ─────────────
+# The LLM's `kind` is a hint, never the enforcement point — every entry is
+# re-verified deterministically right here before anything is applied.
+# Gated solely by `product.provisional_classification`; independent of the
+# priority BACKEND and runs in both `single` and `sweep` scope.
+APPLIED_CLASSIFICATIONS_JSON="[]"
+if [[ "$CLASSIFICATION_COUNT" -gt 0 ]]; then
+  APPLIED_CLASSIFICATIONS_JSON=$(jq -s '.' < <(
+    while IFS= read -r c; do
+      issue=$(echo "$c" | jq -r '.issue')
+      kind=$(echo "$c" | jq -r '.kind')
+      opposite="Bug"
+      [[ "$kind" == "Bug" ]] && opposite="Feature"
+
+      issue_json=$(its::get_issue "$issue" 2>/dev/null) || continue
+      closed=$(gh issue view "$issue" --repo "$REPO" --json closed --jq '.closed' 2>/dev/null || echo true)
+      [[ "$closed" == "true" ]] && continue
+
+      issue_type=$(echo "$issue_json" | jq -r '.type // empty')
+      issue_labels=$(echo "$issue_json" | jq -r '.labels[]?')
+
+      # Already authoritatively classified (native type or exact Feature/Bug
+      # label) or already designed — the Architect owns classification once
+      # an issue reaches that stage; never override it.
+      if [[ "$issue_type" == "Feature" || "$issue_type" == "Bug" ]] \
+         || echo "$issue_labels" | grep -qxE 'Feature|Bug' \
+         || echo "$issue_labels" | grep -qx 'Design:done'; then
+        continue
+      fi
+
+      # Idempotent: already carries this exact provisional label.
+      echo "$issue_labels" | grep -qx "Intake:${kind}" && continue
+
+      gh label create "Intake:${kind}" --repo "$REPO" --color E4E4E4 \
+        --description "Autoducks provisional triage classification (non-authoritative)" 2>/dev/null || true
+      its::add_label "$issue" "Intake:${kind}"
+      its::remove_label "$issue" "Intake:${opposite}" 2>/dev/null || true
+
+      jq -n --argjson issue "$issue" --arg kind "$kind" '{issue: $issue, kind: $kind}'
+    done < <(echo "$CLASSIFICATIONS_JSON" | jq -c '.[]')
+  ))
+fi
+APPLIED_CLASSIFICATION_COUNT=$(echo "$APPLIED_CLASSIFICATIONS_JSON" | jq 'length')
+
 # ── Wrap up ───────────────────────────────────────────────────────────
 SUMMARY="Triage complete (scope: \`$SCOPE\`, priority backend: \`$BACKEND\`)."
 if [[ "$APPLIED_PRIORITY_COUNT" -gt 0 ]]; then
@@ -298,7 +356,10 @@ fi
 if [[ "$CLOSED_COUNT" -gt 0 ]]; then
   SUMMARY+=$'\n\n**Duplicates closed:** '"$CLOSED_COUNT"
 fi
-if [[ "$APPLIED_PRIORITY_COUNT" -eq 0 && "$CLOSED_COUNT" -eq 0 ]]; then
+if [[ "$APPLIED_CLASSIFICATION_COUNT" -gt 0 ]]; then
+  SUMMARY+=$'\n\n**Intake:* set:** '"$APPLIED_CLASSIFICATION_COUNT"
+fi
+if [[ "$APPLIED_PRIORITY_COUNT" -eq 0 && "$CLOSED_COUNT" -eq 0 && "$APPLIED_CLASSIFICATION_COUNT" -eq 0 ]]; then
   SUMMARY+=$'\n\nNo-op — the backlog in scope was already groomed.'
 fi
 
