@@ -1,19 +1,40 @@
-# CI: runs the shell unit suite on every PR and on pushes to main.
+# CI: runs the shell unit suite for the autoducks orchestration logic.
 #
 # The suite is fully green (31/31) on both Linux (GNU) and macOS (BSD) as of #784,
-# so this job now fails the run on any regression. To make it BLOCKING, add it as a
-# required status check in main's branch protection — note this also gates the
-# autoducks agents' auto-merges, so confirm the pipeline waits for it first.
+# so this job fails the run on any regression. It is a required status check on
+# main's branch protection — note this also gates the autoducks agents'
+# auto-merges, so confirm the pipeline waits for it first.
+#
+# WHEN IT RUNS (deliberately narrow — see #818 investigation):
+#   * pull_request → only `ready_for_review`. The Maestro creates the
+#     feature→main PR as a draft up front (run.sh:104-110) and flips it ready
+#     only when every wave has merged (run.sh:279 → `gh pr ready`), which fires
+#     exactly one `ready_for_review` event at delivery. `opened`/`reopened`
+#     carry no work yet, and `synchronize` would fire on every task push during
+#     the run — dozens of useless runs per feature. All excluded.
+#     CAVEAT: a human PR opened directly as NON-draft emits `opened`, not
+#     `ready_for_review`, so it won't trigger this required check and will hang.
+#     Open such PRs as draft then mark ready, or re-add a non-draft `opened`
+#     guard if that flow becomes common.
+#   * push → validates main after a merge lands.
+#
+# The `unit` job always runs (so the required check is always reported), but the
+# actual suite only executes when files that could affect it changed. A
+# docs-only PR (e.g. #826) reports the check green without spinning the 31
+# suites. Skipped steps still report the job as successful, so the required
+# check is never left pending — which a `paths:` filter on the trigger would do.
 name: CI — unit tests
 
 on:
   pull_request:
+    types: [ready_for_review]
     branches: [main]
   push:
     branches: [main]
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ci-unit-tests-${{ github.ref }}
@@ -25,9 +46,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Detect relevant changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            relevant:
+              - '.autoducks/**'
+              - 'test/unit-*.sh'
+              - '.github/workflows/ci-unit-tests.yml'
       - name: Ensure jq
+        if: steps.changes.outputs.relevant == 'true'
         run: sudo apt-get update -y && sudo apt-get install -y jq
       - name: Run test/unit-*.sh
+        if: steps.changes.outputs.relevant == 'true'
         run: |
           set -uo pipefail
           pass=0; fail=0; failed=()
@@ -47,5 +79,8 @@ jobs:
               printf '%s\n' "### Failing" "${failed[@]/#/- }"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-          # Real signal (non-zero on failure); advisory because not a required check.
+          # Real signal (non-zero on failure).
           [ "$fail" -eq 0 ]
+      - name: Skipped (no relevant changes)
+        if: steps.changes.outputs.relevant != 'true'
+        run: echo "No changes under .autoducks/**, test/unit-*.sh, or this workflow — unit suite skipped."
