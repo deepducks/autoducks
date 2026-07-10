@@ -6,28 +6,27 @@
 # auto-merges, so confirm the pipeline waits for it first.
 #
 # WHEN IT RUNS (deliberately narrow — see #818 investigation):
-#   * pull_request → only `ready_for_review`. The Maestro creates the
-#     feature→main PR as a draft up front (run.sh:104-110) and flips it ready
-#     only when every wave has merged (run.sh:279 → `gh pr ready`), which fires
-#     exactly one `ready_for_review` event at delivery. `opened`/`reopened`
-#     carry no work yet, and `synchronize` would fire on every task push during
-#     the run — dozens of useless runs per feature. All excluded.
-#     CAVEAT: a human PR opened directly as NON-draft emits `opened`, not
-#     `ready_for_review`, so it won't trigger this required check and will hang.
-#     Open such PRs as draft then mark ready, or re-add a non-draft `opened`
-#     guard if that flow becomes common.
+#   * pull_request → `ready_for_review`, `opened`, `reopened`, but the job
+#     skips any PR still in draft (see the `unit` job's `if:`). The Maestro
+#     opens the feature→main PR as a draft up front (run.sh:104-110) and flips
+#     it ready only when every wave has merged (run.sh:279 → `gh pr ready`), so
+#     `ready_for_review` fires exactly once, at delivery — the draft `opened`
+#     is skipped, and `synchronize` (every task push during the run) is not a
+#     trigger at all. A human PR opened/reopened directly as NON-draft still
+#     runs once via `opened`/`reopened`, so the required check never hangs.
 #   * push → validates main after a merge lands.
 #
-# The `unit` job always runs (so the required check is always reported), but the
-# actual suite only executes when files that could affect it changed. A
-# docs-only PR (e.g. #826) reports the check green without spinning the 31
-# suites. Skipped steps still report the job as successful, so the required
-# check is never left pending — which a `paths:` filter on the trigger would do.
+# The `unit` job is reported for every triggering event (so the required check
+# is never left pending — which a `paths:` filter on the trigger would cause),
+# but it does real work only when (a) the PR is not a draft AND (b) files that
+# could affect the suite changed. A docs-only PR (e.g. #826) reports the check
+# green without spinning the 31 suites; a draft PR reports green via a skipped
+# job. Skipped jobs/steps count as successful for branch protection.
 name: CI — unit tests
 
 on:
   pull_request:
-    types: [ready_for_review]
+    types: [ready_for_review, opened, reopened]
     branches: [main]
   push:
     branches: [main]
@@ -44,6 +43,11 @@ jobs:
   unit:
     name: shell unit suite
     runs-on: ubuntu-latest
+    # Skip draft PRs: the Maestro's feature PR sits in draft through the whole
+    # run and fires `opened` while still empty. A skipped job reports the
+    # required check as successful, so drafts never block; the real run happens
+    # on `ready_for_review`. Non-PR events (push) and non-draft PRs run.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v4
       - name: Detect relevant changes
