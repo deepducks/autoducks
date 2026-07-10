@@ -5,7 +5,8 @@ its::create_issue() {
   local title="$1"
   local body_file="$2"
   local labels_csv="${3:-}"
-  local parent_id="${4:-}"
+  local type="${4:-}"
+  local parent_id="${5:-}"
 
   local body
   body="$(cat "$body_file")"
@@ -20,6 +21,10 @@ its::create_issue() {
     local labels_json
     labels_json=$(echo "$labels_csv" | tr ',' '\n' | jq -R . | jq -s .)
     payload=$(echo "$payload" | jq --argjson labels "$labels_json" '. + {labels: $labels}')
+  fi
+
+  if [[ -n "$type" ]]; then
+    payload=$(echo "$payload" | jq --arg type "$type" '. + {type: $type}')
   fi
 
   local create_response
@@ -39,6 +44,6 @@ its::create_issue() {
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   case "${1:-}" in
-    --help) echo "Usage: its::create_issue TITLE BODY_FILE [LABELS_CSV] [PARENT_ID]"; echo "  Create an issue, returns issue number"; echo "  Requires: REPO env var"; exit 0 ;;
+    --help) echo "Usage: its::create_issue TITLE BODY_FILE [LABELS_CSV] [TYPE] [PARENT_ID]"; echo "  Create an issue, returns issue number"; echo "  Requires: REPO env var"; exit 0 ;;
   esac
 fi
