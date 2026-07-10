@@ -90,6 +90,7 @@ LABELS=("Feature|6F42C1|Orchestration feature issue"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../.autoducks/core/feedback/progress-labels.sh"
 LABELS+=("${AUTODUCKS_PROGRESS_LABELS[@]}")
+LABELS+=("${AUTODUCKS_MODE_LABELS[@]}")
 
 for entry in "${LABELS[@]}"; do
   IFS='|' read -r name color desc <<< "$entry"
