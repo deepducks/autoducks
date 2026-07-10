@@ -27,6 +27,9 @@ REPORT_FILE = os.environ.get("REPORT_FILE", "/tmp/triage-validation-report.json"
 PRIORITY_ENUM = ["Critical", "High", "Medium", "Low"]
 PRIORITY_LOOKUP = {p.lower(): p for p in PRIORITY_ENUM}
 
+KIND_ENUM = ["Bug", "Feature"]
+KIND_LOOKUP = {k.lower(): k for k in KIND_ENUM}
+
 CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
 
 
@@ -88,6 +91,48 @@ def validate_priorities(raw, dropped: list) -> list:
         accepted.append({
             "issue": issue,
             "priority": priority,
+            "rationale": entry.get("rationale") if isinstance(entry.get("rationale"), str) else "",
+        })
+
+    return accepted
+
+
+def validate_classifications(raw, dropped: list) -> list:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        dropped.append({"section": "classifications", "reason": "`classifications` is not an array; ignored entirely"})
+        return []
+
+    accepted = []
+    seen_issues = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            dropped.append({"section": "classifications", "entry": entry, "reason": "entry is not an object"})
+            continue
+
+        issue = as_issue_number(entry.get("issue"))
+        if issue is None:
+            dropped.append({"section": "classifications", "entry": entry, "reason": "missing/invalid `issue`"})
+            continue
+
+        kind_raw = entry.get("kind")
+        kind = KIND_LOOKUP.get(str(kind_raw).lower()) if isinstance(kind_raw, str) else None
+        if kind is None:
+            dropped.append({
+                "section": "classifications", "issue": issue,
+                "reason": f"`kind` {kind_raw!r} is outside Bug|Feature",
+            })
+            continue
+
+        if issue in seen_issues:
+            dropped.append({"section": "classifications", "issue": issue, "reason": "duplicate entry for this issue; first one wins"})
+            continue
+        seen_issues.add(issue)
+
+        accepted.append({
+            "issue": issue,
+            "kind": kind,
             "rationale": entry.get("rationale") if isinstance(entry.get("rationale"), str) else "",
         })
 
@@ -227,14 +272,18 @@ def main() -> None:
     dropped = []
     priorities = validate_priorities(data.get("priorities"), dropped)
     duplicates = validate_duplicates(data.get("duplicates"), confidence_threshold, max_closes, dropped)
+    classifications = validate_classifications(data.get("classifications"), dropped)
 
-    Path(out_path).write_text(json.dumps({"priorities": priorities, "duplicates": duplicates}, indent=2))
+    Path(out_path).write_text(json.dumps(
+        {"priorities": priorities, "duplicates": duplicates, "classifications": classifications}, indent=2
+    ))
 
     write_report({
         "ok": True,
         "accepted_priorities": len(priorities),
         "accepted_duplicate_groups": len(duplicates),
         "accepted_closes": sum(len(g["duplicates"]) for g in duplicates),
+        "accepted_classifications": len(classifications),
         "dropped": dropped,
     })
 
