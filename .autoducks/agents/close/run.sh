@@ -79,7 +79,7 @@ done
 for lbl in "Design:draft" "Design:done" "Tactics:crafting" "Tactics:done" \
            "Work:orchestrating" "Work:coding" "Work:done" \
            "Spec:draft" "Spec:plan" "Tactics:ready" "Work:progress" \
-           "Ready" "Tactics:single"; do
+           "Ready" "Tactics:single" "Mode:waves" "Mode:sequential"; do
   its::remove_label "$FEATURE" "$lbl" 2>/dev/null || true
 done
 
