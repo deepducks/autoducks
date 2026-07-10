@@ -24,7 +24,10 @@ check() { # label expected actual
 
 echo "── branch_prefix_for_issue (D10) ──"
 MOCK_ISSUE_JSON='{"type": "Bug", "labels": []}'
-check "native type Bug" "fix" "$(branch_prefix_for_issue 1)"
+check "native type Bug, no label" "fix" "$(branch_prefix_for_issue 1)"
+
+MOCK_ISSUE_JSON='{"type": "Bug", "labels": ["Feature"]}'
+check "native type Bug, label Feature" "fix" "$(branch_prefix_for_issue 1)"
 
 MOCK_ISSUE_JSON='{"type": "Feature", "labels": ["Bug"]}'
 check "label Bug (type Feature)" "fix" "$(branch_prefix_for_issue 1)"
