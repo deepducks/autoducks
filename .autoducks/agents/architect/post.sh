@@ -99,6 +99,11 @@ else
   its::remove_label "$ISSUE_NUM" "Bug" 2>/dev/null || true
 fi
 
+# The authoritative classification above supersedes any provisional intake
+# guess — strip both so a stale guess never lingers next to it.
+its::remove_label "$ISSUE_NUM" "Intake:Bug"     2>/dev/null || true
+its::remove_label "$ISSUE_NUM" "Intake:Feature" 2>/dev/null || true
+
 # Remove Draft label if present
 its::remove_label "$ISSUE_NUM" "Draft" 2>/dev/null || true
 
