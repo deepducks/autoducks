@@ -37,6 +37,28 @@ permissions:
   pull-requests: write
   actions: write
 
+# Serialize wave transitions per feature. A wave finishing merges several
+# task PRs near-simultaneously; each merge fires a `pull_request: closed`
+# event, so GitHub would otherwise run several Maestros in parallel. Each
+# independently recomputes the same "next wave" and dispatches it, because
+# prevent_duplicate_dispatch only sees a duplicate once the first developer
+# has opened its PR (minutes later) — a race the parallel Maestros lose.
+# Grouping per feature makes them run one at a time: the second Maestro only
+# starts after the first has dispatched, so its prevent_duplicate_dispatch
+# check sees the in-flight PR and skips instead of re-dispatching.
+#
+# All colliding `pull_request` events for a feature share the same base ref
+# (feature/NNN or fix/NNN), which is the natural key here; dispatch/comment
+# events key on the feature issue number instead. cancel-in-progress is
+# false — never abort a Maestro mid-dispatch — mirroring the developer.
+concurrency:
+  group: >-
+    autoducks-maestro-${{
+      github.event_name == 'workflow_dispatch' && inputs.feature_issue ||
+      github.event_name == 'issue_comment' && github.event.issue.number ||
+      github.event.pull_request.base.ref }}
+  cancel-in-progress: false
+
 jobs:
   resolve:
     if: >-
