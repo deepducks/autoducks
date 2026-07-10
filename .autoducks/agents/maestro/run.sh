@@ -11,6 +11,7 @@ source "$AUTODUCKS_ROOT/core/orchestration/prevent-duplicate-dispatch.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/create-final-pr.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/branch-prefix.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/dispatch-chain.sh"
+source "$AUTODUCKS_ROOT/core/orchestration/orchestrator-mode.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 
 log() { echo "[maestro] $*" >&2; }
@@ -108,6 +109,9 @@ if [[ -z "$EXISTING_FEATURE_PR" ]]; then
   git::create_pr "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$PR_KIND #$FEATURE: $ISSUE_TITLE" "Closes #$FEATURE" true || true
 fi
 
+ORCH_MODE=$(orchestrator_mode::resolve "$FEATURE")
+log "Orchestrator mode: $ORCH_MODE"
+
 # --- Phase 4: Single-task fast path (structural detection, D12) ---
 # A tactical zone without a waves plan means the Engineer collapsed the plan
 # into a single task carried by the feature issue itself.
@@ -162,6 +166,21 @@ done <<< "$PARSED"
 
 TOTAL_WAVES=${#WAVE_NAMES[@]}
 [[ $TOTAL_WAVES -eq 0 ]] && die "No waves found in issue #$FEATURE"
+
+if [[ "$ORCH_MODE" == "sequential" ]]; then
+  declare -a _FLAT=()
+  for ((w=0; w<TOTAL_WAVES; w++)); do
+    for t in ${WAVE_TASKS[$w]:-}; do [[ -n "$t" ]] && _FLAT+=("$t"); done
+  done
+  WAVE_NAMES=(); declare -A _NEW_TASKS=()
+  for i in "${!_FLAT[@]}"; do
+    WAVE_NAMES[$i]="Task #${_FLAT[$i]}"
+    _NEW_TASKS[$i]="${_FLAT[$i]} "
+  done
+  unset WAVE_TASKS; declare -A WAVE_TASKS
+  for i in "${!_NEW_TASKS[@]}"; do WAVE_TASKS[$i]="${_NEW_TASKS[$i]}"; done
+  TOTAL_WAVES=${#WAVE_NAMES[@]}
+fi
 
 log "Found $TOTAL_WAVES waves"
 
@@ -292,19 +311,35 @@ $(echo -e "$WORKLOG")"
 
     progress_labels::finish "$FEATURE" "Work:orchestrating" "Work:done"
     its::assign_issue "$FEATURE" "${COMMENTER:-}" 2>/dev/null || true
-    report "🎉 **All waves complete!**
+    if [[ "$ORCH_MODE" == "sequential" ]]; then
+      report "🎉 **All $TOTAL_WAVES tasks complete!**
+
+Every task has merged into the feature branch and the PR is ready.
+
+**Next:** review and merge the PR to ship, or comment \`$(autoducks_command_for close)\`
+to tear the pipeline artifacts down."
+    else
+      report "🎉 **All waves complete!**
 
 Every task across all $TOTAL_WAVES waves has merged into the feature branch and
 the PR is ready.
 
 **Next:** review and merge the PR to ship, or comment \`$(autoducks_command_for close)\`
 to tear the pipeline artifacts down."
+    fi
   else
     # Blocked — not all previous waves done
-    report "⏳ **Orchestrator waiting.**
+    if [[ "$ORCH_MODE" == "sequential" ]]; then
+      report "⏳ **Orchestrator waiting.**
+
+An earlier task is still open, so the next task can't start yet. The
+orchestrator re-runs automatically as task PRs merge — no action needed."
+    else
+      report "⏳ **Orchestrator waiting.**
 
 Some tasks in an earlier wave are still open, so no new wave can start yet. The
 orchestrator re-runs automatically as task PRs merge — no action needed."
+    fi
   fi
 else
   # Dispatch next wave
@@ -339,7 +374,12 @@ else
   done
 
   # Post summary
-  SUMMARY="🌊 **Wave $((NEXT_WAVE+1)) of $TOTAL_WAVES dispatched: ${WAVE_NAMES[$NEXT_WAVE]}**\n\n"
+  if [[ "$ORCH_MODE" == "sequential" ]]; then
+    TASK_NUM=$(echo "${WAVE_TASKS[$NEXT_WAVE]:-}" | xargs)
+    SUMMARY="➡️ **Task $((NEXT_WAVE+1)) of $TOTAL_WAVES dispatched: #${TASK_NUM}**\n\n"
+  else
+    SUMMARY="🌊 **Wave $((NEXT_WAVE+1)) of $TOTAL_WAVES dispatched: ${WAVE_NAMES[$NEXT_WAVE]}**\n\n"
+  fi
   [[ ${#ASSIGNED[@]} -gt 0 ]] && SUMMARY+="**Dispatched:** $(hashify "${ASSIGNED[@]}")\n"
   [[ ${#SKIPPED[@]} -gt 0 ]] && SUMMARY+="**Skipped (already done or in flight):** $(hashify "${SKIPPED[@]}")\n"
   [[ ${#BLOCKED[@]} -gt 0 ]] && SUMMARY+="**Blocked — needs \`$(autoducks_command_for fix)\`:** $(hashify "${BLOCKED[@]}")\n"
