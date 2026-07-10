@@ -1,0 +1,94 @@
+---
+const installCommand =
+  'curl -fsSL https://raw.githubusercontent.com/deepducks/autoducks/main/scripts/install.sh | bash';
+---
+
+<section class="home-hero not-content">
+  <p class="home-hero__concept">
+    Remote agents on GitHub Actions, powered by Claude, structured by a
+    spec-driven <strong>design &rarr; plan &rarr; build</strong> workflow.
+  </p>
+
+  <div class="home-hero__install">
+    <span class="home-hero__install-label">Install</span>
+    <pre class="home-hero__snippet"><code>{installCommand}</code></pre>
+  </div>
+</section>
+
+<style>
+  .home-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+    margin: 1.5rem auto 2.5rem;
+    max-width: 46rem;
+    padding-inline: 1rem;
+    text-align: center;
+  }
+
+  .home-hero__concept {
+    margin: 0;
+    max-width: 42rem;
+    font-size: clamp(1rem, 0.85rem + 0.6vw, 1.25rem);
+    line-height: 1.6;
+    color: var(--sl-color-gray-2);
+  }
+
+  .home-hero__concept strong {
+    color: var(--sl-color-white);
+    font-weight: 600;
+  }
+
+  .home-hero__install {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .home-hero__install-label {
+    font-family: var(--__sl-font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-3);
+  }
+
+  .home-hero__snippet {
+    display: block;
+    width: 100%;
+    max-width: 40rem;
+    margin: 0;
+    padding: 0.85rem 1.25rem;
+    overflow-x: auto;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    background: var(--sl-color-gray-6);
+    color: var(--sl-color-gray-1);
+    font-family: var(--__sl-font-mono);
+    font-size: clamp(0.75rem, 0.6rem + 0.5vw, 0.9rem);
+    text-align: left;
+    white-space: pre;
+    transition: border-color 0.15s ease;
+  }
+
+  .home-hero__snippet:hover {
+    border-color: var(--sl-color-gray-3);
+  }
+
+  .home-hero__snippet code {
+    background: transparent;
+    padding: 0;
+    border: none;
+    color: inherit;
+    font: inherit;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .home-hero__snippet {
+      transition: none;
+    }
+  }
+</style>
