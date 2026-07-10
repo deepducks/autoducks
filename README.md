@@ -72,6 +72,8 @@ The pipeline designs, plans, and implements it — opening a PR per task and a f
 
 Issues and PRs welcome.
 
+> **Referencing issues in commits.** Closing keywords (`Fixes/Closes/Resolves #N`) are reserved for the delivery PR body the Maestro generates — they close the issue when the PR merges. For any other commit that merely *mentions* an issue (hotfixes, side-quests, work-in-progress), use a **non-closing** reference: `refs #N` or `re #N`. This prevents a stray commit from closing an in-flight feature/task issue on the default branch.
+
 ## License
 
 MIT
