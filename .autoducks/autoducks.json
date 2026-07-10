@@ -19,6 +19,9 @@
     "auto": true,
     "opt_out_label": "Resolve:off"
   },
+  "orchestrator": {
+    "mode": "waves"
+  },
   "product": {
     "enabled": true,
     "schedule": "0 9 * * *",

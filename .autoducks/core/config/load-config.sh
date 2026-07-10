@@ -90,6 +90,14 @@ AUTODUCKS_MERGE_METHOD="$(echo "$_merged" | jq -r '.merge_method // "auto"')"
 export AUTODUCKS_REVIEW_CHECK_NAME
 AUTODUCKS_REVIEW_CHECK_NAME="$(jq -r '.reviewer.check_name // "Autoducks: Reviewer"' "$_config")"
 
+# ── Orchestrator mode ─────────────────────────────────────────────────
+export AUTODUCKS_ORCHESTRATOR_MODE
+AUTODUCKS_ORCHESTRATOR_MODE="$(jq -r '.orchestrator.mode // "waves"' "$_config")"
+case "$AUTODUCKS_ORCHESTRATOR_MODE" in
+  waves|sequential) ;;
+  *) AUTODUCKS_ORCHESTRATOR_MODE="waves" ;;   # tolerate garbage
+esac
+
 # ── Coordination-marker paths ────────────────────────────────────────
 # Coordination markers live in the runner's private temp dir (never the agent's
 # /tmp working area) and are scoped per run, so agent Bash activity and the
