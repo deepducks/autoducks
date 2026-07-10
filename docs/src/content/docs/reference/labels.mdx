@@ -60,6 +60,17 @@ When `product.priority_backend` resolves to `project` instead, priority lives on
 
 Labels are the route-critical signal on every repository kind; the native issue *types* (Feature/Task/Bug) are a best-effort visual enhancement on organization repos.
 
+## Orchestrator mode labels
+
+Optional, human-applied labels that pin the [Maestro's dispatch topology](/agents/maestro#topology) for a single issue — `waves` (parallel, wave-by-wave dispatch) or `sequential` (one task at a time, in dependency order, ignoring wave grouping).
+
+| Label | Applied by | Meaning |
+|-------|-----------|---------|
+| `Mode:waves` | you (optional) | Pin this issue to parallel wave-by-wave dispatch |
+| `Mode:sequential` | you (optional) | Pin this issue to one-task-at-a-time dispatch |
+
+A `Mode:*` label overrides `orchestrator.mode` in `.autoducks/autoducks.json`, but yields to an explicit `mode:` directive on the triggering comment — see [Maestro → Topology](/agents/maestro#topology) for the full resolution order.
+
 ## Retired labels
 
 These belonged to the previous taxonomy and are **cleaned up on sight** by the Engineer, Revert, and Close agents:

@@ -15,6 +15,10 @@ set -euo pipefail
 #                       Set via a `turns=<n>`, `max-turns=<n>`, `max_turns=<n>`,
 #                       or `turns:<n>` token (digits only; malformed/out-of-range
 #                       values are ignored, not fatal).
+#   mode             — waves, sequential, or empty. Set via a `mode:<value>`
+#                       token (colon form only); friendly synonyms fan-out/
+#                       fanout→waves and seq→sequential are also accepted.
+#                       Invalid values are ignored, not fatal.
 #   auto_chain       — `+`-separated canonical verbs to run after this agent
 #                       finishes, from a `#auto:<verb>[+<verb>...]` token.
 #                       Verbs are alias-normalized, deduplicated, capped at 5.
@@ -67,6 +71,7 @@ ORIGINAL_COMMAND=""
 MODEL=""
 EFFORT=""
 MAX_TURNS=""
+MODE=""
 AUTO_CHAIN=""
 STEERING_LEFTOVER=()
 TRAILING_BODY=""
@@ -125,6 +130,7 @@ is_directive_token() {
   [[ "$_lc" =~ ^model:(.+)$ ]] && return 0
   [[ "$_lc" =~ ^effort:(.+)$ ]] && return 0
   [[ "$_lc" =~ ^turns:([0-9]+)$ ]] && return 0
+  [[ "$_lc" =~ ^mode:(.+)$ ]] && return 0
   _t=$(echo "$_lc" | tr -d ',.!?:;#')
   case "$_t" in
     opus|sonnet|haiku) return 0 ;;
@@ -201,6 +207,15 @@ if [[ -n "$DIRECTIVE" ]]; then
     if [[ "$_lc" =~ ^turns:([0-9]+)$ ]]; then
       _v="${BASH_REMATCH[1]}"
       (( _v > 0 && _v <= 1000 )) && MAX_TURNS="$_v"
+      continue
+    fi
+    if [[ "$_lc" =~ ^mode:(.+)$ ]]; then
+      _md=$(echo "${BASH_REMATCH[1]}" | tr -d ',.!?;')
+      case "$_md" in
+        waves|sequential) MODE="$_md" ;;
+        fan-out|fanout)   MODE="waves" ;;
+        seq)              MODE="sequential" ;;
+      esac
       continue
     fi
 
@@ -282,5 +297,6 @@ echo "model=$MODEL"
 echo "effort=$EFFORT"
 echo "think_phrase=$THINK_PHRASE"
 echo "max_turns=$MAX_TURNS"
+echo "mode=$MODE"
 echo "auto_chain=$AUTO_CHAIN"
 echo "steering_prompt=$STEERING_PROMPT_B64"

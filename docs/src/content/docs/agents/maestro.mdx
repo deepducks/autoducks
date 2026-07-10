@@ -68,6 +68,24 @@ Both are idempotent — re-runs reuse what exists.
 7. **All waves done** → assembles the final PR: `Closes #…` for every task and the issue, plus a **Work Log** harvested from each task PR's Implementation Summary. Marks the PR ready, requests review from the issue assignees, `Work:orchestrating` → `Work:done`, assigns the command author, updates the orchestration comment in place with 🎉.
 8. **Blocked** (earlier wave still open) → updates the orchestration comment in place with ⏳, listing the still-blocked `#N` tasks, and waits for the next merge event.
 
+## Topology
+
+The Maestro supports two dispatch topologies for the wave plan:
+
+| Mode | Behavior |
+|------|----------|
+| `waves` (default) | Every unfinished task in a ready wave dispatches to its own Developer in parallel; the next wave starts only once every task in the current wave is done |
+| `sequential` | Tasks dispatch one at a time, in dependency order — the wave grouping in the tactical plan is ignored, and only a single Developer runs at once |
+
+Resolution order (highest to lowest):
+
+1. A `mode:` directive on the triggering comment — see [Slash commands → `mode:`](/reference/slash-commands#mode)
+2. A `Mode:waves` / `Mode:sequential` label on the issue — see [Labels → Orchestrator mode labels](/reference/labels#orchestrator-mode-labels)
+3. `orchestrator.mode` in `.autoducks/autoducks.json` — see [Configuration → `orchestrator.mode`](/reference/configuration#orchestratormode)
+4. Hard default: `waves`
+
+Reach for `sequential` when the wave plan's parallelism doesn't fully capture a cross-task ordering risk, or to bound how many Developers run concurrently against the same pipeline branch.
+
 ## Duplicate-dispatch protection
 
 Three independent guards prevent a task from running twice when merge events race:

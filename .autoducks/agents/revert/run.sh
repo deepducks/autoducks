@@ -27,7 +27,7 @@ fi
 PROGRESS_LABELS=(draft "Design:draft" "Design:done" "Tactics:crafting" "Tactics:done" \
                   "Work:orchestrating" "Work:coding" "Work:done" \
                   "Spec:draft" "Spec:plan" "Tactics:ready" "Work:progress" \
-                  "Ready" "Tactics:single")
+                  "Ready" "Tactics:single" "Mode:waves" "Mode:sequential")
 
 HAS_PROGRESS_LABEL=0
 for lbl in "${PROGRESS_LABELS[@]}"; do

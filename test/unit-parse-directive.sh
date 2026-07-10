@@ -109,6 +109,14 @@ assert_out "turns:0 rejected" "/execute turns:0" "max_turns="
 assert_out "turns:1001 rejected" "/execute turns:1001" "max_turns="
 assert_out "turns garbage rejected" "/execute turns=abc" "max_turns="
 
+echo "── mode overrides ──"
+assert_out "mode:sequential" "/execute mode:sequential" "mode=sequential"
+assert_out "mode:waves" "/execute mode:waves" "mode=waves"
+assert_out "mode:bogus ignored" "/execute mode:bogus" "mode="
+assert_out "mode:fan-out synonym" "/execute mode:fan-out" "mode=waves"
+assert_out "mode:fanout synonym" "/execute mode:fanout" "mode=waves"
+assert_out "mode:seq synonym" "/execute mode:seq" "mode=sequential"
+
 echo "── #auto: chaining ──"
 assert_out "single chain" "/architect #auto:engineer" "auto_chain=engineer"
 assert_out "multi chain" "/architect #auto:engineer+execute" \
@@ -139,7 +147,7 @@ assert_out "direct /review still routes (canonical, non-chain)" \
   "/review" "command=review"
 
 echo "── no directive ──"
-assert_out "empty body" "" "command=" "model=" "effort=" "max_turns=" "auto_chain="
+assert_out "empty body" "" "command=" "model=" "effort=" "max_turns=" "mode=" "auto_chain="
 assert_out "unrelated comment" "great work!" "command="
 
 # ---------------------------------------------------------------------------
@@ -227,6 +235,10 @@ assert_steering "multi-line prose" \
 assert_steering "model:-like word mid-prose is not stripped" \
   "/architect lets discuss the model:xyz option further" \
   "lets discuss the model:xyz option further"
+
+assert_steering "leading mode: token is stripped from steering_prompt" \
+  "/execute mode:sequential please add a caching layer" \
+  "please add a caching layer"
 
 # ---------------------------------------------------------------------------
 echo ""

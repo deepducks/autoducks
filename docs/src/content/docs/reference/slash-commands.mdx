@@ -8,7 +8,7 @@ import { Aside } from '@astrojs/starlight/components';
 All autoducks commands are issue comments. The full grammar:
 
 ```
-/<trigger> [model:<model>] [effort:<level>] [turns:<n>] [#auto:<agent>+<agent>...]
+/<trigger> [model:<model>] [effort:<level>] [turns:<n>] [mode:<mode>] [#auto:<agent>+<agent>...]
 ```
 
 The bare `/<trigger>` form (e.g. `/execute`) is the default — no prefix word between the slash and the verb. If your repository sets a `command` namespace in `.autoducks/autoducks.json`, insert it right after the slash instead: `/<namespace> <trigger> ...` (e.g. `/quack execute`). See [Namespace](#namespace) below.
@@ -116,6 +116,18 @@ Maximum number of agentic turns for this run (1–1000). `turns=<n>`, `max-turns
 On the wave path, the Maestro forwards `model:`/`effort:`/`turns:` from your comment to every dispatched Developer.
 
 **Priority (highest to lowest):** inline directive → per-agent `defaults.json` → global `autoducks.json` → provider default (`50` for turns).
+
+### `mode:`
+
+Overrides the [orchestrator's dispatch topology](/agents/maestro#topology) for this run — `waves` or `sequential`.
+
+```
+/execute mode:sequential
+```
+
+Only meaningful on the wave path (`/execute` routed to the [Maestro](/agents/maestro) on an issue with `Tactics:done`); ignored elsewhere. A malformed or missing value simply falls through to the next tier of resolution.
+
+**Priority (highest to lowest):** `mode:` directive → `Mode:waves`/`Mode:sequential` [label](/reference/labels#orchestrator-mode-labels) on the issue → `orchestrator.mode` in `autoducks.json` → hard default `waves`.
 
 ### `#auto:` — chaining
 
