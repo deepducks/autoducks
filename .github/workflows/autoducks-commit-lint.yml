@@ -1,0 +1,31 @@
+name: 'Autoducks: Commit-message Lint'
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  commit-lint:
+    name: commit-message lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Ensure jq
+        run: command -v jq >/dev/null 2>&1 || (sudo apt-get update -y && sudo apt-get install -y jq)
+      - name: Commit-message lint
+        run: |
+          source .autoducks/core/config/load-config.sh
+          source .autoducks/core/robustness/commit-lint.sh
+          commit_lint::scan "$(commit_lint::collect_commits)"
+        env:
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          BEFORE_SHA: ${{ github.event.before || '' }}
