@@ -44,6 +44,12 @@ check "label Bugfix does NOT match Bug" "feature" "$(branch_prefix_for_issue 1)"
 MOCK_ISSUE_JSON='{"type": null, "labels": []}'
 check "untyped, unlabeled issue defaults to feature" "feature" "$(branch_prefix_for_issue 1)"
 
+# Routing safety (Feature #888): the provisional `Intake:Bug` label must never
+# be mistaken for the authoritative bare `Bug` label — grep -qx 'Bug' does not
+# match "Intake:Bug", so this must resolve to feature, not fix.
+MOCK_ISSUE_JSON='{"type": null, "labels": ["Intake:Bug"]}'
+check "Intake:Bug-only label does NOT match Bug" "feature" "$(branch_prefix_for_issue 1)"
+
 echo "── branch_prefix_of ──"
 check "feature branch" "feature" "$(branch_prefix_of 'feature/42-user-auth')"
 check "fix branch" "fix" "$(branch_prefix_of 'fix/57-login-crash')"
