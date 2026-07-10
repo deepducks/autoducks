@@ -283,7 +283,7 @@ printf '%s' "$TACTICAL_E" > "$SCRATCH/e_tactical.md"
 assemble_body "$SCRATCH/e_design.md" "$SCRATCH/e_tactical.md" "$SCRATCH/e_body.md"
 
 jq -n --rawfile body "$SCRATCH/e_body.md" \
-  '{title: "Add search", body: $body, labels: ["Design:done", "Tactics:done"], author: "alice"}' \
+  '{title: "Add search", body: $body, labels: ["Design:done", "Tactics:done", "Feature"], author: "alice"}' \
   > "$MOCK_ISSUE_DIR/$FEATURE_E.json"
 
 run_engineer_round() {

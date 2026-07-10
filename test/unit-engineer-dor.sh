@@ -102,6 +102,52 @@ else
   pass "dor_skip not set on ready issue"
 fi
 
+echo "── Design:done but unclassified (no Feature/Bug type or label) delegates to the Architect ──"
+cat > "$SCRATCH/issue-unclassified.json" <<'JSON'
+{"title": "Add search", "body": "designed body", "labels": ["Design:done"], "author": "alice"}
+JSON
+: > "$SCRATCH/gh_output"
+TEST_COMMAND="engineer" run_pre "$SCRATCH/issue-unclassified.json"
+[[ "$RC" -eq 0 ]] && pass "pre exits 0 on unclassified delegation" || fail "rc=$RC"
+grep -q 'gh workflow run autoducks-architect.yml' "$GH_LOG" \
+  && pass "Architect workflow dispatched for unclassified issue" || fail "no architect dispatch: $(grep 'workflow run' "$GH_LOG" || echo none)"
+grep -q 'dor_skip=true' "$SCRATCH/gh_output" \
+  && pass "dor_skip output set for unclassified issue" || fail "dor_skip missing"
+[[ -f "$SCRATCH/autoducks-dortest/dor-delegated" ]] \
+  && pass "delegation marker written for unclassified issue" || fail "marker missing"
+
+echo ""
+echo "── Design:done + Bug label (already classified) proceeds without delegation ──"
+cat > "$SCRATCH/issue-classified-bug.json" <<'JSON'
+{"title": "Fix crash", "body": "designed body", "labels": ["Design:done", "Bug"], "author": "alice"}
+JSON
+: > "$SCRATCH/gh_output"
+TEST_COMMAND="engineer" run_pre "$SCRATCH/issue-classified-bug.json"
+[[ "$RC" -eq 0 ]] && pass "pre exits 0 on classified Bug issue" || fail "rc=$RC"
+if grep -q 'workflow run' "$GH_LOG"; then
+  fail "unexpected dispatch on already-classified Bug issue"
+else
+  pass "no dispatch on already-classified Bug issue"
+fi
+if grep -q 'dor_skip=true' "$SCRATCH/gh_output"; then
+  fail "dor_skip set on already-classified Bug issue"
+else
+  pass "dor_skip not set on already-classified Bug issue"
+fi
+
+echo ""
+echo "── Design:done + Intake:Bug (no authoritative Feature/Bug) still cascades ──"
+cat > "$SCRATCH/issue-intake-bug.json" <<'JSON'
+{"title": "Maybe a bug", "body": "designed body", "labels": ["Design:done", "Intake:Bug"], "author": "alice"}
+JSON
+: > "$SCRATCH/gh_output"
+TEST_COMMAND="engineer" run_pre "$SCRATCH/issue-intake-bug.json"
+[[ "$RC" -eq 0 ]] && pass "pre exits 0 on Intake:Bug delegation" || fail "rc=$RC"
+grep -q 'gh workflow run autoducks-architect.yml' "$GH_LOG" \
+  && pass "Architect workflow dispatched despite Intake:Bug" || fail "no architect dispatch: $(grep 'workflow run' "$GH_LOG" || echo none)"
+grep -q 'dor_skip=true' "$SCRATCH/gh_output" \
+  && pass "dor_skip output set for Intake:Bug issue" || fail "dor_skip missing"
+
 echo "── revision mode detected via Tactics:done ──"
 cat > "$SCRATCH/issue-revision.json" <<'JSON'
 {"title": "Add search", "body": "designed body", "labels": ["Design:done", "Tactics:done", "Feature"], "author": "alice"}

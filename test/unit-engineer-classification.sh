@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
-# Regression test for the Engineer's post-tactics classification guard
-# (.autoducks/agents/engineer/post.sh:158-168, D10).
+# Regression test: the Engineer's post.sh no longer performs any
+# classification (D10 was removed — classification is now exclusively the
+# Architect's job, gated by the Engineer's DoR guard in pre.sh, see
+# test/unit-engineer-dor.sh).
 #
 # Runs the real post.sh as a subprocess (gh shimmed out, same technique as
-# test/unit-idempotency.sh) through a single-task tactical plan, controlling
-# the mocked issue's native `.type` and labels to assert:
-#   - a native `Bug` type (no `Bug` label) is never demoted: neither
-#     `its::set_issue_type … Feature` nor `its::add_label … Feature` fires.
-#   - a `Bug` label (independent of native type) also blocks the Feature
-#     label from being added.
-#   - a plain non-bug issue still gets classified as Feature, same as before.
+# test/unit-idempotency.sh) through a single-task tactical plan, asserting
+# that regardless of the mocked issue's native `.type` or labels, post.sh
+# never calls `its::set_issue_type` or `its::add_label Feature`/`Bug`.
 #
 # Run: bash test/unit-engineer-classification.sh
 set -euo pipefail
@@ -130,60 +128,38 @@ EOF
   [[ "$RC" -eq 0 ]] || fail "post.sh exited $RC for #$issue: $(tail -5 "$SCRATCH/stderr.log")"
 }
 
-echo "── native type Bug, no Bug label: never demoted to Feature ──"
+assert_no_classification() {
+  local desc="$1"
+  if grep -q -- '--method PATCH' "$GH_LOG" && grep -q 'type=' "$GH_LOG"; then
+    fail "its::set_issue_type was called ($desc): $(grep -- '--method PATCH' "$GH_LOG")"
+  else
+    pass "its::set_issue_type never called ($desc)"
+  fi
+  if grep -qE -- '--add-label (Feature|Bug)' "$GH_LOG"; then
+    fail "its::add_label Feature/Bug was called ($desc): $(grep -- '--add-label' "$GH_LOG")"
+  else
+    pass "its::add_label Feature/Bug never called ($desc)"
+  fi
+}
+
+echo "── native type Bug, no Bug label: post.sh never classifies ──"
 run_classification_case 301 '[]' "Bug"
-if grep -q -- '--method PATCH' "$GH_LOG" && grep -q 'type=Feature' "$GH_LOG"; then
-  fail "set_issue_type … Feature was called on a native Bug: $(grep -- '--method PATCH' "$GH_LOG")"
-else
-  pass "its::set_issue_type … Feature never called on a native Bug"
-fi
-if grep -q -- '--add-label Feature' "$GH_LOG"; then
-  fail "add_label … Feature was called on a native Bug: $(grep -- '--add-label' "$GH_LOG")"
-else
-  pass "its::add_label … Feature never called on a native Bug"
-fi
+assert_no_classification "native Bug"
 
 echo ""
-echo "── Bug label present (no native type): Feature label withheld ──"
+echo "── Bug label present (no native type): post.sh never classifies ──"
 run_classification_case 302 '["Bug"]' ""
-if grep -q -- '--add-label Feature' "$GH_LOG"; then
-  fail "add_label … Feature was called on a Bug-labeled issue: $(grep -- '--add-label' "$GH_LOG")"
-else
-  pass "its::add_label … Feature never called on a Bug-labeled issue"
-fi
-if grep -q -- '--method PATCH' "$GH_LOG" && grep -q 'type=Feature' "$GH_LOG"; then
-  fail "set_issue_type … Feature was called on a Bug-labeled issue"
-else
-  pass "its::set_issue_type … Feature never called on a Bug-labeled issue"
-fi
+assert_no_classification "Bug-labeled"
 
 echo ""
-echo "── no bug signal (native type Feature, no Bug label): still classified Feature ──"
+echo "── no bug signal (native type Feature, no Bug label): post.sh never classifies ──"
 run_classification_case 303 '[]' "Feature"
-if grep -q -- '--method PATCH' "$GH_LOG" && grep -q 'type=Feature' "$GH_LOG"; then
-  pass "its::set_issue_type … Feature called for a non-bug issue"
-else
-  fail "set_issue_type … Feature missing for a non-bug issue: $(cat "$GH_LOG")"
-fi
-if grep -q -- '--add-label Feature' "$GH_LOG"; then
-  pass "its::add_label … Feature called for a non-bug issue"
-else
-  fail "add_label … Feature missing for a non-bug issue: $(cat "$GH_LOG")"
-fi
+assert_no_classification "native Feature"
 
 echo ""
-echo "── no bug signal (untyped, no Bug label): still classified Feature ──"
+echo "── no bug signal (untyped, no Bug label): post.sh never classifies ──"
 run_classification_case 304 '[]' ""
-if grep -q -- '--method PATCH' "$GH_LOG" && grep -q 'type=Feature' "$GH_LOG"; then
-  pass "its::set_issue_type … Feature called for an untyped non-bug issue"
-else
-  fail "set_issue_type … Feature missing for an untyped non-bug issue: $(cat "$GH_LOG")"
-fi
-if grep -q -- '--add-label Feature' "$GH_LOG"; then
-  pass "its::add_label … Feature called for an untyped non-bug issue"
-else
-  fail "add_label … Feature missing for an untyped non-bug issue: $(cat "$GH_LOG")"
-fi
+assert_no_classification "untyped"
 
 rm -f /tmp/design-zone.md /tmp/issue-body-raw.md /tmp/tactical-body.md /tmp/tasks.jsonl \
       /tmp/parse-error.md /tmp/link-outcomes.tsv \
