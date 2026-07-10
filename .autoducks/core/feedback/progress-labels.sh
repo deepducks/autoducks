@@ -20,10 +20,18 @@ AUTODUCKS_PROGRESS_LABELS=(
   "auto-resolved|0052CC|Conflicts auto-resolved by the resolver agent"
 )
 
-# Ensure all labels in AUTODUCKS_PROGRESS_LABELS exist on $REPO. Idempotent; ignores "already exists".
+# Sticky Mode:* labels indicating the orchestrator's execution mode. Distinct
+# from AUTODUCKS_PROGRESS_LABELS: never swapped in/out by start/finish.
+AUTODUCKS_MODE_LABELS=(
+  "Mode:waves|BFDADC|Orchestrator: sequential fan-out of waves (default)"
+  "Mode:sequential|5319E7|Orchestrator: one task at a time, fully sequential"
+)
+
+# Ensure all labels in AUTODUCKS_PROGRESS_LABELS and AUTODUCKS_MODE_LABELS
+# exist on $REPO. Idempotent; ignores "already exists".
 progress_labels::ensure() {
   local entry name color desc
-  for entry in "${AUTODUCKS_PROGRESS_LABELS[@]}"; do
+  for entry in "${AUTODUCKS_PROGRESS_LABELS[@]}" "${AUTODUCKS_MODE_LABELS[@]}"; do
     IFS='|' read -r name color desc <<< "$entry"
     gh label create "$name" \
       --repo "$REPO" \
