@@ -20,7 +20,7 @@ orchestrator_mode::resolve() {
 
   # 2. Persisted label.
   local labels
-  labels=$(its::get_issue "$issue" | jq -r '.labels[].name // empty' 2>/dev/null || true)
+  labels=$(its::get_issue "$issue" | jq -r '.labels[] // empty' 2>/dev/null || true)
   if grep -qx 'Mode:sequential' <<<"$labels"; then echo "sequential"; return 0; fi
   if grep -qx 'Mode:waves'      <<<"$labels"; then echo "waves";      return 0; fi
 
