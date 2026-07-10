@@ -75,7 +75,7 @@ if [[ -n "${EXISTING_DEFER_NUM:-}" ]]; then
   its::update_issue_body "$EXISTING_DEFER_NUM" /tmp/defer-issue-final.md
   DEFER_ISSUE_NUM="$EXISTING_DEFER_NUM"
 else
-  DEFER_ISSUE_NUM=$(its::create_issue "Follow-up: deferred review of #$FEATURE_NUM (PR #$PR_NUM)" /tmp/defer-issue-final.md "" "")
+  DEFER_ISSUE_NUM=$(its::create_issue "Follow-up: deferred review of #$FEATURE_NUM (PR #$PR_NUM)" /tmp/defer-issue-final.md "" "" "")
 fi
 
 react_to_comment "${COMMENT_ID:-}" "+1"
