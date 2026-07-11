@@ -44,6 +44,11 @@ includes:
 - **Constraints** — performance requirements, compatibility, security considerations
 - **Out of Scope** — explicit boundaries of what this does NOT include
 
+Emit each of the six sections above under its own exact `## <Heading>` line
+(e.g. `## Problem Statement`), in the order listed, using the heading text
+verbatim — not a bold bullet or any other variant. Downstream tooling
+locates each section by this exact heading, so any deviation breaks it.
+
 ## Classification
 
 Also write `/tmp/issue-type` containing a single word:

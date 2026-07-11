@@ -180,7 +180,11 @@ design_sections::wrap() {
     local idx="${entry##* }"
     local sec_id="${hit_ids[$idx]}"
 
-    local content_start=$((ln + 1))
+    # content_start begins at the heading line itself (not ln + 1) so the
+    # human-visible `## Heading` / `**Heading**` text is preserved inside the
+    # marker pair — markers are invisible HTML comments, so the heading still
+    # renders normally in the published issue body.
+    local content_start=$ln
     local content_end
     if (( k + 1 < n )); then
       local next_entry="${order[$((k + 1))]}"

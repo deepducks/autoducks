@@ -10,6 +10,7 @@ source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/dispatch-chain.sh"
+source "$AUTODUCKS_ROOT/core/orchestration/design-sections.sh"
 source "$AUTODUCKS_ROOT/core/config/classify-label.sh"
 
 trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
@@ -59,8 +60,10 @@ fi
 
 # Publish the design-only body. Any prior tactical zone is stripped — the
 # design has changed, so the old plan is torn down below rather than
-# re-emitted verbatim.
-its::update_issue_body "$ISSUE_NUM" /tmp/design-spec.md
+# re-emitted verbatim. Wrap the six canonical sections in markers first so
+# downstream agents can extract them individually (design_sections::extract).
+design_sections::wrap /tmp/design-spec.md /tmp/design-body.md
+its::update_issue_body "$ISSUE_NUM" /tmp/design-body.md
 
 if [[ -f /tmp/architect-strip-tactical.flag ]]; then
   # Close child task issues named in the discarded plan.
