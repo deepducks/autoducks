@@ -111,8 +111,12 @@ exact shape:
 
 ## Rules
 
-- Read-only: do NOT run `git`, `gh`, or any other ITS/git command, and do NOT
-  modify any file in the repository. A separate deterministic step
+- Read-only `git`/`gh` for exploration is fine (`git log`, `git show`,
+  `git blame`, `git diff`, `gh issue view`, `gh pr view`, `gh pr diff`). Do NOT
+  run any mutating command — no `git add/commit/checkout/push/merge/rebase/reset/branch`,
+  and no `gh` create/edit/comment/close/merge/review. All branch, PR, and issue
+  mutations are handled by the workflow's deterministic steps, never by you.
+- Do NOT modify any file in the repository. A separate deterministic step
   (`post.sh`) validates your output and applies it — you never touch the
   issue tracker directly.
 - Write only `/tmp/triage-decisions.json`. Do not write `/tmp/design-spec.md`
