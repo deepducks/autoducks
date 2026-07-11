@@ -53,14 +53,12 @@ When `product.priority_backend` resolves to `project` instead, priority lives on
 
 | Label | Applied by | Meaning |
 |-------|-----------|---------|
-| `Feature` | Architect | Routing + classification; pipeline branch `feature/…` |
-| `Bug` | Architect | Same pipeline as features; pipeline branch `fix/…` |
-| `Intake:Feature` | Product Owner | Provisional triage hint proposed at intake — **not** route-critical, does not affect branch naming; the Architect confirms or overrides it when classifying and strips the label |
-| `Intake:Bug` | Product Owner | Same as `Intake:Feature`, proposing `Bug` instead |
+| `Feature` | Architect (authoritative) / Product Owner (provisional) | Routing + classification; pipeline branch `feature/…` |
+| `Bug` | Architect (authoritative) / Product Owner (provisional) | Same pipeline as features; pipeline branch `fix/…` |
 | `Task` | Engineer | A task issue split from a plan — routes `execute` to the Developer |
 | `Draft` | you (optional) | Human marker for "still needs design"; removed by the Architect |
 
-Labels are the route-critical signal on every repository kind; the native issue *types* (Feature/Task/Bug) are a best-effort visual enhancement on organization repos. `Intake:*` is the one exception — it is a non-authoritative hint, never consulted for routing.
+Labels are the route-critical signal on every repository kind; the native issue *types* (Feature/Task/Bug) are a best-effort visual enhancement on organization repos. The `Bug`/`Feature` label is the single route-critical classification signal on every issue, regardless of whether the Product Owner proposed it provisionally at intake or the Architect later confirmed or overrode it.
 
 ## Orchestrator mode labels
 
