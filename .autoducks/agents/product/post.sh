@@ -334,7 +334,7 @@ if [[ "$CLASSIFICATION_COUNT" -gt 0 ]]; then
         continue
       fi
 
-      classify_label::apply "$issue" "$kind"
+      classify_label::apply "$issue" "$kind" 2>/dev/null || true
 
       jq -n --argjson issue "$issue" --arg kind "$kind" '{issue: $issue, kind: $kind}'
     done < <(echo "$CLASSIFICATIONS_JSON" | jq -c '.[]')
