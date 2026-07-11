@@ -19,7 +19,10 @@ set -euo pipefail
 export AUTODUCKS_CHECK_FEEDBACK_MARKER="<!-- autoducks:check-feedback -->"
 
 _verify_loop::config_file() {
-  echo "${AUTODUCKS_CONFIG:-.autoducks/autoducks.json}"
+  # Align with load-config.sh ($AUTODUCKS_ROOT/autoducks.json) so the command
+  # list and the `enabled` gate always read the same file — including under the
+  # pinned-machinery snapshot, where AUTODUCKS_ROOT is redirected (#989, #952).
+  echo "${AUTODUCKS_CONFIG:-${AUTODUCKS_ROOT:-.autoducks}/autoducks.json}"
 }
 
 # _verify_loop::commands_json → stdout: JSON array of {name, run}

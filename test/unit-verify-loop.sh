@@ -199,6 +199,21 @@ fi
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
+echo "── config file tracks load-config's source of truth (#989) ──"
+(
+  unset AUTODUCKS_CONFIG
+  export AUTODUCKS_ROOT="$SCRATCH/pinned"
+  source "$MODULE"
+  [[ "$(_verify_loop::config_file)" == "$SCRATCH/pinned/autoducks.json" ]]
+) && pass "config_file defaults to \$AUTODUCKS_ROOT/autoducks.json (matches load-config)" \
+  || fail "config_file did not align with AUTODUCKS_ROOT"
+(
+  export AUTODUCKS_CONFIG="$SCRATCH/override.json"
+  source "$MODULE"
+  [[ "$(_verify_loop::config_file)" == "$SCRATCH/override.json" ]]
+) && pass "config_file still honours an explicit AUTODUCKS_CONFIG override" \
+  || fail "AUTODUCKS_CONFIG override not honoured"
+
 echo "=== Unit Test Summary ==="
 echo "  Pass: $PASS"
 echo "  Fail: $FAIL"
