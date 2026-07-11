@@ -9,6 +9,7 @@ source "$AUTODUCKS_ROOT/core/orchestration/delivery-phase.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/fold-duplicate.sh"
+source "$AUTODUCKS_ROOT/core/config/classify-label.sh"
 
 ISSUE_NUM="${ISSUE_NUM:-}"
 COMMENT_ISSUE_NUM="${COMMENT_ISSUE_NUM:-}"
@@ -156,7 +157,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
       fi
       if [[ "$CLASSIFICATION_COUNT" -gt 0 ]]; then
         echo "**Proposed provisional classifications ($CLASSIFICATION_COUNT):**"
-        echo "$CLASSIFICATIONS_JSON" | jq -r '.[] | "- #\(.issue) → `Intake:\(.kind)` — \(.rationale)"'
+        echo "$CLASSIFICATIONS_JSON" | jq -r '.[] | "- #\(.issue) → `\(.kind)` — \(.rationale)"'
         echo
       fi
       if [[ "$PRIORITY_COUNT" -eq 0 && "$DUPLICATE_GROUP_COUNT" -eq 0 && "$CLASSIFICATION_COUNT" -eq 0 ]]; then
@@ -304,7 +305,7 @@ done
 
 CLOSED_COUNT=$(echo "$CLOSED_DUPLICATES_JSON" | jq 'length')
 
-# ── Apply classifications: provisional Intake:<kind> labels ─────────────
+# ── Apply classifications: authoritative Bug/Feature labels ─────────────
 # The LLM's `kind` is a hint, never the enforcement point — every entry is
 # re-verified deterministically right here before anything is applied.
 # Gated solely by `product.provisional_classification`; independent of the
@@ -315,8 +316,6 @@ if [[ "$CLASSIFICATION_COUNT" -gt 0 ]]; then
     while IFS= read -r c; do
       issue=$(echo "$c" | jq -r '.issue')
       kind=$(echo "$c" | jq -r '.kind')
-      opposite="Bug"
-      [[ "$kind" == "Bug" ]] && opposite="Feature"
 
       issue_json=$(its::get_issue "$issue" 2>/dev/null) || continue
       closed=$(gh issue view "$issue" --repo "$REPO" --json closed --jq '.closed' 2>/dev/null || echo true)
@@ -327,20 +326,15 @@ if [[ "$CLASSIFICATION_COUNT" -gt 0 ]]; then
 
       # Already authoritatively classified (native type or exact Feature/Bug
       # label) or already designed — the Architect owns classification once
-      # an issue reaches that stage; never override it.
+      # an issue reaches that stage; never override it. This guard also
+      # doubles as the idempotency guard.
       if [[ "$issue_type" == "Feature" || "$issue_type" == "Bug" ]] \
          || echo "$issue_labels" | grep -qxE 'Feature|Bug' \
          || echo "$issue_labels" | grep -qx 'Design:done'; then
         continue
       fi
 
-      # Idempotent: already carries this exact provisional label.
-      echo "$issue_labels" | grep -qx "Intake:${kind}" && continue
-
-      gh label create "Intake:${kind}" --repo "$REPO" --color E4E4E4 \
-        --description "Autoducks provisional triage classification (non-authoritative)" 2>/dev/null || true
-      its::add_label "$issue" "Intake:${kind}"
-      its::remove_label "$issue" "Intake:${opposite}" 2>/dev/null || true
+      classify_label::apply "$issue" "$kind"
 
       jq -n --argjson issue "$issue" --arg kind "$kind" '{issue: $issue, kind: $kind}'
     done < <(echo "$CLASSIFICATIONS_JSON" | jq -c '.[]')
@@ -357,7 +351,7 @@ if [[ "$CLOSED_COUNT" -gt 0 ]]; then
   SUMMARY+=$'\n\n**Duplicates closed:** '"$CLOSED_COUNT"
 fi
 if [[ "$APPLIED_CLASSIFICATION_COUNT" -gt 0 ]]; then
-  SUMMARY+=$'\n\n**Intake:* set:** '"$APPLIED_CLASSIFICATION_COUNT"
+  SUMMARY+=$'\n\n**Classified:** '"$APPLIED_CLASSIFICATION_COUNT"
 fi
 if [[ "$APPLIED_PRIORITY_COUNT" -eq 0 && "$CLOSED_COUNT" -eq 0 && "$APPLIED_CLASSIFICATION_COUNT" -eq 0 ]]; then
   SUMMARY+=$'\n\nNo-op — the backlog in scope was already groomed.'

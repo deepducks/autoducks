@@ -10,6 +10,7 @@ source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/dispatch-chain.sh"
+source "$AUTODUCKS_ROOT/core/config/classify-label.sh"
 
 trap '_rc=$?; notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
       status_comment::fail "$ISSUE_NUM" 2>/dev/null || true; \
@@ -91,18 +92,7 @@ fi
 # Route-critical: the label makes routing work on every repo kind.
 # Type is best-effort (org-only feature — silently no-ops on user repos).
 its::set_issue_type "$ISSUE_NUM" "$ISSUE_KIND" 2>/dev/null || true
-gh label create "Bug" --repo "$REPO" --color "D73A4A" --description "Autoducks bug pipeline" 2>/dev/null || true
-its::add_label "$ISSUE_NUM" "$ISSUE_KIND"
-if [[ "$ISSUE_KIND" == "Bug" ]]; then
-  its::remove_label "$ISSUE_NUM" "Feature" 2>/dev/null || true
-else
-  its::remove_label "$ISSUE_NUM" "Bug" 2>/dev/null || true
-fi
-
-# The authoritative classification above supersedes any provisional intake
-# guess — strip both so a stale guess never lingers next to it.
-its::remove_label "$ISSUE_NUM" "Intake:Bug"     2>/dev/null || true
-its::remove_label "$ISSUE_NUM" "Intake:Feature" 2>/dev/null || true
+classify_label::apply "$ISSUE_NUM" "$ISSUE_KIND"
 
 # Remove Draft label if present
 its::remove_label "$ISSUE_NUM" "Draft" 2>/dev/null || true

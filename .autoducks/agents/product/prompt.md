@@ -29,8 +29,7 @@ that describe the same underlying problem, and provisional **classifications**
         "already_prioritized": false,  // best-effort hint — re-verified deterministically before anything is applied
         "dedup_candidates": [45, 51],  // other in-scope issue numbers a cheap keyword search flagged as similar
         "already_classified": false,   // true once the issue carries a Bug/Feature classification
-        "design_done": false,          // true once the Architect has produced a design/plan for this issue
-        "intake_hint": "Bug"           // "Bug" | "Feature" | null — an existing provisional guess, if any
+        "design_done": false          // true once the Architect has produced a design/plan for this issue
       }
     ]
   }
@@ -40,9 +39,6 @@ that describe the same underlying problem, and provisional **classifications**
   actually reading both issues' bodies. Issues outside any `dedup_candidates`
   list can still be duplicates of each other; the hint only narrows where to
   look first, it does not bound the search.
-  `intake_hint` is a previously proposed provisional classification, if one
-  exists — keep it rather than re-proposing a fresh guess unless you have a
-  concrete reason to change it.
 
 ## Output
 
@@ -98,11 +94,10 @@ exact shape:
   not-yet-classified (`already_classified: false`) and not-yet-designed
   (`design_done: false`). If either is `true`, omit the issue — the
   Architect owns classification once it reaches that stage.
-- This is an explicitly provisional board hint that the Architect later
-  confirms or overrides, not a final verdict. When unsure, omit — an
-  unlabeled issue is safer than a wrong guess. Prefer keeping an issue's
-  existing `intake_hint` over re-proposing a different guess unless you have
-  concrete evidence it's wrong.
+- This is an early, authoritative `Bug`/`Feature` assignment made before the
+  issue reaches design — the Architect may still revisit and override it
+  during design. When unsure, omit — an unlabeled issue is safer than a
+  wrong guess.
 - Honored subject to config: `classification_enabled` in the inbox reflects
   whether `product.provisional_classification` is turned on. If it is
   `false`, still write an empty `classifications` array — `post.sh` ignores

@@ -31,7 +31,6 @@ const MANAGED_LABEL_PATTERNS: RegExp[] = [
   /^(feature|bug|task|draft)$/i,
   /^priority:/i,
   /^auto-resolved$/i,
-  /^intake:(bug|feature)$/i,
 ];
 
 const PRIORITY_COLORS: Record<string, string> = {
