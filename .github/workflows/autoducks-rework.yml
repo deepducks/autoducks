@@ -198,7 +198,7 @@ jobs:
         run: |
           gh issue comment "$ISSUE_NUM" --repo "$REPO" --body \
             "⚠️ **Agent run failed and its post-execution hook did not report cleanly.** \
-            This is a last-resort watchdog notice — the run's own failure reporting was \
-            skipped or errored (possible corrupted \`post.sh\`). \
-            [View the run logs](https://github.com/$REPO/actions/runs/$RUN_ID). \
-            **Next:** re-run with a larger turn budget, or inspect the hook." || true
+          This is a last-resort watchdog notice — the run's own failure reporting was \
+          skipped or errored (possible corrupted \`post.sh\`). \
+          [View the run logs](https://github.com/$REPO/actions/runs/$RUN_ID). \
+          **Next:** re-run with a larger turn budget, or inspect the hook." || true

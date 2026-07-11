@@ -168,7 +168,9 @@ jobs:
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Post-execution
         id: post
-        if: always() && steps.authz.outcome == 'success'
+        if: >-
+          always() && steps.authz.outcome == 'success' &&
+          steps.pre.outputs.dor_skip != 'true'
         run: bash "$RUNNER_TEMP/autoducks-snapshot/.autoducks/agents/engineer/post.sh"
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
