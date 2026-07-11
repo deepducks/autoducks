@@ -109,6 +109,15 @@ assert_out "turns:0 rejected" "/execute turns:0" "max_turns="
 assert_out "turns:1001 rejected" "/execute turns:1001" "max_turns="
 assert_out "turns garbage rejected" "/execute turns=abc" "max_turns="
 
+echo "── max_iterations overrides ──"
+assert_out "iters:5" "/execute iters:5" "max_iterations=5"
+assert_out "iterations:2" "/execute iterations:2" "max_iterations=2"
+assert_out "iters:0 rejected" "/execute iters:0" "max_iterations="
+assert_out "iters:99 rejected" "/execute iters:99" "max_iterations="
+assert_out "iters:abc rejected" "/execute iters:abc" "max_iterations="
+assert_out "iters:10 accepted (upper bound)" "/execute iters:10" "max_iterations=10"
+assert_out "iters:11 rejected (out of range)" "/execute iters:11" "max_iterations="
+
 echo "── mode overrides ──"
 assert_out "mode:sequential" "/execute mode:sequential" "mode=sequential"
 assert_out "mode:waves" "/execute mode:waves" "mode=waves"
@@ -147,7 +156,7 @@ assert_out "direct /review still routes (canonical, non-chain)" \
   "/review" "command=review"
 
 echo "── no directive ──"
-assert_out "empty body" "" "command=" "model=" "effort=" "max_turns=" "mode=" "auto_chain="
+assert_out "empty body" "" "command=" "model=" "effort=" "max_turns=" "max_iterations=" "mode=" "auto_chain="
 assert_out "unrelated comment" "great work!" "command="
 
 # ---------------------------------------------------------------------------
