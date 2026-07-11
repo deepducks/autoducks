@@ -77,6 +77,11 @@ BACKEND=$(its::priority_backend)
 # explicit `"auto_merge_duplicates": false` in config.
 AUTO_MERGE_DUPLICATES=$(jq -r 'if .product.auto_merge_duplicates == null then true else .product.auto_merge_duplicates end' "$AUTODUCKS_ROOT/autoducks.json")
 
+# Same explicit-`false`-honoring form as AUTO_MERGE_DUPLICATES above — read
+# again (not shared with post.sh) so each script fails independently if the
+# other's config read ever breaks.
+PROVISIONAL_CLASSIFICATION=$(jq -r 'if .product.provisional_classification == null then true else .product.provisional_classification end' "$AUTODUCKS_ROOT/autoducks.json")
+
 MAX_ISSUES=$(jq -r '.product.max_issues_per_run // 100' "$AUTODUCKS_ROOT/autoducks.json")
 [[ -z "$MAX_ISSUES" || "$MAX_ISSUES" == "null" ]] && MAX_ISSUES=100
 
@@ -95,7 +100,7 @@ if [[ "$SCOPE" == "single" ]]; then
   ISSUE_JSON=$(its::get_issue "$ISSUE_NUM")
   ISSUES_JSON=$(jq -n --argjson n "$ISSUE_NUM" --argjson issue "$ISSUE_JSON" \
     '[{number: $n, title: $issue.title, body: $issue.body, labels: $issue.labels,
-       type: null, already_prioritized: ($issue.labels | any(startswith("Priority:"))),
+       type: $issue.type, already_prioritized: ($issue.labels | any(startswith("Priority:"))),
        dedup_candidates: []}]')
 else
   RAW_ISSUES=$(its::list_issues open "$MAX_ISSUES")
@@ -165,6 +170,16 @@ else
   fi
 fi
 
+# Provisional-classification hints, backend-independent (unlike priority,
+# these read straight off labels/native type already fetched above, so no
+# `off`/`project`-style split is needed) — applies to both single and sweep
+# scope alike.
+ISSUES_JSON=$(echo "$ISSUES_JSON" | jq -c '[.[] | . + {
+  already_classified: ((.type == "Feature" or .type == "Bug") or (.labels | any(. == "Feature" or . == "Bug"))),
+  design_done: (.labels | any(. == "Design:done")),
+  intake_hint: (((.labels | map(select(. == "Intake:Bug" or . == "Intake:Feature")))[0]) as $l | if $l then ($l | ltrimstr("Intake:")) else null end)
+}]')
+
 DUPLICATES_ENABLED_JSON="false"
 [[ "$DUPLICATES_ENABLED" == "true" ]] && DUPLICATES_ENABLED_JSON="true"
 
@@ -174,10 +189,12 @@ jq -n \
   --arg backend "$BACKEND" \
   --argjson duplicates_enabled "$DUPLICATES_ENABLED_JSON" \
   --arg confidence_threshold "$CONFIDENCE_THRESHOLD" \
+  --argjson provisional_classification "$PROVISIONAL_CLASSIFICATION" \
   --argjson issues "$ISSUES_JSON" \
   '{scope: $scope, issue_scope: $issue_scope, priority_backend: $backend,
     duplicates_enabled: $duplicates_enabled, confidence_threshold: $confidence_threshold,
-    issues: $issues}' \
+    provisional_classification: $provisional_classification,
+    classification_enabled: $provisional_classification, issues: $issues}' \
   > /tmp/triage-inbox.json
 
 # ── Human-readable rendering for the LLM ────────────────────────────────
@@ -190,6 +207,7 @@ jq -n \
   echo
   echo "- Priority backend: \`$BACKEND\`"
   echo "- Duplicate detection: \`$DUPLICATES_ENABLED\`"
+  echo "- Provisional classification: \`$PROVISIONAL_CLASSIFICATION\`"
   echo "- Confidence threshold: \`$CONFIDENCE_THRESHOLD\`"
   echo "- Issues in scope: $(echo "$ISSUES_JSON" | jq 'length')"
   echo

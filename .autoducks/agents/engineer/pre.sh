@@ -58,9 +58,16 @@ if [[ "${COMMAND:-}" == "execute" ]]; then
     *) DOR_CHAIN="execute${DOR_CHAIN:++$DOR_CHAIN}" ;;
   esac
 fi
-if ! echo "$ISSUE_LABELS" | grep -qx 'Design:done'; then
+ISSUE_TYPE=$(echo "$ISSUE_DATA" | jq -r '.type // empty')
+is_classified=false
+if [[ "$ISSUE_TYPE" == "Feature" || "$ISSUE_TYPE" == "Bug" ]] \
+   || echo "$ISSUE_LABELS" | grep -qxE 'Feature|Bug'; then
+  is_classified=true
+fi
+
+if ! echo "$ISSUE_LABELS" | grep -qx 'Design:done' || [[ "$is_classified" == false ]]; then
   if chain::dispatch_prerequisite "architect" "engineer" "$DOR_CHAIN" "$ISSUE_NUM"; then
-    status_comment::delegate "$ISSUE_NUM" "This issue has no \`Design:done\` label, so the **Architect** was dispatched first to create (or revise) the design. The Engineer will re-run automatically when it finishes."
+    status_comment::delegate "$ISSUE_NUM" "This issue has no completed, classified design, so the **Architect** was dispatched first to create (or revise) the design. The Engineer will re-run automatically when it finishes."
     touch "$AUTODUCKS_DOR_DELEGATED_MARKER"
     [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "dor_skip=true" >> "$GITHUB_OUTPUT"
     exit 0

@@ -155,18 +155,6 @@ its::remove_label "$ISSUE_NUM" "Ready" 2>/dev/null || true
 # signal for the Maestro.
 progress_labels::finish "$ISSUE_NUM" "Tactics:crafting" "Tactics:done"
 
-# Classification (D10): only default to Feature when the issue is neither a
-# native `Bug` type nor `Bug`-labeled. its::get_issue now surfaces a real
-# `.type`, so a human-set native `Bug` short-circuits this and the Engineer can
-# never demote a real bug to Feature. Never strips an existing `Bug` label.
-ISSUE_KIND_DATA=$(its::get_issue "$ISSUE_NUM")
-ISSUE_TYPE=$(echo "$ISSUE_KIND_DATA" | jq -r '.type // empty')
-if [[ "$ISSUE_TYPE" != "Bug" ]] \
-   && ! echo "$ISSUE_KIND_DATA" | jq -r '.labels[]?' | grep -qx 'Bug'; then
-  its::set_issue_type "$ISSUE_NUM" "Feature" 2>/dev/null || true
-  its::add_label "$ISSUE_NUM" "Feature"
-fi
-
 # Done-assignee (D15): the command author owns the next action.
 its::assign_issue "$ISSUE_NUM" "${COMMENTER:-}" 2>/dev/null || true
 
