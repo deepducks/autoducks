@@ -6,7 +6,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 
 # Clear stale markers from a previous run on this runner before we could
 # leave fresh ones behind (see trap below / post.sh's guard).
-rm -f "$AUTODUCKS_PRE_FAILED_MARKER" "$AUTODUCKS_DOR_DELEGATED_MARKER"
+rm -f "$AUTODUCKS_PRE_FAILED_MARKER" "$AUTODUCKS_DOR_DELEGATED_MARKER" "$AUTODUCKS_NO_CODE_RESULT"
 mkdir -p "$AUTODUCKS_MARKER_DIR"
 
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
