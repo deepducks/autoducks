@@ -108,8 +108,8 @@ The Engineer is **pure ITS** — it never touches git (D7).
 
 1. **DoR:** requires `Tactics:done`, else delegates to the Engineer with `#auto:execute`.
 2. **Owns all pipeline git** (D7): ensures the pipeline branch — `feature/<slug>` for Features, `fix/<slug>` for Bugs (D10) — cut from `base_branch`, and the **draft PR** into `integration_branch`.
-3. Computes wave states from merged task PRs (`fixes #N` bodies), ticks the `## Progress` checkboxes, and dispatches the next eligible wave of Developers (`autoducks-developer.yml` via `workflow_dispatch`), propagating model/effort/turns overrides and the original actor. Three independent guards prevent duplicate dispatch (open-PR check, Developer pre-flight skip, per-task concurrency group).
-4. **Advancement is event-driven**: every PR merged into a `feature/*` or `fix/*` branch re-triggers the Maestro, which recomputes and continues. No polling.
+3. Computes wave states from merged task PRs (`fixes #N` bodies) **and from sub-tasks closed via a no-code-diff completion** (D17), ticks the `## Progress` checkboxes, and dispatches the next eligible wave of Developers (`autoducks-developer.yml` via `workflow_dispatch`), propagating model/effort/turns overrides and the original actor. Three independent guards prevent duplicate dispatch (open-PR check, Developer pre-flight skip, per-task concurrency group).
+4. **Advancement is event-driven**: every PR merged into a `feature/*` or `fix/*` branch re-triggers the Maestro, which recomputes and continues. No polling — except a no-code-diff sub-task, which creates no PR and so explicitly re-dispatches the Maestro instead (D17).
 5. **Persistent orchestration comment**: instead of stacking a new comment on every re-run, the Maestro maintains a single, marker-anchored **orchestration status comment** that it edits in place to reflect current wave state — dispatched, skipped, and blocked tasks are rendered as clickable `#N` references, so the comment always shows the latest picture rather than a scrolling history.
 6. When every wave is done: rebuilds the final PR body (`Closes #…` + a `## Work Log` harvested from each task PR's Implementation Summary), marks the PR ready, requests review from the issue assignees, `Work:orchestrating` → `Work:done`, assigns the command author, and updates the orchestration comment in place with the completion summary.
 7. Single-task fast path: dispatches the Developer on the feature issue itself.
@@ -120,12 +120,16 @@ The Engineer is **pure ITS** — it never touches git (D7).
 2. Cuts a task branch from the pipeline branch, inheriting its prefix: `<feature|fix>/<parentNum>-issue-<taskNum>-<epoch>`.
 3. **[AGENT]** Implements the task spec (may read with `git`/`gh`, never mutates); writes `/tmp/work-summary.md`.
 4. Opens the task PR into the pipeline branch (`fixes #N` + Implementation Summary) and **auto-merges** it (adaptive method: `auto` probes merge/squash/rebase; 3 attempts with rebase in between; conflicts → `notify_conflict`).
-5. Closes the task explicitly (sub-PR merges don't fire GitHub's auto-close), `Work:coding` → `Work:done`, assigns the command author.
+5. Closes the task explicitly (sub-PR merges don't fire GitHub's auto-close) — **only for real sub-tasks**, where `ISSUE_NUM != FEATURE_NUM` (D16) — then `Work:coding` → `Work:done`, assigns the command author.
 6. On `max_turns` exhaustion: commits `WIP:`, pushes the branch, and reports it — `/fix` resumes from the preserved branch.
 
 > **Auto-merge policy:** task PRs merge into a pipeline branch that itself undergoes human review before reaching `integration_branch`. Manually-dispatched tasks against the default branch are **not** auto-merged.
 
 > **Referencing issues in commits.** Closing keywords (`Fixes/Closes/Resolves #N`) are reserved for the delivery PR body the Maestro generates — they close the issue when the PR merges. For any other commit that merely *mentions* an issue (hotfixes, side-quests, work-in-progress), use a **non-closing** reference: `refs #N` or `re #N`. This prevents a stray commit from closing an in-flight feature/task issue on the default branch.
+
+> **Feature-issue closure is exclusive to the delivery PR (D16).** Agents never `its::close_issue` a feature issue (`ISSUE_NUM == FEATURE_NUM`); features close **only** via the human-merged delivery PR's `Closes #N`. Real sub-tasks (`ISSUE_NUM != FEATURE_NUM`) still close on sub-PR merge — unchanged.
+
+> **A task may legitimately complete with no code diff (D17).** The diff is ground truth: a non-empty diff always produces a PR, and no marker can suppress or fabricate one. When a task's diff is empty, an execution-time no-code result artifact (not a label/type) — written by the agent in lieu of a code change — turns that empty diff into a recorded, PR-less completion: the result is posted as a comment and the sub-task is closed without opening a PR. Because this path creates no PR and fires no merge event, the Maestro counts such a closed task as done alongside merged-PR done-ness, and is explicitly re-triggered — rather than relying on the `pull_request: closed` event — to advance the wave (see [Maestro](#maestro-orchestration-layer)).
 
 ---
 
