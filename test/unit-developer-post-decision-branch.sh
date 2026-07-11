@@ -306,6 +306,44 @@ rm -f /tmp/no-code-result.md
 echo ""
 
 # =============================================================================
+# 3b. Single-task no-op (ISSUE_NUM == FEATURE_NUM), empty diff + no-code
+#     artifact → the no-op branch must NOT fire (Fix 1 guard extended to the
+#     no-op arm): the feature issue stays open, no PR is created, and the run
+#     instead falls through to the assert_changes failure path.
+# =============================================================================
+echo "── Single-task no-op (ISSUE_NUM == FEATURE_NUM): feature stays open, routes to failure ──"
+
+fixture_issue 99 "Widget feature"
+reset_state
+new_task_branch "feature/99-issue-99-b"
+echo "Verified: no code changes needed." > /tmp/no-code-result.md
+
+RC=0
+run_post 99 "$FEATURE_BRANCH" || RC=$?
+[[ "$RC" -eq 1 ]] && pass "exits 1 (routed to the assert_changes failure path)" || fail "rc=$RC: $(tail -5 "$SCRATCH/stderr.log")"
+if grep -q '^=== gh pr create ' "$GH_LOG"; then
+  fail "a PR was created on the single-task no-op path"
+else
+  pass "no PR created"
+fi
+if grep -qE "gh issue close 99 " "$GH_LOG"; then
+  fail "feature issue #99 was closed by a single-task no-op (D16 invariant violated)"
+else
+  pass "feature issue #99 was NOT closed"
+fi
+if grep -q '^=== gh workflow run autoducks-maestro.yml' "$GH_LOG"; then
+  fail "Maestro was explicitly re-dispatched on the single-task no-op path"
+else
+  pass "no explicit Maestro re-dispatch"
+fi
+grep -qF "Agent run failed" "$GH_LOG" \
+  && pass "notify_failure fired (single-task no-op falls through to the failure path)" \
+  || fail "notify_failure did not fire: $(cat "$GH_LOG")"
+
+rm -f /tmp/no-code-result.md
+echo ""
+
+# =============================================================================
 # 4. Empty diff + no artifact → genuine failure via assert_changes (scenario 3).
 # =============================================================================
 echo "── Empty diff + no artifact: fails via the existing assert_changes path ──"

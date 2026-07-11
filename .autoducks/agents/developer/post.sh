@@ -148,21 +148,28 @@ $SUMMARY"
     # primary trigger)
     trigger_loop_closure "$FEATURE_NUM" || true
   fi
-elif [[ -s "$AUTODUCKS_NO_CODE_RESULT" ]]; then
+elif [[ "$ISSUE_NUM" != "$FEATURE_NUM" && -s "$AUTODUCKS_NO_CODE_RESULT" ]]; then
   # Legitimate no-op: the agent's deliverable is a recorded finding, not a
   # code diff. No PR, no failure — record the result, close the sub-task,
   # and explicitly wake the Maestro (there is no PR-merge event to do it).
+  # A single-task no-op (ISSUE_NUM == FEATURE_NUM) is excluded above and
+  # falls through to the assert_changes failure path below instead — a
+  # feature issue must never close without a reviewed delivery PR (Fix 1,
+  # D16).
   NO_OP=true
   NO_CODE_RESULT=$(cat "$AUTODUCKS_NO_CODE_RESULT")
-  its::comment_issue "$ISSUE_NUM" "$NO_CODE_RESULT"
+  its::comment_issue "$ISSUE_NUM" "$NO_CODE_RESULT" \
+    2>/dev/null || echo "::warning::Could not comment on task #$ISSUE_NUM"
   its::close_issue "$ISSUE_NUM" \
     "Auto-closed by the Developer agent — no code change was required; see the recorded result above." \
     "completed" \
     2>/dev/null || echo "::warning::Could not close task #$ISSUE_NUM"
 
-  git::dispatch_workflow "autoducks-maestro.yml" \
-    -f "feature_issue=$FEATURE_NUM" \
-    ${COMMENTER:+-f "actor=$COMMENTER"} || true
+  if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
+    git::dispatch_workflow "autoducks-maestro.yml" \
+      -f "feature_issue=$FEATURE_NUM" \
+      ${COMMENTER:+-f "actor=$COMMENTER"} || true
+  fi
 else
   # Empty diff and no recorded result — the agent produced nothing.
   if ! assert_changes "$PR_BASE_BRANCH"; then
@@ -182,13 +189,23 @@ progress_labels::finish "$ISSUE_NUM" "Work:coding" "Work:done"
 its::assign_issue "$ISSUE_NUM" "${COMMENTER:-}" 2>/dev/null || true
 
 if [[ "$NO_OP" == "true" ]]; then
-  EXEC_MSG="**No code change — result recorded.**
+  if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
+    EXEC_MSG="**No code change — result recorded.**
 
 This task's deliverable was a recorded finding rather than a code change. It
 has been posted as a comment on this issue and the task was closed. The
 Maestro has been notified and will advance to the next wave automatically.
 
 **Next:** nothing — the Maestro drives the feature to completion from here."
+  else
+    # Manually-dispatched, parent-less no-op — there is no Maestro to notify.
+    EXEC_MSG="**No code change — result recorded.**
+
+This task's deliverable was a recorded finding rather than a code change. It
+has been posted as a comment on this issue and the task was closed.
+
+**Next:** nothing further is required."
+  fi
 elif [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
   if [[ "$ISSUE_NUM" == "$FEATURE_NUM" ]]; then
     # Single-task mode — the Developer ran directly on the feature issue, so
