@@ -89,7 +89,12 @@ waves:
 - **The design zone is preserved verbatim above your output.** Do NOT copy, paraphrase, or re-summarize it into `/tmp/tactical-body.md`. If tactical-only caveats are worth recording, use `## Notes`. The human wrote the design spec deliberately — downstream agents read it directly from the issue body.
 - **Preserve the draft's specs in the task that implements them.** When the draft includes code blocks, type definitions, exact function/class signatures, constant tables, error messages, or validation rules that define *what an artifact must look like*, copy them verbatim into the Summary of the task responsible for that artifact. Do not translate spec-as-code into imperative bullets — the worker agent will re-derive and diverge. If the draft is "here's the shape, implement it", the task body must contain that shape. This applies per-task: if a snippet belongs to task T3, it goes only in T3, not duplicated across the plan.
 - **Never embed "confirm with author before …" or "pending approval" phrases in the plan.** If you need confirmation, use Questions Mode above.
-- Do NOT run `git` or `gh`. Do NOT modify source code. Only Write to
+- Read-only `git`/`gh` for exploration is fine (`git log`, `git show`,
+  `git blame`, `git diff`, `gh issue view`, `gh pr view`, `gh pr diff`). Do NOT
+  run any mutating command — no `git add/commit/checkout/push/merge/rebase/reset/branch`,
+  and no `gh` create/edit/comment/close/merge/review. All branch, PR, and issue
+  mutations are handled by the workflow's deterministic steps, never by you.
+- Do NOT modify source code. Only Write to
   `/tmp/tactical-body.md` (Plan Mode) or `/tmp/questions.md` (Questions Mode).
 
 ## Example — decomposing a multi-file refactor (illustrative)

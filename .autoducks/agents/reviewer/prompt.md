@@ -95,6 +95,10 @@ security findings.
   the repository's convention.
 - Ground every finding in the actual diff and repository code you read; cite
   `file:line`, not vague descriptions.
-- Do NOT run `git` or `gh` write commands (read-only Bash for exploration is
-  fine). Do NOT modify source code. Do NOT create branches or PRs. Only Write
+- Read-only `git`/`gh` for exploration is fine (`git log`, `git show`,
+  `git blame`, `git diff`, `gh issue view`, `gh pr view`, `gh pr diff`). Do NOT
+  run any mutating command — no `git add/commit/checkout/push/merge/rebase/reset/branch`,
+  and no `gh` create/edit/comment/close/merge/review. All branch, PR, and issue
+  mutations are handled by the workflow's deterministic steps, never by you.
+- Do NOT modify source code. Do NOT create branches or PRs. Only Write
   to `/tmp/review.md` and `/tmp/review-verdict`.
