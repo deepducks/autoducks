@@ -32,6 +32,13 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
     "required_check": false,
     "check_name": "Autoducks: Reviewer"
   },
+  "checks": {
+    "enabled": false,
+    "setup": "",
+    "commands": [],
+    "git_hooks": false,
+    "max_iterations": 3
+  },
   "product": {
     "enabled": true,
     "schedule": "0 9 * * *",
@@ -189,6 +196,68 @@ When `true`, `scripts/setup.sh` (run with repo-admin `gh` credentials) creates a
 ### `reviewer.check_name`
 
 The Check-run name emitted on final PRs and required by the ruleset — kept in one place so the two never drift. **Default:** `Autoducks: Reviewer`.
+
+## `checks`
+
+Configures the [Developer](/agents/developer)'s **build-layer verification loop**: automated checks (lint, build, test, or anything else scriptable) that run against the agent's own changes before a task PR ever opens. Optional — the whole block, and every field in it, can be omitted; checks are disabled by default. See [Developer → Verification loop](/agents/developer#verification-loop) for the runtime behavior this config drives.
+
+### `checks.enabled`
+
+Turns the loop on. **Default:** `false`
+
+Checks only actually run when `enabled` is `true` **and** there's something to run — at least one entry in `commands`, or `git_hooks: true` with a discoverable hook. `enabled: true` with neither is a no-op.
+
+### `checks.setup`
+
+An optional shell command that prepares the toolchain before any check runs (installing dependencies, building, starting a service, etc.). **Default:** `""` (no setup step)
+
+<Aside type="caution">
+**`setup` failure is infrastructure, not a check failure.** If `setup` exits non-zero, the run is categorized `infra` — the same bucket as any other environment problem — and it is **never** blamed on the agent's work: it does not consume a `max_iterations` attempt, and it does not re-dispatch the Developer for another try. Put toolchain availability here; put anything that should judge the correctness of the change itself in `commands` below.
+</Aside>
+
+### `checks.commands`
+
+An ordered array of `{ "name": "...", "run": "..." }` checks, each run from the repository root via `bash -c "<run>"`. They run in array order; the first non-zero exit stops the loop right there (later commands don't run). **Default:** `[]`
+
+```json
+{
+  "checks": {
+    "commands": [
+      { "name": "lint", "run": "npm run lint" },
+      { "name": "test", "run": "npm test" }
+    ]
+  }
+}
+```
+
+`name` is optional (falls back to `"check"`) and is only used to label the failure in the feedback comment; `run` is required.
+
+### `checks.git_hooks`
+
+When `true`, probes the repository for an existing pre-commit setup and, if one is found, runs it as an implicit first check (before `commands`, in this order): `pre-commit run --all-files` (when `.pre-commit-config.yaml` exists and `pre-commit` is on `PATH`), else an executable `.githooks/pre-commit`, else an executable `.git/hooks/pre-commit`. **Default:** `false`
+
+If none of those are discoverable, `git_hooks: true` degrades to a no-op (with a workflow warning) rather than failing the run — a missing hook config never wedges every task.
+
+### `checks.max_iterations`
+
+Caps how many additional LLM attempts the loop will dispatch against a failing check before giving up. **Default:** `3`. Clamped to `1`–`10`; a non-numeric or out-of-range value falls back to the default.
+
+### Loop mechanics
+
+The loop runs after the Developer's LLM step has committed its changes, and before the task PR is opened:
+
+1. `setup` runs once (if set); a non-zero exit is an `infra` failure — see the caveat above.
+2. The `git_hooks`-derived check (if any) runs, then `commands` in order. The first failure stops the loop.
+3. **All checks pass** → the loop clears any stale feedback comment and the run proceeds to push + open the PR as normal.
+4. **A check fails and iterations remain** (`iteration < max_iterations`) → the branch is pushed as WIP (resumable, no PR yet), a marker-anchored comment on the task issue is created or updated in place with the failing output, and the Developer **re-dispatches itself** on the same task with the iteration counter incremented — the same LLM prompt, plus the prior failure appended as context.
+5. **A check fails and iterations are exhausted** (`iteration >= max_iterations`) → the loop gives up: the branch is pushed with its last attempt preserved, the run fails with category `check_failed`, and `/fix` on the task resumes from that branch.
+
+A `setup` (infra) failure never consumes an iteration — only `commands`/`git_hooks` failures do.
+
+<Aside type="danger">
+**Check commands are a config-only trust boundary.** `checks.setup` and every `checks.commands[].run` string is read straight from the committed `.autoducks/autoducks.json` and executed with `bash -c` on the runner — **never** from the triggering comment, the issue/PR body, or anything the LLM writes. This is deliberate: those are all untrusted-text surfaces on a public repository, and an attacker-controlled command string reaching `bash -c` would be arbitrary code execution. Only commit commands here that you'd run on any change merged into this repository, and review edits to this block with the same scrutiny as CI config.
+</Aside>
+
 ## `product`
 
 Configuration for the [Product Owner](/agents/product) (`/triage` and `/merge`) — the only agent that also runs unattended, on a schedule.

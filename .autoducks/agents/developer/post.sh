@@ -17,10 +17,68 @@ source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/robustness/assert-changes.sh"
+source "$AUTODUCKS_ROOT/core/robustness/verify-loop.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/trigger-loop-closure.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/branch-prefix.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
+
+# ── Marker-anchored check-feedback comment (T4) ──────────────────────
+# Mirrors orchestrator_comment::upsert's marker-scan pattern (find-or-create
+# by scanning its::list_comments for the hidden marker), but also supports
+# deletion — this comment must never linger past the retry it describes.
+# Kept here (not in verify-loop.sh) since it performs ITS writes, while
+# verify-loop.sh stays read-only w.r.t. ITS/git.
+# One id file per issue (mirrors status_comment's _id_file), so /tmp never
+# confuses two different issues' feedback comments.
+_check_feedback_comment_id_file() {
+  echo "/tmp/autoducks-check-feedback-comment-id.${1}"
+}
+
+_verify_loop::find_feedback_comment_id() {
+  local issue_id="$1"
+  local comments
+  comments=$(its::list_comments "$issue_id" 2>/dev/null) || return 0
+  echo "$comments" | jq -r --arg marker "$AUTODUCKS_CHECK_FEEDBACK_MARKER" \
+    '[.[] | select((.author == "github-actions[bot]" or .author == "github-actions")
+                   and ((.body // "") | contains($marker)))]
+     | sort_by(.updated_at // .created_at // "") | last | .id // empty' \
+    2>/dev/null
+}
+
+# verify_loop::upsert_feedback_comment ISSUE_NUM BODY
+# Edits the existing feedback comment in place, or posts a fresh one.
+verify_loop::upsert_feedback_comment() {
+  local issue_id="$1" body="$2"
+  local f; f=$(_check_feedback_comment_id_file "$issue_id")
+  local cid=""
+  [[ -s "$f" ]] && cid=$(cat "$f" 2>/dev/null || true)
+  [[ -z "$cid" ]] && cid=$(_verify_loop::find_feedback_comment_id "$issue_id")
+
+  if [[ -n "$cid" && "$cid" != "null" ]]; then
+    echo "$cid" > "$f"
+    its::update_comment "$cid" "$body" 2>/dev/null || true
+    return 0
+  fi
+
+  local out="" new_id=""
+  out=$(its::comment_issue "$issue_id" "$body" 2>/dev/null) || return 0
+  new_id=$(echo "$out" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+' | head -1 || true)
+  [[ -n "$new_id" ]] && echo "$new_id" > "$f"
+  return 0
+}
+
+# verify_loop::clear_feedback_comment ISSUE_NUM
+# Deletes the feedback comment (success or give-up path) so it never lingers.
+verify_loop::clear_feedback_comment() {
+  local issue_id="$1"
+  local f; f=$(_check_feedback_comment_id_file "$issue_id")
+  local cid=""
+  [[ -s "$f" ]] && cid=$(cat "$f" 2>/dev/null || true)
+  [[ -z "$cid" ]] && cid=$(_verify_loop::find_feedback_comment_id "$issue_id")
+  [[ -n "$cid" && "$cid" != "null" ]] && its::delete_comment "$cid" 2>/dev/null || true
+  rm -f "$f"
+}
 
 # Reconstruct state from git (pre.sh exports don't persist across GHA steps)
 TASK_BRANCH=$(git rev-parse --abbrev-ref HEAD)
@@ -68,9 +126,62 @@ fi
 git add -A
 git commit -m "Implement issue #${ISSUE_NUM}" || true
 
+# Verify-loop footer note (T2-T4); set on a passing check run below. Defined
+# at top level so the footer can read it under `set -u` on every code path.
+CHECKS_NOTE=""
+
 NO_OP=false
 ahead=$(git::commits_ahead "$PR_BASE_BRANCH")
 if [[ "$ahead" -gt 0 ]]; then
+  # ── Capped verification loop (T2-T4): run configured checks before the PR
+  # ever opens; a failure re-dispatches this same task for another LLM pass
+  # instead of shipping broken work, up to AUTODUCKS_CHECKS_MAX_ITERATIONS.
+  if verify_loop::enabled; then
+    ITERATION="${ITERATION:-1}"
+    MAX="${MAX_ITERATIONS:-$AUTODUCKS_CHECKS_MAX_ITERATIONS}"
+
+    # Capture the exit code immediately — set -e / the ERR trap / intermediate
+    # commands would otherwise clobber a bare $? by the time the if runs.
+    rc=0
+    verify_loop::run_checks || rc=$?
+
+    if [[ "$rc" -eq 0 ]]; then
+      verify_loop::clear_feedback_comment "$ISSUE_NUM"
+      CHECKS_NOTE="Automated checks passed on attempt ${ITERATION}/${MAX}."
+      : # fall through to push + PR + auto-merge below
+    elif [[ "$rc" -eq 2 ]]; then
+      # Setup/infra error — categorize as infra, do NOT consume an iteration.
+      export AUTODUCKS_FAIL_CATEGORY="infra" AUTODUCKS_FAIL_PHASE="post"
+      notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}"
+      status_comment::fail "$ISSUE_NUM"
+      react_to_comment "${COMMENT_ID:-}" "confused"
+      progress_labels::abort "$ISSUE_NUM" "Work:coding"
+      exit 1
+    elif (( ITERATION < MAX )); then
+      git::push_branch "$TASK_BRANCH"                      # WIP, resumable
+      verify_loop::upsert_feedback_comment "$ISSUE_NUM" "$(verify_loop::feedback_body "$ITERATION" "$MAX")"
+      status_comment::note "$ISSUE_NUM" "Check failed — retrying ($((ITERATION+1))/$MAX)…"
+      git::dispatch_workflow "autoducks-developer.yml" \
+          -f issue_number="$ISSUE_NUM" -f base_branch="$BASE_BRANCH" \
+          -f iteration="$((ITERATION+1))" \
+          ${COMMENTER:+-f actor="$COMMENTER"} \
+          ${MODEL:+-f model="$MODEL"} \
+          ${EFFORT:+-f effort="$EFFORT"} \
+          ${MAX_TURNS:+-f max_turns="$MAX_TURNS"} \
+          ${MAX_ITERATIONS:+-f max_iterations="$MAX_ITERATIONS"}
+      exit 0                                               # this iteration ends cleanly
+    else
+      verify_loop::clear_feedback_comment "$ISSUE_NUM"
+      git::push_branch "$TASK_BRANCH" || true             # preserve this iteration for /fix
+      export AUTODUCKS_FAIL_CATEGORY="check_failed" AUTODUCKS_FAIL_PHASE="post"
+      export AUTODUCKS_FAIL_BRANCH="$TASK_BRANCH"          # leave for /fix
+      notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}"
+      status_comment::fail "$ISSUE_NUM"
+      progress_labels::abort "$ISSUE_NUM" "Work:coding"
+      exit 1
+    fi
+  fi
+
   # Normal path: push, create the PR, merge-retry, close the real sub-task.
   git::push_branch "$TASK_BRANCH"
 
@@ -238,6 +349,9 @@ is **not** auto-merged.
 if changes are needed."
 fi
 
+FOOTER="_Ran with \`${MODEL:-unknown}\` at effort \`${EFFORT:-unknown}\`._"
+[[ -n "$CHECKS_NOTE" ]] && FOOTER="$FOOTER $CHECKS_NOTE"
+
 status_comment::finish "$ISSUE_NUM" "$EXEC_MSG
 
-_Ran with \`${MODEL:-unknown}\` at effort \`${EFFORT:-unknown}\`._"
+$FOOTER"

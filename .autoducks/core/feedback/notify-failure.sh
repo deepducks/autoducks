@@ -7,11 +7,13 @@ set -euo pipefail
 # Optional context (env, all default to empty/"infra"):
 #   AUTODUCKS_AGENT          — set already by every entry script (architect|engineer|maestro|developer|fix|revert|close)
 #   AUTODUCKS_FAIL_PHASE     — pre | llm | post   (default: "" → omitted from message)
-#   AUTODUCKS_FAIL_CATEGORY  — merge-conflict | no-changes | scope-missing | parse | max_turns | infra
+#   AUTODUCKS_FAIL_CATEGORY  — merge-conflict | no-changes | scope-missing | parse | max_turns | check_failed | infra
 #                              (default: "infra")
-#   AUTODUCKS_FAIL_BRANCH    — pushed branch with preserved work (max_turns only)
+#   AUTODUCKS_FAIL_BRANCH    — pushed branch with preserved work (max_turns, check_failed)
 #   MAX_TURNS                — turn budget the failed run used; sizes the
 #                              suggested `turns=<n>` retry hint (max_turns only)
+#   AUTODUCKS_CHECKS_MAX_ITERATIONS — number of check-fix iterations attempted
+#                              before giving up (check_failed only)
 
 # Suggested `turns=<n>` for a max_turns retry: double the budget the failed run
 # used, capped at the parser's ceiling (1000). Falls back to the provider
@@ -96,6 +98,10 @@ notify_failure() {
         *)         retry="\`$(autoducks_command_for execute) turns=$turns\` to resume from the partial branch with more turns" ;;
       esac
       ;;
+    check_failed)
+      diagnosis="Automated checks did not pass after ${AUTODUCKS_CHECKS_MAX_ITERATIONS:-N} iterations — the partial work has been preserved (see the branch below)."
+      retry="\`$(autoducks_command_for fix)\` on this task to resume from the preserved branch"
+      ;;
     *)
       category="infra"
       diagnosis="The run hit an unexpected error before it could finish (API, git, or runtime issue)."
@@ -107,10 +113,11 @@ notify_failure() {
   [[ -n "$phase" ]] && context_line+="  ·  **Phase:** \`$phase\`"
   context_line+="  ·  **Category:** \`$category\`"
 
-  # max_turns: append the preserved branch name and any work summary the agent
-  # left behind, so the next fix run knows exactly where to resume.
+  # max_turns/check_failed: append the preserved branch name and any work
+  # summary the agent left behind, so the next fix run knows exactly where to
+  # resume.
   local partial_section=""
-  if [[ "$category" == "max_turns" ]]; then
+  if [[ "$category" == "max_turns" || "$category" == "check_failed" ]]; then
     if [[ -n "${AUTODUCKS_FAIL_BRANCH:-}" ]]; then
       partial_section+="
 

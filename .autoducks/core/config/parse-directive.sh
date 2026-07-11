@@ -15,6 +15,9 @@ set -euo pipefail
 #                       Set via a `turns=<n>`, `max-turns=<n>`, `max_turns=<n>`,
 #                       or `turns:<n>` token (digits only; malformed/out-of-range
 #                       values are ignored, not fatal).
+#   max_iterations   — integer in [1, 10], or empty. Set via an `iters:<n>` or
+#                       `iterations:<n>` token (digits only; malformed/out-of-range
+#                       values are ignored, not fatal).
 #   mode             — waves, sequential, or empty. Set via a `mode:<value>`
 #                       token (colon form only); friendly synonyms fan-out/
 #                       fanout→waves and seq→sequential are also accepted.
@@ -71,6 +74,7 @@ ORIGINAL_COMMAND=""
 MODEL=""
 EFFORT=""
 MAX_TURNS=""
+MAX_ITERATIONS=""
 MODE=""
 AUTO_CHAIN=""
 STEERING_LEFTOVER=()
@@ -130,6 +134,8 @@ is_directive_token() {
   [[ "$_lc" =~ ^model:(.+)$ ]] && return 0
   [[ "$_lc" =~ ^effort:(.+)$ ]] && return 0
   [[ "$_lc" =~ ^turns:([0-9]+)$ ]] && return 0
+  [[ "$_lc" =~ ^iters:([0-9]+)$ ]] && return 0
+  [[ "$_lc" =~ ^iterations:([0-9]+)$ ]] && return 0
   [[ "$_lc" =~ ^mode:(.+)$ ]] && return 0
   _t=$(echo "$_lc" | tr -d ',.!?:;#')
   case "$_t" in
@@ -207,6 +213,11 @@ if [[ -n "$DIRECTIVE" ]]; then
     if [[ "$_lc" =~ ^turns:([0-9]+)$ ]]; then
       _v="${BASH_REMATCH[1]}"
       if (( _v > 0 && _v <= 1000 )); then MAX_TURNS="$_v"; fi
+      continue
+    fi
+    if [[ "$_lc" =~ ^iters:([0-9]+)$ || "$_lc" =~ ^iterations:([0-9]+)$ ]]; then
+      _v="${BASH_REMATCH[1]}"
+      (( _v >= 1 && _v <= 10 )) && MAX_ITERATIONS="$_v"
       continue
     fi
     if [[ "$_lc" =~ ^mode:(.+)$ ]]; then
@@ -297,6 +308,7 @@ echo "model=$MODEL"
 echo "effort=$EFFORT"
 echo "think_phrase=$THINK_PHRASE"
 echo "max_turns=$MAX_TURNS"
+echo "max_iterations=$MAX_ITERATIONS"
 echo "mode=$MODE"
 echo "auto_chain=$AUTO_CHAIN"
 echo "steering_prompt=$STEERING_PROMPT_B64"

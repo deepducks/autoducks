@@ -286,6 +286,41 @@ fi
 rm -f /tmp/work-summary.md
 
 # ---------------------------------------------------------------------------
+# Test 6a: check_failed diagnosis references checks/iterations, includes the
+# preserved branch, and points at the fix command
+# ---------------------------------------------------------------------------
+echo "[6a] check_failed diagnosis + preserved branch"
+reset_log
+(
+  unset _AUTODUCKS_NOTIFIED
+  export AUTODUCKS_FAIL_CATEGORY="check_failed"
+  export AUTODUCKS_FAIL_BRANCH="feature/301-task-checks"
+  export AUTODUCKS_CHECKS_MAX_ITERATIONS="3"
+  notify_failure "301" "701"
+)
+BODY=$(cat "$SCRATCH/comment_1_body.txt")
+if echo "$BODY" | grep -qF "Automated checks did not pass after 3 iterations"; then
+  pass "check_failed: diagnosis references checks and iteration count"
+else
+  fail "check_failed: diagnosis missing: $BODY"
+fi
+if echo "$BODY" | grep -qF "feature/301-task-checks"; then
+  pass "check_failed: preserved branch included"
+else
+  fail "check_failed: preserved branch missing: $BODY"
+fi
+if echo "$BODY" | grep -qF '`/fix` on this task to resume from the preserved branch'; then
+  pass "check_failed: retry points at fix command"
+else
+  fail "check_failed: retry command missing: $BODY"
+fi
+if echo "$BODY" | grep -qF '`check_failed`'; then
+  pass "check_failed: category echoed in message"
+else
+  fail "check_failed: category not echoed: $BODY"
+fi
+
+# ---------------------------------------------------------------------------
 # Test 7: second notify_failure call in the same process is a no-op
 # ---------------------------------------------------------------------------
 echo "[7] second call in same process is a no-op"

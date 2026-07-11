@@ -47,11 +47,11 @@ Every slash-command run follows the same skeleton (security first, feedback alwa
 4. **Definition-of-Ready guards** — distinct from the security gate. When an agent is not ready, it **auto-dispatches its prerequisite agent** and re-queues itself (plus any pending `#auto:` chain) behind it via [`core/orchestration/dispatch-chain.sh`](../core/orchestration/dispatch-chain.sh). Chains are depth-capped and loop-protected.
 5. **Apply the layer's in-progress label** to the issue.
 6. **Run the agent's specific workflow** (LLM step for Architect/Engineer/Developer/Fix; pure orchestration for Maestro/Revert/Close).
-7. *(Future)* wrap the agentic workflow in a verification loop against a definition of done.
+7. **Build layer only:** the Developer wraps its agentic workflow in a capped verification loop against the [`checks`](../../docs/src/content/docs/reference/configuration.mdx#checks) config — re-dispatching itself on a check failure (up to `checks.max_iterations`) before ever opening a PR. See [`core/robustness/verify-loop.sh`](../core/robustness/verify-loop.sh) and the [Developer → Verification loop](../../docs/src/content/docs/agents/developer.mdx#verification-loop) doc.
 8. **Edit the status comment** to ✅ with the friendly outcome details and the `_Ran with \`model\` at effort \`level\`._` footer.
 9. **Apply the layer's done label** and **assign the command author** to the issue — the assignee always marks who owns the next action (D15).
 
-Failures never end as a silent red X: [`core/feedback/notify-failure.sh`](../core/feedback/notify-failure.sh) posts a categorized diagnosis (merge-conflict / no-changes / scope-missing / parse / max_turns / infra) with a run-log link and a retry hint, mirrored to the parent feature when a task fails.
+Failures never end as a silent red X: [`core/feedback/notify-failure.sh`](../core/feedback/notify-failure.sh) posts a categorized diagnosis (merge-conflict / no-changes / scope-missing / parse / max_turns / check_failed / infra) with a run-log link and a retry hint, mirrored to the parent feature when a task fails.
 
 ### Re-run semantics
 

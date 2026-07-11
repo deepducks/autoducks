@@ -47,9 +47,22 @@ A task needs its **pipeline context** — the parent issue's branch to cut from 
 2. **Idempotency guard:** if any PR — open or merged — already claims this task (`fixes #N`), the run skips quietly (this is one of the three [duplicate-dispatch guards](/agents/maestro#duplicate-dispatch-protection)).
 3. Applies `Work:coding`; waits for the base branch to be visible; cuts the task branch, inheriting the pipeline prefix: `feature/<parent>-issue-<task>-<epoch>` or `fix/…`.
 4. **[LLM]** Implements the task spec — read-only `git`/`gh` exploration is permitted, but the LLM never commits, pushes, or opens the PR (that stays with the workflow), and any code it writes must not embed a `gh`/GitHub-API call directly (that goes through the `its::*` / `git::*` provider interfaces); it edits files and writes `/tmp/work-summary.md`.
-5. Commits, pushes, opens the PR into the pipeline branch with `fixes #N` and an **Implementation Summary** (harvested later into the final PR's Work Log).
-6. **Auto-merges** with the adaptive method (`merge_method: auto` probes merge → squash → rebase; three attempts with a rebase onto the base in between). A conflict posts a 🔀 report with resolution steps.
-7. Closes the task explicitly (sub-PR merges don't fire GitHub's auto-close), `Work:coding` → `Work:done`, assigns the command author, flips the status comment to ✅. The merge event itself re-triggers the Maestro.
+5. Commits locally, then — if [`checks`](/reference/configuration#checks) is configured — runs the **verification loop** (below) before anything is pushed.
+6. Pushes, opens the PR into the pipeline branch with `fixes #N` and an **Implementation Summary** (harvested later into the final PR's Work Log).
+7. **Auto-merges** with the adaptive method (`merge_method: auto` probes merge → squash → rebase; three attempts with a rebase onto the base in between). A conflict posts a 🔀 report with resolution steps.
+8. Closes the task explicitly (sub-PR merges don't fire GitHub's auto-close), `Work:coding` → `Work:done`, assigns the command author, flips the status comment to ✅. The merge event itself re-triggers the Maestro.
+
+## Verification loop
+
+When [`checks`](/reference/configuration#checks) is enabled, the Developer doesn't hand a task straight to review the moment the LLM stops editing — it runs the configured commands (lint/build/test/pre-commit/…) against the agent's own changes first, and treats a failure as more work to do rather than a finished task:
+
+1. After committing, it runs `checks.setup` (if any), then any `git_hooks`-derived check, then `checks.commands` in order. The first failure stops the loop right there.
+2. **Pass** → proceeds to push + open the PR as usual; the status comment footer notes which attempt passed (e.g. *"Automated checks passed on attempt 2/3."*).
+3. **Fail, attempts remain** → pushes the branch as WIP (no PR yet — same resumable-branch mechanic as a `max_turns` cutoff), posts the failing check's output as a marker-anchored comment on the task issue, and **re-dispatches itself** on the same task — the LLM gets a fresh turn budget and the prior failure as context, so it's fixing a concrete, quoted error rather than re-guessing. This repeats up to `checks.max_iterations` times.
+4. **Fail, attempts exhausted** → gives up: the branch is preserved and pushed, the run fails with category `check_failed`, and `/fix` on the task resumes from that branch. See [When things fail](/guides/when-things-fail).
+5. **`setup` itself fails** at any point → categorized `infra`, not `check_failed` — an unavailable toolchain is never treated as the agent's fault, and it doesn't consume an iteration.
+
+The loop counter (`iteration`, defaulting to `1`) rides along on the internal `workflow_dispatch` that drives the re-run — it isn't something you set on the triggering comment; the Developer manages it itself between attempts. Full field-by-field schema (`enabled`, `setup`, `commands`, `git_hooks`, `max_iterations`) lives in the [Configuration reference](/reference/configuration#checks).
 
 ## When the turn limit hits
 
