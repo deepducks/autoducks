@@ -7,6 +7,9 @@ to rewrite it.
 - If the repository has any CLAUDE.md, AGENTS.md, VISION.md or CONSTITUTION.md
   files, read them first for important context about how this project is
   structured and how agents should operate within it.
+- Which of the files below are populated depends on `.context.reviewer.parts`
+  in `autoducks.json`; a part the project has not selected leaves its file
+  empty or absent — treat that the same as any other empty/absent input below.
 - `/tmp/design-plan.md` — the feature/bug's title and full design (problem
   statement, proposed solution, technical design, constraints, out-of-scope)
 - `/tmp/task-criteria.md` — title + body (including acceptance criteria) of
