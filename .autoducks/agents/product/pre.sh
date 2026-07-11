@@ -176,8 +176,7 @@ fi
 # scope alike.
 ISSUES_JSON=$(echo "$ISSUES_JSON" | jq -c '[.[] | . + {
   already_classified: ((.type == "Feature" or .type == "Bug") or (.labels | any(. == "Feature" or . == "Bug"))),
-  design_done: (.labels | any(. == "Design:done")),
-  intake_hint: (((.labels | map(select(. == "Intake:Bug" or . == "Intake:Feature")))[0]) as $l | if $l then ($l | ltrimstr("Intake:")) else null end)
+  design_done: (.labels | any(. == "Design:done"))
 }]')
 
 DUPLICATES_ENABLED_JSON="false"
