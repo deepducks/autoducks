@@ -151,6 +151,7 @@ if [[ "$ahead" -gt 0 ]]; then
       : # fall through to push + PR + auto-merge below
     elif [[ "$rc" -eq 2 ]]; then
       # Setup/infra error — categorize as infra, do NOT consume an iteration.
+      verify_loop::clear_feedback_comment "$ISSUE_NUM"   # no stale note (#989)
       export AUTODUCKS_FAIL_CATEGORY="infra" AUTODUCKS_FAIL_PHASE="post"
       notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}"
       status_comment::fail "$ISSUE_NUM"
@@ -175,6 +176,9 @@ if [[ "$ahead" -gt 0 ]]; then
       git::push_branch "$TASK_BRANCH" || true             # preserve this iteration for /fix
       export AUTODUCKS_FAIL_CATEGORY="check_failed" AUTODUCKS_FAIL_PHASE="post"
       export AUTODUCKS_FAIL_BRANCH="$TASK_BRANCH"          # leave for /fix
+      # Report the cap the loop actually enforced (honours an `iters:` override),
+      # not the config default, so the diagnosis matches reality (#989).
+      export AUTODUCKS_CHECKS_MAX_ITERATIONS="$MAX"
       notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}"
       status_comment::fail "$ISSUE_NUM"
       progress_labels::abort "$ISSUE_NUM" "Work:coding"

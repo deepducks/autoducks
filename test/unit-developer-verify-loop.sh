@@ -318,7 +318,7 @@ echo ""
 # 4. Setup/infra error (rc=2) → infra category, no iteration consumed
 # =============================================================================
 echo "── Developer post: setup error → infra, no iteration consumed ──"
-no_feedback_comments
+stale_feedback_comment
 reset_run
 MOCK_CHECKS_ENABLED=true MOCK_CHECKS_RC=2
 RC=0
@@ -349,6 +349,26 @@ if grep -q 'attempt' "$GH_LOG"; then
 else
   pass "infra: no feedback comment upserted"
 fi
+grep -q '=== gh api .*issues/comments/501 --method DELETE' "$GH_LOG" \
+  && pass "infra: stale feedback comment cleared (#989)" \
+  || fail "infra: stale feedback comment was not cleared: $(cat "$GH_LOG")"
+
+# =============================================================================
+# 5. Give-up with an iters override reports the ENFORCED cap, not the config
+#    default (#989 — the give-up message must sync $MAX).
+# =============================================================================
+echo "── Developer post: give-up reports the overridden cap, not the config default ──"
+no_feedback_comments
+reset_run
+MOCK_CHECKS_ENABLED=true MOCK_CHECKS_RC=1
+RC=0
+run_post "feature/1-issue-$ISSUE_NUM-capoverride" ITERATION=5 MAX_ITERATIONS=5 || RC=$?
+[[ "$RC" -eq 1 ]] \
+  && pass "cap: post.sh exits 1 (give-up)" \
+  || fail "cap: rc=$RC: $(tail -20 "$SCRATCH/stderr.log")"
+grep -q 'after 5 iterations' "$GH_LOG" \
+  && pass "cap: give-up reports the enforced cap (5), not the config default (2)" \
+  || fail "cap: message did not report the enforced cap: $(cat "$GH_LOG")"
 
 # ---------------------------------------------------------------------------
 # Summary
