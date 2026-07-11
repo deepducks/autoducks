@@ -131,29 +131,13 @@ else
   git checkout -b "$TASK_BRANCH"
 fi
 
-# Prepare task spec for the LLM
-its::get_issue "$ISSUE_NUM" | jq -r '"# " + .title + "\n\n" + .body' > /tmp/task-spec.md
-
-# Re-dispatched retry (ITERATION > 1, T2/T4): surface the prior check
-# failure so the LLM sees exactly what to fix instead of re-guessing. The
-# feedback comment is marker-anchored (verify-loop.sh), so it survives the
-# fresh runner post.sh's push dispatched us onto.
-ITERATION="${ITERATION:-1}"
-if [[ "$ITERATION" -gt 1 ]]; then
-  FEEDBACK_BODY=$(its::list_comments "$ISSUE_NUM" 2>/dev/null | jq -r \
-    --arg marker "$AUTODUCKS_CHECK_FEEDBACK_MARKER" \
-    '[.[] | select((.author == "github-actions[bot]" or .author == "github-actions")
-                   and ((.body // "") | contains($marker)))]
-     | sort_by(.updated_at // .created_at // "") | last | .body // empty') || FEEDBACK_BODY=""
-  if [[ -n "$FEEDBACK_BODY" ]]; then
-    {
-      echo ""
-      echo "## Previous check failure"
-      echo ""
-      echo "$FEEDBACK_BODY"
-    } >> /tmp/task-spec.md
-  fi
-fi
+# Prepare task spec for the LLM. resolve_context reads .context.developer.parts
+# from autoducks.json (default manifest: issue_title, issue_description,
+# prior_feedback) and writes /tmp/task-spec.md, including the marker-anchored
+# check-failure append on a re-dispatched retry (ITERATION > 1, T2/T4) — the
+# feedback comment survives the fresh runner post.sh's push dispatched us onto.
+source "$AUTODUCKS_ROOT/core/context/resolve-context.sh"
+resolve_context "developer" "$ISSUE_NUM"
 
 # Export for post.sh
 export TASK_BRANCH BASE_BRANCH PR_BASE_BRANCH FEATURE_NUM

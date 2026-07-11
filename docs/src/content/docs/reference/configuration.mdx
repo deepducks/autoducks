@@ -62,6 +62,11 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
     "triage":    [],
     "merge":     []
   },
+  "context": {
+    "developer": {
+      "parts": ["issue_title", "issue_description", "prior_feedback"]
+    }
+  },
   "review": {
     "security_guidelines": ".autoducks/security-guidelines.md"
   },
@@ -364,6 +369,94 @@ Agent directories: `architect`, `engineer`, `maestro`, `developer`, `fix`, `reve
 2. Agent-level `defaults.json`
 3. Global `.autoducks/autoducks.json`
 4. Provider action default — applies only to `max_turns` (`50`)
+
+## `context`
+
+Controls which pieces of issue/PR/design context each agent is fed, keyed by agent (`architect`, `engineer`, `developer`, `reviewer`). Optional — omit the whole block, or any agent within it, to use that agent's built-in default manifest (see [Default manifests](#default-manifests) below).
+
+```json
+{
+  "context": {
+    "developer": {
+      "parts": ["issue_title", "issue_description", "prior_feedback", "issue_metadata"]
+    }
+  }
+}
+```
+
+### `context.<agent>.parts`
+
+An **allow-list, not an additive list**: when `parts` is present, it entirely *replaces* that agent's default manifest rather than adding to it. An explicit `"parts": []` is a deliberate "select nothing" and is honored as-is — that's distinct from omitting `parts` altogether, which falls back to the default manifest.
+
+Every requested part is validated against the [availability matrix](#part-catalog--availability) for that agent. An unknown part ID, or one not available to that agent, aborts the run (exit 1) with a fix hint pointing back at this config — never a silent no-op.
+
+### Part catalog & availability
+
+| Part ID | Source | Architect | Engineer | Developer | Reviewer |
+|---|---|:---:|:---:|:---:|:---:|
+| `issue_title` | Issue title | ✅ | ✅ | ✅ | ✅ |
+| `issue_description` | Issue body | ✅ | ✅ | ✅ | ✅ |
+| `issue_comments` | Last 20 issue comments | ✅ | ✅ | ✅ | ✅ |
+| `issue_metadata` | Labels, type, author | ✅ | ✅ | ✅ | ✅ |
+| `design.problem_statement` | Design-section marker extract | — | ✅ | ✅ | ✅ |
+| `design.proposed_solution` | Design-section marker extract | — | ✅ | ✅ | ✅ |
+| `design.technical_design` | Design-section marker extract | — | ✅ | ✅ | ✅ |
+| `design.dependencies` | Design-section marker extract | — | ✅ | ✅ | ✅ |
+| `design.constraints` | Design-section marker extract | — | ✅ | ✅ | ✅ |
+| `design.out_of_scope` | Design-section marker extract | — | ✅ | ✅ | ✅ |
+| `design.full` | Whole design zone of the issue body | — | ✅ | ✅ | ✅ |
+| `plan` | Tactical zone (plan YAML) of the issue body | — | ✅ | ✅ | ✅ |
+| `task_title` | Task issue's title | — | — | ✅ | — |
+| `task_description` | Task issue's body | — | — | ✅ | — |
+| `prior_feedback` | Marker-anchored check-failure comment (only materializes when `ITERATION > 1`) | — | — | ✅ | — |
+| `task_criteria` | Acceptance criteria of every task in the feature's wave plan | — | — | — | ✅ |
+| `pr_diff` | Unified diff of the PR | — | — | — | ✅ |
+| `pr_meta` | PR title/base/head/state plus changed-file list | — | — | — | ✅ |
+| `security_guidelines` | Repository security guidelines file (see [`review.security_guidelines`](#reviewsecurity_guidelines)) | — | — | — | ✅ |
+
+`task_title`/`task_description` are shaped identically to `issue_title`/`issue_description` — they're distinct catalog IDs because the Developer resolves them against the task issue rather than the parent feature/bug issue.
+
+### Default manifests
+
+The parts injected when `context.<agent>` (or its `parts` key) is absent — chosen to reproduce each agent's pre-existing `/tmp` context files byte-for-byte:
+
+| Agent | Default `parts` |
+|---|---|
+| `architect` | `issue_title`, `issue_description`, `issue_comments` |
+| `engineer` | `issue_title`, `issue_description`, `issue_comments`, `design.full` |
+| `developer` | `issue_title`, `issue_description`, `prior_feedback` |
+| `reviewer` | `issue_title`, `issue_description`, `task_criteria`, `design.full`, `pr_diff`, `pr_meta`, `security_guidelines` |
+
+### Architect: `issue_comments` runs every turn
+
+Unlike every other part, the Architect's `issue_comments` is **turn-agnostic**: whenever it's selected, it's materialized on the first pass *and* every revision — there's no gate on iteration count or on whether feedback exists yet. In practice this means a reviewer's feedback comment is visible to the Architect's very next turn, not just a later resumed revision.
+
+To opt out, list `context.architect.parts` explicitly without `issue_comments`:
+
+```json
+{
+  "context": {
+    "architect": { "parts": ["issue_title", "issue_description"] }
+  }
+}
+```
+
+### Design-section markers & the legacy full-design fallback
+
+When the Architect finalizes a design, its issue body is wrapped in wire-format HTML-comment markers around each of the six canonical sections:
+
+```
+<!-- autoducks:design:problem_statement:begin -->
+...
+<!-- autoducks:design:problem_statement:end -->
+```
+
+(likewise for `proposed_solution`, `technical_design`, `dependencies`, `constraints`, and `out_of_scope`)
+
+Downstream agents can select individual `design.<section>` parts to receive only the relevant slice of the design, or `design.full` for the entire design zone. Two precedence rules resolve conflicts between them, each logged as an `::notice::` when triggered:
+
+- **`design.full` wins.** Selecting both `design.full` and one or more `design.<section>` parts drops the individual sections — only the full zone is materialized.
+- **Legacy fallback.** If the issue body carries none of the section markers at all (e.g. a design authored before this feature existed), any selected `design.<section>` part degrades to the full design zone instead. No agent ever runs with an empty design because of a missing marker.
 
 ## `review`
 

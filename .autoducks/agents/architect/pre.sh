@@ -7,6 +7,7 @@ source "$AUTODUCKS_ROOT/core/feedback/notify-failure.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
+source "$AUTODUCKS_ROOT/core/context/resolve-context.sh"
 
 rm -f "$AUTODUCKS_PRE_FAILED_MARKER"
 mkdir -p "$AUTODUCKS_MARKER_DIR"
@@ -41,18 +42,25 @@ status_comment::start "$ISSUE_NUM"
 progress_labels::ensure
 progress_labels::start "$ISSUE_NUM" "Design:draft" "Design:done"
 
-# Fetch issue content for the LLM
-its::get_issue "$ISSUE_NUM" | jq -r '"# " + .title + "\n\n" + .body' > /tmp/issue-request.md
-
-# Fetch raw body (no title prefix) for zone splitting
-its::get_issue "$ISSUE_NUM" | jq -r '.body' > /tmp/issue-body-raw.md
+# Fetch issue content for the LLM (title+body → /tmp/issue-request.md, raw
+# body → /tmp/issue-body-raw.md, last-20 comments appended under the
+# "Reviewer feedback / adjustments" heading) via the shared context resolver.
+resolve_context "architect" "$ISSUE_NUM"
 
 # Decode the steering prompt (free-text prose from the triggering comment,
 # base64-encoded by parse-directive.sh) to a stable file. Advisory only — it
 # is never written into the design body or interpolated into a shell command.
+# Always-on override, not a manifest part — appended after the comment
+# window resolve_context already wrote above.
 rm -f /tmp/steering-prompt.md
 if [[ -n "${STEERING_PROMPT:-}" ]]; then
   printf '%s' "$STEERING_PROMPT" | base64 -d > /tmp/steering-prompt.md
+fi
+if [[ -s /tmp/steering-prompt.md ]]; then
+  {
+    cat /tmp/steering-prompt.md
+    echo ""
+  } >> /tmp/issue-request.md
 fi
 
 # If the current body already has a tactical zone, strip it: the design is
@@ -79,27 +87,4 @@ if body_has_markers /tmp/issue-body-raw.md; then
     tactical_zone::task_refs "$YAML_BLOCK" > /tmp/architect-dropped-tasks.txt || true
   fi
   touch /tmp/architect-strip-tactical.flag
-
-  # Revision run: append recent comments and the steering prompt below the
-  # request, under a labelled section. Advisory only — appended after the
-  # request, never mixed into the design zone split above.
-  {
-    echo ""
-    echo "## Reviewer feedback / adjustments (steer the revision)"
-    echo ""
-    its::list_comments "$ISSUE_NUM" 20 | jq -r '.[] | "### " + .author + "\n\n" + .body + "\n\n---\n"'
-    if [[ -s /tmp/steering-prompt.md ]]; then
-      cat /tmp/steering-prompt.md
-      echo ""
-    fi
-  } >> /tmp/issue-request.md
-elif [[ -s /tmp/steering-prompt.md ]]; then
-  # First-pass run: no comment history to append, only the steering prompt.
-  {
-    echo ""
-    echo "## Reviewer feedback / adjustments (steer the revision)"
-    echo ""
-    cat /tmp/steering-prompt.md
-    echo ""
-  } >> /tmp/issue-request.md
 fi

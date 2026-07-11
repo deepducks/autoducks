@@ -8,7 +8,7 @@ source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/branch-prefix.sh"
-source "$AUTODUCKS_ROOT/core/orchestration/parse-waves.sh"
+source "$AUTODUCKS_ROOT/core/context/resolve-context.sh"
 
 rm -f "$AUTODUCKS_PRE_FAILED_MARKER"
 mkdir -p "$AUTODUCKS_MARKER_DIR"
@@ -121,36 +121,11 @@ for _t in "${REVIEW_TARGETS[@]}"; do
 done
 
 # ── Gather context for the LLM ──────────────────────────────────────────
-its::get_issue "$FEATURE_NUM" | jq -r '.title,.body' > /tmp/design-plan.md
+resolve_context "reviewer" "$PR_NUM" "$FEATURE_NUM"
 
-# Task acceptance criteria: best-effort — a feature body without a `waves:`
-# block (e.g. the single-task fast path) simply yields an empty file.
-: > /tmp/task-criteria.md
-FEATURE_BODY=$(its::get_issue "$FEATURE_NUM" | jq -r '.body')
-if PARSED=$(parse_waves "$FEATURE_BODY" 2>/dev/null); then
-  TASK_NUMS=$(echo "$PARSED" | awk -F'|' '$1 == "TASK" {print $3}' | sort -un)
-  for t in $TASK_NUMS; do
-    its::get_issue "$t" 2>/dev/null \
-      | jq -r --arg n "$t" '"## Task #" + $n + " — " + .title + "\n\n" + .body + "\n\n---\n"' \
-      >> /tmp/task-criteria.md || true
-  done
-fi
-
-git::get_pr_diff "$PR_NUM" > /tmp/pr-diff.patch
-
+# Direct gh call (outside the resolver surface): the changed-files list is
+# needed here for the workflow-touching short-circuit below.
 PR_CHANGED_FILES=$(gh pr view "$PR_NUM" --repo "$REPO" --json files --jq '.files[].path')
-
-{
-  echo "# PR #$PR_NUM: $PR_TITLE"
-  echo ""
-  echo "- Base: $PR_BASE"
-  echo "- Head: $PR_HEAD"
-  echo "- State: $PR_STATE"
-  echo ""
-  echo "## Changed files"
-  echo ""
-  echo "$PR_CHANGED_FILES" | sed 's/^/- /'
-} > /tmp/pr-meta.md
 
 # ── Layer 3: pre-detection short-circuit for workflow-touching PRs ─────
 # claude-code-action refuses to execute against repository secrets on PRs
@@ -169,13 +144,6 @@ if [[ "${EVENT_NAME:-}" == "pull_request" ]] \
   touch "$AUTODUCKS_PRE_FAILED_MARKER"
   [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "skip=true" >> "$GITHUB_OUTPUT"
   exit 0
-fi
-
-# ── Optional repository security guidelines ────────────────────────────
-: > /tmp/security-guidelines.md
-_guidelines="${AUTODUCKS_REVIEW_SECURITY_GUIDELINES:-.autoducks/security-guidelines.md}"
-if [[ -n "$_guidelines" && -f "$_guidelines" ]]; then
-  cat "$_guidelines" > /tmp/security-guidelines.md
 fi
 
 # ── Nothing to review: empty diff or the PR is no longer open ──────────
