@@ -49,6 +49,7 @@ done
 #   git::list_pr_reviews(pr_number)                    → JSON array (reviews + inline thread comments)
 #   git::start_check_run(name, head_sha)              → check_run_id (status=in_progress)
 #   git::conclude_check_run(check_run_id, conclusion, title, summary)
+#   git::commits_ahead(base_branch)                   → integer
 
 REQUIRED_FUNCTIONS=(
   "git::create_branch"
@@ -74,6 +75,7 @@ REQUIRED_FUNCTIONS=(
   "git::list_pr_reviews"
   "git::start_check_run"
   "git::conclude_check_run"
+  "git::commits_ahead"
 )
 
 missing=0
