@@ -14,6 +14,7 @@ source "$AUTODUCKS_ROOT/core/orchestration/build-revision-context.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/dispatch-chain.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/delivery-phase.sh"
+source "$AUTODUCKS_ROOT/core/context/resolve-context.sh"
 
 trap '_rc=$?; touch "$AUTODUCKS_PRE_FAILED_MARKER"; \
       notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
@@ -85,9 +86,7 @@ fi
 progress_labels::ensure
 progress_labels::start "$ISSUE_NUM" "Tactics:crafting" "Tactics:done"
 
-its::get_issue "$ISSUE_NUM" | jq -r '"# " + .title + "\n\n" + .body' > /tmp/issue-request.md
-
-echo "$ISSUE_DATA" | jq -r '.body' > /tmp/issue-body-raw.md
+resolve_context "engineer" "$ISSUE_NUM"
 
 # Revision mode: a completed tactical plan already exists (D6 — `Tactics:done`
 # is both the completion record and the routing signal).

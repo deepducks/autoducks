@@ -15,6 +15,8 @@ architecture, dependencies, and correct wave ordering before writing.
   `/tmp/steering-prompt.md` exists), treat it as the specific change the
   human wants on this run; apply it while otherwise preserving the existing
   design/plan per revision mode.
+- These input files are present only when the context manifest selects them;
+  a missing/empty file is an intentional omission, not an error.
 
 ## Questions Mode (read before writing anything)
 
