@@ -111,6 +111,23 @@ export AUTODUCKS_DOR_DELEGATED_MARKER="$AUTODUCKS_MARKER_DIR/dor-delegated"
 export AUTODUCKS_REVIEW_SECURITY_GUIDELINES
 AUTODUCKS_REVIEW_SECURITY_GUIDELINES="$(jq -r '.review.security_guidelines // ".autoducks/security-guidelines.md"' "$_config")"
 
+# ── Checks (verification loop) settings ──────────────────────────────
+export AUTODUCKS_CHECKS_ENABLED
+AUTODUCKS_CHECKS_ENABLED="$(jq -r '.checks.enabled // false' "$_config")"
+
+export AUTODUCKS_CHECKS_SETUP
+AUTODUCKS_CHECKS_SETUP="$(jq -r '.checks.setup // ""' "$_config")"
+
+export AUTODUCKS_CHECKS_GIT_HOOKS
+AUTODUCKS_CHECKS_GIT_HOOKS="$(jq -r '.checks.git_hooks // false' "$_config")"
+
+export AUTODUCKS_CHECKS_MAX_ITERATIONS
+AUTODUCKS_CHECKS_MAX_ITERATIONS="$(jq -r '.checks.max_iterations // 3' "$_config")"
+# Clamp to 1–10 (bounded cost); non-numeric / out-of-range → default 3.
+[[ "$AUTODUCKS_CHECKS_MAX_ITERATIONS" =~ ^[0-9]+$ ]] || AUTODUCKS_CHECKS_MAX_ITERATIONS=3
+(( AUTODUCKS_CHECKS_MAX_ITERATIONS < 1 ))  && AUTODUCKS_CHECKS_MAX_ITERATIONS=1
+(( AUTODUCKS_CHECKS_MAX_ITERATIONS > 10 )) && AUTODUCKS_CHECKS_MAX_ITERATIONS=10
+
 # ── Source provider interfaces ──────────────────────────────────────
 source "$AUTODUCKS_ROOT/providers/its/interface.sh"
 source "$AUTODUCKS_ROOT/providers/git/interface.sh"
