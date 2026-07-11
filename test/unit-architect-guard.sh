@@ -46,7 +46,7 @@ chmod +x "$SCRATCH/bin/gh"
 clean_tmp() {
   rm -f /tmp/autoducks-pre-failed /tmp/autoducks-status-comment-id \
         /tmp/architect-strip-tactical.flag /tmp/architect-dropped-tasks.txt \
-        /tmp/design-spec.md /tmp/issue-request.md /tmp/issue-body-raw.md \
+        /tmp/design-spec.md /tmp/design-body.md /tmp/issue-request.md /tmp/issue-body-raw.md \
         /tmp/steering-prompt.md /tmp/design-zone-discard.md /tmp/tactical-zone-discard.md \
         /tmp/issue-type
 }
@@ -153,7 +153,7 @@ Revised design." > /tmp/design-spec.md
 
 run_post "engineer"
 [[ "$RC" -eq 0 ]] && pass "post exits 0" || fail "rc=$RC"
-grep -q 'issue edit 10 --repo x/y --body-file /tmp/design-spec.md' "$GH_LOG" \
+grep -q 'issue edit 10 --repo x/y --body-file /tmp/design-body.md' "$GH_LOG" \
   && pass "design-only body published" || fail "body not published: $(cat "$GH_LOG")"
 grep -q '^gh issue close 101 ' "$GH_LOG" \
   && pass "old task #101 closed" || fail "#101 not closed"
