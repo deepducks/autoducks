@@ -242,55 +242,61 @@ product::_priority_color() {
 
 APPLIED_PRIORITIES_JSON="[]"
 if [[ "$BACKEND" != "off" && "$PRIORITY_COUNT" -gt 0 ]]; then
-  APPLIED_PRIORITIES_JSON=$(jq -s '.' < <(
-    while IFS= read -r p; do
-      issue=$(echo "$p" | jq -r '.issue')
-      priority=$(echo "$p" | jq -r '.priority')
+  # Private collector: only jq -n's output may land here, so side-effect
+  # stdout from gh/its:: below can never contaminate the jq -s slurp.
+  priorities_collector=$(mktemp)
+  while IFS= read -r p; do
+    issue=$(echo "$p" | jq -r '.issue')
+    priority=$(echo "$p" | jq -r '.priority')
 
-      issue_json=$(its::get_issue "$issue" 2>/dev/null) || continue
-      closed=$(gh issue view "$issue" --repo "$REPO" --json closed --jq '.closed' 2>/dev/null || echo true)
-      [[ "$closed" == "true" ]] && continue
+    issue_json=$(its::get_issue "$issue" 2>/dev/null) || continue
+    closed=$(gh issue view "$issue" --repo "$REPO" --json closed --jq '.closed' 2>/dev/null || echo true)
+    [[ "$closed" == "true" ]] && continue
 
-      product::_already_prioritized "$issue" "$issue_json" && continue
+    product::_already_prioritized "$issue" "$issue_json" && continue
 
-      if [[ "$BACKEND" == "labels" ]]; then
-        gh label create "Priority:${priority}" --repo "$REPO" \
-          --color "$(product::_priority_color "$priority")" \
-          --description "Autoducks triage priority: ${priority}" 2>/dev/null || true
-      fi
+    if [[ "$BACKEND" == "labels" ]]; then
+      gh label create "Priority:${priority}" --repo "$REPO" \
+        --color "$(product::_priority_color "$priority")" \
+        --description "Autoducks triage priority: ${priority}" >/dev/null 2>&1 || true
+    fi
 
-      its::set_priority "$issue" "$priority" >/dev/null 2>&1 || true
-      jq -n --argjson issue "$issue" --arg priority "$priority" '{issue: $issue, priority: $priority}'
-    done < <(echo "$PRIORITIES_JSON" | jq -c '.[]')
-  ))
+    its::set_priority "$issue" "$priority" >/dev/null 2>&1 || true
+    jq -n --argjson issue "$issue" --arg priority "$priority" '{issue: $issue, priority: $priority}' >> "$priorities_collector"
+  done < <(echo "$PRIORITIES_JSON" | jq -c '.[]')
+  APPLIED_PRIORITIES_JSON=$(jq -s '.' < "$priorities_collector")
+  rm -f "$priorities_collector"
 fi
 APPLIED_PRIORITY_COUNT=$(echo "$APPLIED_PRIORITIES_JSON" | jq 'length')
 
 # ── Apply duplicates: close, label, cross-reference ─────────────────────
 CLOSED_DUPLICATES_JSON="[]"
 if [[ "$DUPLICATE_GROUP_COUNT" -gt 0 ]]; then
-  CLOSED_DUPLICATES_JSON=$(jq -s '.' < <(
-    while IFS= read -r group; do
-      canonical=$(echo "$group" | jq -r '.canonical')
+  # Private collector: only jq -n's output may land here, so side-effect
+  # stdout from fold_duplicate::close below can never contaminate the jq -s slurp.
+  duplicates_collector=$(mktemp)
+  while IFS= read -r group; do
+    canonical=$(echo "$group" | jq -r '.canonical')
 
-      while IFS= read -r dup; do
-        [[ -z "$dup" ]] && continue
+    while IFS= read -r dup; do
+      [[ -z "$dup" ]] && continue
 
-        dup_json=$(its::get_issue "$dup" 2>/dev/null) || continue
-        dup_closed=$(gh issue view "$dup" --repo "$REPO" --json closed --jq '.closed' 2>/dev/null || echo true)
-        [[ "$dup_closed" == "true" ]] && continue
+      dup_json=$(its::get_issue "$dup" 2>/dev/null) || continue
+      dup_closed=$(gh issue view "$dup" --repo "$REPO" --json closed --jq '.closed' 2>/dev/null || echo true)
+      [[ "$dup_closed" == "true" ]] && continue
 
-        dup_labels=$(echo "$dup_json" | jq -r '.labels[]?')
-        if delivery_phase::started "$dup" "$dup_labels"; then
-          continue
-        fi
+      dup_labels=$(echo "$dup_json" | jq -r '.labels[]?')
+      if delivery_phase::started "$dup" "$dup_labels"; then
+        continue
+      fi
 
-        fold_duplicate::close "$dup" "$canonical"
+      fold_duplicate::close "$dup" "$canonical" >/dev/null
 
-        jq -n --argjson canonical "$canonical" --argjson duplicate "$dup" '{canonical: $canonical, duplicate: $duplicate}'
-      done < <(echo "$group" | jq -r '.duplicates[]')
-    done < <(echo "$DUPLICATES_JSON" | jq -c '.[]')
-  ))
+      jq -n --argjson canonical "$canonical" --argjson duplicate "$dup" '{canonical: $canonical, duplicate: $duplicate}' >> "$duplicates_collector"
+    done < <(echo "$group" | jq -r '.duplicates[]')
+  done < <(echo "$DUPLICATES_JSON" | jq -c '.[]')
+  CLOSED_DUPLICATES_JSON=$(jq -s '.' < "$duplicates_collector")
+  rm -f "$duplicates_collector"
 fi
 
 # Cross-reference comment on each canonical, folding in whichever of its
@@ -312,33 +318,36 @@ CLOSED_COUNT=$(echo "$CLOSED_DUPLICATES_JSON" | jq 'length')
 # priority BACKEND and runs in both `single` and `sweep` scope.
 APPLIED_CLASSIFICATIONS_JSON="[]"
 if [[ "$CLASSIFICATION_COUNT" -gt 0 ]]; then
-  APPLIED_CLASSIFICATIONS_JSON=$(jq -s '.' < <(
-    while IFS= read -r c; do
-      issue=$(echo "$c" | jq -r '.issue')
-      kind=$(echo "$c" | jq -r '.kind')
+  # Private collector: only jq -n's output may land here, so side-effect
+  # stdout from classify_label::apply below can never contaminate the jq -s slurp.
+  classifications_collector=$(mktemp)
+  while IFS= read -r c; do
+    issue=$(echo "$c" | jq -r '.issue')
+    kind=$(echo "$c" | jq -r '.kind')
 
-      issue_json=$(its::get_issue "$issue" 2>/dev/null) || continue
-      closed=$(gh issue view "$issue" --repo "$REPO" --json closed --jq '.closed' 2>/dev/null || echo true)
-      [[ "$closed" == "true" ]] && continue
+    issue_json=$(its::get_issue "$issue" 2>/dev/null) || continue
+    closed=$(gh issue view "$issue" --repo "$REPO" --json closed --jq '.closed' 2>/dev/null || echo true)
+    [[ "$closed" == "true" ]] && continue
 
-      issue_type=$(echo "$issue_json" | jq -r '.type // empty')
-      issue_labels=$(echo "$issue_json" | jq -r '.labels[]?')
+    issue_type=$(echo "$issue_json" | jq -r '.type // empty')
+    issue_labels=$(echo "$issue_json" | jq -r '.labels[]?')
 
-      # Already authoritatively classified (native type or exact Feature/Bug
-      # label) or already designed — the Architect owns classification once
-      # an issue reaches that stage; never override it. This guard also
-      # doubles as the idempotency guard.
-      if [[ "$issue_type" == "Feature" || "$issue_type" == "Bug" ]] \
-         || echo "$issue_labels" | grep -qxE 'Feature|Bug' \
-         || echo "$issue_labels" | grep -qx 'Design:done'; then
-        continue
-      fi
+    # Already authoritatively classified (native type or exact Feature/Bug
+    # label) or already designed — the Architect owns classification once
+    # an issue reaches that stage; never override it. This guard also
+    # doubles as the idempotency guard.
+    if [[ "$issue_type" == "Feature" || "$issue_type" == "Bug" ]] \
+       || echo "$issue_labels" | grep -qxE 'Feature|Bug' \
+       || echo "$issue_labels" | grep -qx 'Design:done'; then
+      continue
+    fi
 
-      classify_label::apply "$issue" "$kind" 2>/dev/null || true
+    classify_label::apply "$issue" "$kind" >/dev/null 2>&1 || true
 
-      jq -n --argjson issue "$issue" --arg kind "$kind" '{issue: $issue, kind: $kind}'
-    done < <(echo "$CLASSIFICATIONS_JSON" | jq -c '.[]')
-  ))
+    jq -n --argjson issue "$issue" --arg kind "$kind" '{issue: $issue, kind: $kind}' >> "$classifications_collector"
+  done < <(echo "$CLASSIFICATIONS_JSON" | jq -c '.[]')
+  APPLIED_CLASSIFICATIONS_JSON=$(jq -s '.' < "$classifications_collector")
+  rm -f "$classifications_collector"
 fi
 APPLIED_CLASSIFICATION_COUNT=$(echo "$APPLIED_CLASSIFICATIONS_JSON" | jq 'length')
 
