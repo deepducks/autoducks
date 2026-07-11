@@ -223,7 +223,7 @@ else
   fi
 fi
 
-if echo "$ALREADY_LABELED_LABELS" | grep -qx 'Bug' && ! echo "$ALREADY_LABELED_LABELS" | grep -qE '(^|,)Feature(,|$)'; then
+if echo "$ALREADY_LABELED_LABELS" | grep -qE '(^|,)Bug(,|$)' && ! echo "$ALREADY_LABELED_LABELS" | grep -qE '(^|,)Feature(,|$)'; then
   pass "#$ALREADY_LABELED (already classified) was skipped — still carries only Bug"
 else
   fail "#$ALREADY_LABELED (already carries Bug label) label set changed unexpectedly (labels: $ALREADY_LABELED_LABELS)"
