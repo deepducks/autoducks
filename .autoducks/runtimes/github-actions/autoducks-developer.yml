@@ -28,6 +28,10 @@ on:
         required: false
         type: string
         default: ''
+      iteration:
+        required: false
+        type: string
+        default: '1'
 
 permissions:
   contents: write
@@ -91,10 +95,12 @@ jobs:
             echo "effort=${{ inputs.effort }}" >> "$GITHUB_OUTPUT"
             echo "max_turns=${{ inputs.max_turns }}" >> "$GITHUB_OUTPUT"
             echo "commenter=${{ inputs.actor }}" >> "$GITHUB_OUTPUT"
+            echo "iteration=${{ inputs.iteration }}" >> "$GITHUB_OUTPUT"
           else
             echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
             echo "base_branch=" >> "$GITHUB_OUTPUT"
             echo "commenter=${{ github.event.comment.user.login }}" >> "$GITHUB_OUTPUT"
+            echo "iteration=1" >> "$GITHUB_OUTPUT"
             source .autoducks/core/config/parse-directive.sh >> "$GITHUB_OUTPUT"
           fi
         env:
@@ -110,6 +116,7 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          ITERATION: ${{ steps.ctx.outputs.iteration }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: User pre hook
         if: >-
@@ -174,6 +181,7 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          ITERATION: ${{ steps.ctx.outputs.iteration }}
           MODEL: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
           EFFORT: ${{ steps.ctx.outputs.effort || steps.agent.outputs.effort }}
           MAX_TURNS: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
