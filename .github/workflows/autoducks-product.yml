@@ -63,9 +63,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Pin the machinery to the pipeline's cut commit BEFORE the agent runs, so
+      # an agent editing .autoducks on its own branch cannot corrupt the scripts
+      # that run its build, and the machinery cannot drift across waves/reviews
+      # (bug #952). Every later step runs from "${AUTODUCKS_PINNED_ROOT}/.autoducks".
+      - name: Snapshot machinery
+        id: snapshot
+        run: bash .autoducks/core/robustness/snapshot-machinery.sh
       - name: Authorize
         id: authz
-        run: bash .autoducks/core/security/authorize.sh
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/security/authorize.sh"
         env:
           AUTODUCKS_AGENT: >-
             ${{
@@ -84,7 +91,7 @@ jobs:
       - name: Load agent defaults
         id: agent
         if: steps.authz.outcome == 'success'
-        run: AUTODUCKS_AGENT=product bash .autoducks/core/config/load-agent-defaults.sh >> "$GITHUB_OUTPUT"
+        run: AUTODUCKS_AGENT=product bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/config/load-agent-defaults.sh" >> "$GITHUB_OUTPUT"
       - name: Set context
         id: ctx
         if: steps.authz.outcome == 'success'
@@ -127,7 +134,7 @@ jobs:
       - name: Pre-execution
         id: pre
         if: steps.authz.outcome == 'success' && steps.ctx.outputs.mode == 'triage'
-        run: bash .autoducks/agents/product/pre.sh
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/agents/product/pre.sh"
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           COMMENT_ISSUE_NUM: ${{ steps.ctx.outputs.comment_issue_num }}
@@ -154,15 +161,6 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           DRY_RUN: ${{ steps.ctx.outputs.dry_run }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
-      - name: Snapshot hooks
-        id: snapshot
-        if: steps.authz.outcome == 'success'
-        run: |
-          SNAP="$RUNNER_TEMP/autoducks-snapshot"
-          rm -rf "$SNAP"
-          mkdir -p "$SNAP"
-          cp -a .autoducks "$SNAP/.autoducks"
-          echo "root=$SNAP/.autoducks" >> "$GITHUB_OUTPUT"
       - name: Run LLM agent
         id: llm
         if: steps.authz.outcome == 'success' && steps.ctx.outputs.mode == 'triage'
@@ -196,7 +194,7 @@ jobs:
       - name: Post-execution
         id: post
         if: always() && steps.authz.outcome == 'success' && steps.ctx.outputs.mode == 'triage'
-        run: bash "$RUNNER_TEMP/autoducks-snapshot/.autoducks/agents/product/post.sh"
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/agents/product/post.sh"
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           COMMENT_ISSUE_NUM: ${{ steps.ctx.outputs.comment_issue_num }}
@@ -211,7 +209,7 @@ jobs:
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Merge
         if: steps.authz.outcome == 'success' && steps.ctx.outputs.mode == 'merge'
-        run: bash .autoducks/agents/product/merge.sh
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/agents/product/merge.sh"
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           REPO: ${{ github.repository }}
@@ -221,6 +219,9 @@ jobs:
           COMMENTER: ${{ steps.ctx.outputs.commenter }}
           DRY_RUN: ${{ steps.ctx.outputs.dry_run }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      # Last-resort backstop: if the LLM step failed or Post-execution did not
+      # report cleanly (e.g. a corrupted hook that still exits 0), post a notice
+      # from pure YAML so a broken hook can never silently freeze a wave (#952).
       - name: Failure watchdog
         if: >-
           always() && steps.authz.outcome == 'success' &&

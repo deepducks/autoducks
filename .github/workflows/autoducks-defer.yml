@@ -59,9 +59,16 @@ jobs:
               github.event.issue.pull_request != null && format('refs/pull/{0}/head', github.event.issue.number) ||
               ''
             }}
+      # Pin the machinery to the pipeline's cut commit BEFORE the agent runs, so
+      # an agent editing .autoducks on its own branch cannot corrupt the scripts
+      # that run its build, and the machinery cannot drift across waves/reviews
+      # (bug #952). Every later step runs from "${AUTODUCKS_PINNED_ROOT}/.autoducks".
+      - name: Snapshot machinery
+        id: snapshot
+        run: bash .autoducks/core/robustness/snapshot-machinery.sh
       - name: Authorize
         id: authz
-        run: bash .autoducks/core/security/authorize.sh
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/security/authorize.sh"
         env:
           AUTODUCKS_AGENT: defer
           ACTOR: ${{ github.event.comment.user.login || github.event.sender.login }}
@@ -74,7 +81,7 @@ jobs:
       - name: Load agent defaults
         id: agent
         if: steps.authz.outcome == 'success'
-        run: AUTODUCKS_AGENT=defer bash .autoducks/core/config/load-agent-defaults.sh >> "$GITHUB_OUTPUT"
+        run: AUTODUCKS_AGENT=defer bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/config/load-agent-defaults.sh" >> "$GITHUB_OUTPUT"
       - name: Set context
         id: ctx
         if: steps.authz.outcome == 'success'
@@ -97,14 +104,14 @@ jobs:
             echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
             echo "is_pr=${{ github.event.issue.pull_request != null }}" >> "$GITHUB_OUTPUT"
             echo "commenter=${{ github.event.comment.user.login }}" >> "$GITHUB_OUTPUT"
-            source .autoducks/core/config/parse-directive.sh >> "$GITHUB_OUTPUT"
+            source "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/config/parse-directive.sh" >> "$GITHUB_OUTPUT"
           fi
         env:
           COMMENT_BODY: ${{ github.event.comment.body || '' }}
       - name: Pre-execution
         id: pre
         if: steps.authz.outcome == 'success'
-        run: bash .autoducks/agents/defer/pre.sh
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/agents/defer/pre.sh"
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           IS_PR: ${{ steps.ctx.outputs.is_pr }}
@@ -128,15 +135,6 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ steps.ctx.outputs.commenter }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
-      - name: Snapshot hooks
-        id: snapshot
-        if: steps.authz.outcome == 'success'
-        run: |
-          SNAP="$RUNNER_TEMP/autoducks-snapshot"
-          rm -rf "$SNAP"
-          mkdir -p "$SNAP"
-          cp -a .autoducks "$SNAP/.autoducks"
-          echo "root=$SNAP/.autoducks" >> "$GITHUB_OUTPUT"
       - name: Run LLM agent
         id: llm
         if: steps.authz.outcome == 'success'
@@ -168,7 +166,7 @@ jobs:
       - name: Post-execution
         id: post
         if: always() && steps.authz.outcome == 'success'
-        run: bash "$RUNNER_TEMP/autoducks-snapshot/.autoducks/agents/defer/post.sh"
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/agents/defer/post.sh"
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           REPO: ${{ github.repository }}
@@ -186,6 +184,9 @@ jobs:
           MAX_TURNS: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
           LLM_ERROR_SUBTYPE: ${{ steps.llm.outputs.error_subtype }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      # Last-resort backstop: if the LLM step failed or Post-execution did not
+      # report cleanly (e.g. a corrupted hook that still exits 0), post a notice
+      # from pure YAML so a broken hook can never silently freeze a wave (#952).
       - name: Failure watchdog
         if: >-
           always() && steps.authz.outcome == 'success' &&
