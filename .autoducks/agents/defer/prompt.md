@@ -37,7 +37,11 @@ Write exactly one of the following files (never both):
   invent findings or restate things that were already fixed.
 - Skip anything that is purely a style nit or already resolved; only defer
   what still needs a human or Architect decision.
-- Do NOT run `git` or `gh` commands, and do NOT modify any file other than
-  `/tmp/defer-issue.md` or `/tmp/defer-none.md`. This step is read-only —
-  all mutation (creating/updating the issue, commenting) happens in
-  `post.sh`.
+- Read-only `git`/`gh` for exploration is fine (`git log`, `git show`,
+  `git blame`, `git diff`, `gh issue view`, `gh pr view`, `gh pr diff`). Do NOT
+  run any mutating command — no `git add/commit/checkout/push/merge/rebase/reset/branch`,
+  and no `gh` create/edit/comment/close/merge/review. All branch, PR, and issue
+  mutations are handled by the workflow's deterministic steps, never by you.
+- Do NOT modify any file other than `/tmp/defer-issue.md` or
+  `/tmp/defer-none.md`. All mutation (creating/updating the issue,
+  commenting) happens in `post.sh`.

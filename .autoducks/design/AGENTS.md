@@ -40,6 +40,7 @@ The gate is the single choke point between an untrusted GitHub event (a `/$trigg
 
 Every slash-command run follows the same skeleton (security first, feedback always):
 
+0. **Pin the machinery** — immediately after checkout and before anything else, [`core/robustness/snapshot-machinery.sh`](../core/robustness/snapshot-machinery.sh) materialises the whole `.autoducks` tree from the pipeline's cut commit (`git merge-base HEAD origin/<base>`) into `$RUNNER_TEMP` and exports `AUTODUCKS_PINNED_ROOT`. Every path-invoked machinery step below — and the LLM provider's prompt/settings reads — then runs from that pinned snapshot, so an agent editing `.autoducks` on its own branch can never corrupt the scripts that run its build, and the machinery cannot drift across waves/reviews (bug #952). Git operations still target the live working tree; only the machinery is pinned. A pure-YAML **failure watchdog** at the end of the job posts a last-resort notice if the LLM step fails or `post.sh` doesn't report cleanly, so a corrupted hook can never silently freeze a wave. Caveat: `uses: ./…` composite actions (the provider action file itself, the `.github/actions` hooks) cannot be redirected — GitHub resolves them from the workspace and freezes them at job start, so they carry no intra-run corruption risk but are not commit-pinned across waves.
 1. **Security gate** — `authorize.sh`, before any observable side effect.
 2. **React** to the triggering comment with 👀 (`+1` on success, `confused` on failure — reactions always live on the *user's* comment).
 3. **Post a bot-owned status comment** — `<img loading.gif> **\`Agent\`**: running on [workflow #id](link)` — and **edit that same comment in place** as the run progresses (✅ finished / ⚠️ failed / 🔁 delegated). The user's comment is never edited, which keeps the revert agent's "delete bot comments, preserve human content" model intact. Module: [`core/feedback/status-comment.sh`](../core/feedback/status-comment.sh); requires `its::update_comment`. The Maestro extends this pattern across its event-driven re-runs: it maintains a single, marker-anchored **orchestration status comment** that it keeps editing in place as waves advance, rather than posting a fresh comment per re-run (see [Maestro (orchestration layer)](#maestro-orchestration-layer)).
@@ -86,9 +87,9 @@ The same `execute` comment is claimed by exactly **one** workflow via label/type
 ### Architect (design layer)
 
 1. Preserve the tactical zone byte-for-byte if the body already has one (abort loudly on malformed markers).
-2. **[AGENT]** Create the specification — or **revise/structure an existing design** — with sections: Problem Statement / Proposed Solution / Technical Design / Dependencies / Constraints / Out of Scope. Classify the issue as `Feature` or `Bug` — the Architect is the **sole authoritative source** of this classification; any `Intake:Feature`/`Intake:Bug` label from the Product Owner is a provisional hint only, confirmed or overridden here.
+2. **[AGENT]** Create the specification — or **revise/structure an existing design** — with sections: Problem Statement / Proposed Solution / Technical Design / Dependencies / Constraints / Out of Scope. Classify the issue as `Feature` or `Bug` — the Architect is the **sole authoritative source** of this classification; any pre-existing `Feature`/`Bug` label (from `/triage` or a human) is a provisional input, confirmed or overridden here.
 3. Publish the new design zone (+ preserved tactical zone) to the issue body.
-4. Set the native issue type and label to `Feature` or `Bug` (label is route-critical; type is best-effort, org-only). Remove `Draft` if present, and strip any `Intake:Feature`/`Intake:Bug` label now that classification is authoritative.
+4. Set the native issue type and label to `Feature` or `Bug` (label is route-critical; type is best-effort, org-only). Remove `Draft` if present.
 5. `Design:draft` → `Design:done`; assign the command author; continue the `#auto:` chain.
 
 There is **no** auto-trigger by the `Draft` label (D13) — entry is by command or cascade only.
@@ -108,8 +109,8 @@ The Engineer is **pure ITS** — it never touches git (D7).
 
 1. **DoR:** requires `Tactics:done`, else delegates to the Engineer with `#auto:execute`.
 2. **Owns all pipeline git** (D7): ensures the pipeline branch — `feature/<slug>` for Features, `fix/<slug>` for Bugs (D10) — cut from `base_branch`, and the **draft PR** into `integration_branch`.
-3. Computes wave states from merged task PRs (`fixes #N` bodies), ticks the `## Progress` checkboxes, and dispatches the next eligible wave of Developers (`autoducks-developer.yml` via `workflow_dispatch`), propagating model/effort/turns overrides and the original actor. Three independent guards prevent duplicate dispatch (open-PR check, Developer pre-flight skip, per-task concurrency group).
-4. **Advancement is event-driven**: every PR merged into a `feature/*` or `fix/*` branch re-triggers the Maestro, which recomputes and continues. No polling.
+3. Computes wave states from merged task PRs (`fixes #N` bodies) **and from sub-tasks closed via a no-code-diff completion** (D17), ticks the `## Progress` checkboxes, and dispatches the next eligible wave of Developers (`autoducks-developer.yml` via `workflow_dispatch`), propagating model/effort/turns overrides and the original actor. Three independent guards prevent duplicate dispatch (open-PR check, Developer pre-flight skip, per-task concurrency group).
+4. **Advancement is event-driven**: every PR merged into a `feature/*` or `fix/*` branch re-triggers the Maestro, which recomputes and continues. No polling — except a no-code-diff sub-task, which creates no PR and so explicitly re-dispatches the Maestro instead (D17).
 5. **Persistent orchestration comment**: instead of stacking a new comment on every re-run, the Maestro maintains a single, marker-anchored **orchestration status comment** that it edits in place to reflect current wave state — dispatched, skipped, and blocked tasks are rendered as clickable `#N` references, so the comment always shows the latest picture rather than a scrolling history.
 6. When every wave is done: rebuilds the final PR body (`Closes #…` + a `## Work Log` harvested from each task PR's Implementation Summary), marks the PR ready, requests review from the issue assignees, `Work:orchestrating` → `Work:done`, assigns the command author, and updates the orchestration comment in place with the completion summary.
 7. Single-task fast path: dispatches the Developer on the feature issue itself.
@@ -118,14 +119,18 @@ The Engineer is **pure ITS** — it never touches git (D7).
 
 1. **DoR (D1):** a Task must have its pipeline context. When invoked by comment without one, it resolves the parent issue; if the parent branch is missing it delegates to the Maestro on the parent. Parentless standalone execution was retired — the pipeline guarantees a reviewed design and plan before code.
 2. Cuts a task branch from the pipeline branch, inheriting its prefix: `<feature|fix>/<parentNum>-issue-<taskNum>-<epoch>`.
-3. **[AGENT]** Implements the task spec (never runs git/gh itself); writes `/tmp/work-summary.md`.
+3. **[AGENT]** Implements the task spec (may read with `git`/`gh`, never mutates); writes `/tmp/work-summary.md`.
 4. Opens the task PR into the pipeline branch (`fixes #N` + Implementation Summary) and **auto-merges** it (adaptive method: `auto` probes merge/squash/rebase; 3 attempts with rebase in between; conflicts → `notify_conflict`).
-5. Closes the task explicitly (sub-PR merges don't fire GitHub's auto-close), `Work:coding` → `Work:done`, assigns the command author.
+5. Closes the task explicitly (sub-PR merges don't fire GitHub's auto-close) — **only for real sub-tasks**, where `ISSUE_NUM != FEATURE_NUM` (D16) — then `Work:coding` → `Work:done`, assigns the command author.
 6. On `max_turns` exhaustion: commits `WIP:`, pushes the branch, and reports it — `/fix` resumes from the preserved branch.
 
 > **Auto-merge policy:** task PRs merge into a pipeline branch that itself undergoes human review before reaching `integration_branch`. Manually-dispatched tasks against the default branch are **not** auto-merged.
 
 > **Referencing issues in commits.** Closing keywords (`Fixes/Closes/Resolves #N`) are reserved for the delivery PR body the Maestro generates — they close the issue when the PR merges. For any other commit that merely *mentions* an issue (hotfixes, side-quests, work-in-progress), use a **non-closing** reference: `refs #N` or `re #N`. This prevents a stray commit from closing an in-flight feature/task issue on the default branch.
+
+> **Feature-issue closure is exclusive to the delivery PR (D16).** Agents never `its::close_issue` a feature issue (`ISSUE_NUM == FEATURE_NUM`); features close **only** via the human-merged delivery PR's `Closes #N`. Real sub-tasks (`ISSUE_NUM != FEATURE_NUM`) still close on sub-PR merge — unchanged.
+
+> **A task may legitimately complete with no code diff (D17).** The diff is ground truth: a non-empty diff always produces a PR, and no marker can suppress or fabricate one. When a task's diff is empty, an execution-time no-code result artifact (not a label/type) — written by the agent in lieu of a code change — turns that empty diff into a recorded, PR-less completion: the result is posted as a comment and the sub-task is closed without opening a PR. Because this path creates no PR and fires no merge event, the Maestro counts such a closed task as done alongside merged-PR done-ness, and is explicitly re-triggered — rather than relying on the `pull_request: closed` event — to advance the wave (see [Maestro](#maestro-orchestration-layer)).
 
 ---
 
@@ -149,7 +154,7 @@ Utility agents handle recovery, cleanup, and lifecycle operations. They are not 
 
 ## Reviewer Agent
 
-**Verb:** `review` — judges an already-implemented pull request against its design and task acceptance criteria. Read-only: never edits code, never runs `git`/`gh` write commands, never merges. No Definition-of-Ready cascade, invoked on demand; unlike the utility agents above it does carry its own stage labels (`Review:reviewing` → `Review:done`/`Review:changes`).
+**Verb:** `review` — judges an already-implemented pull request against its design and task acceptance criteria. Read-vs-mutation: never edits code, may run read-only `git`/`gh` commands for exploration but never `git`/`gh` mutations, never merges. No Definition-of-Ready cascade, invoked on demand; unlike the utility agents above it does carry its own stage labels (`Review:reviewing` → `Review:done`/`Review:changes`).
 
 1. Resolves the target PR (direct PR comment, or the open pipeline PR for the feature/bug issue) and gathers context: the design, task acceptance criteria, the unified diff, PR metadata, and — staged by `pre.sh` at `/tmp/security-guidelines.md` — the repository's optional security guidelines (`review.security_guidelines` in `.autoducks/autoducks.json`, default `.autoducks/security-guidelines.md`; the file left empty when absent).
 2. **[AGENT]** Explores the repo read-only and writes `/tmp/review.md`. **Security is a dedicated review dimension**, not a separate output: alongside correctness/consistency findings, the LLM checks the diff against `/tmp/security-guidelines.md` when non-empty, applying those rules with priority, and falls back to a built-in baseline checklist otherwise (AuthZ/AuthN, injection, secrets, SSRF/path traversal, deserialization/eval, crypto misuse, unsafe defaults, dependencies). Security findings land in the same **Findings** section as any other, tagged `security`.
@@ -192,8 +197,7 @@ The Maestro's PR-merged re-trigger listens on both `feature/*` and `fix/*`. The 
 | Label | Meaning |
 |-------|---------|
 | `Draft` | Optional human marker: issue still needs design work (removed by the Architect) |
-| `Feature` / `Bug` | Routing + classification — set as a label (route-critical) and as the native issue type (best-effort, org-only). Authoritative — set solely by the Architect |
-| `Intake:Feature` / `Intake:Bug` | Product — provisional, overridden by the Architect. Applied at intake as a non-authoritative triage hint; stripped by the Architect on classify |
+| `Feature` / `Bug` | Routing + classification — set as a label (route-critical) and as the native issue type (best-effort, org-only). May be applied provisionally by the Product Owner (`/triage`) or a human; the Architect is the sole authoritative source and confirms or overrides it during design — no separate strip step |
 | `Task` | Marks a task issue split from a plan — label + best-effort native type |
 | `Design:draft` | Architect is writing the design |
 | `Design:done` | Design complete (Engineer's Definition of Ready) |

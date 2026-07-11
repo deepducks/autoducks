@@ -23,7 +23,7 @@ _max_turns_retry_budget() {
   local cur="${MAX_TURNS:-}"
   [[ "$cur" =~ ^[0-9]+$ ]] && (( cur >= 1 && cur <= 1000 )) || cur=50
   local suggested=$(( cur * 2 ))
-  (( suggested > 1000 )) && suggested=1000
+  if (( suggested > 1000 )); then suggested=1000; fi
   printf '%s' "$suggested"
 }
 

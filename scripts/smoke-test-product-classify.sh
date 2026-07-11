@@ -1,24 +1,23 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Smoke Test — Product Agent (Provisional Classification)
+# Smoke Test — Product Agent (Classification)
 # =============================================================================
 #
 # PURPOSE
 # -------
-# Exercises the provisional `Intake:<kind>` classification apply path added
-# to the product agent (pre.sh's `already_classified`/`design_done`/
-# `intake_hint` hints, post.sh's re-verify-then-apply loop), gated by the
+# Exercises the authoritative `Bug`/`Feature` classification apply path in
+# the product agent (pre.sh's `already_classified`/`design_done` hints,
+# post.sh's re-verify-then-apply loop via classify-label.sh), gated by the
 # `product.provisional_classification` config key:
 #
-#   1. An unclassified, open, un-designed issue gets a lazily-created
-#      `Intake:Bug` or `Intake:Feature` label — never the bare `Bug`/
-#      `Feature` label, never a native-type set.
+#   1. An unclassified, open, un-designed issue gets the bare `Bug` or
+#      `Feature` label applied directly — never a native-type set.
 #   2. An issue that already carries an authoritative classification (exact
-#      `Bug`/`Feature` label) is skipped and gets no `Intake:*` label.
+#      `Bug`/`Feature` label) is skipped and keeps just that one label.
 #   3. An issue that already carries `Design:done` is skipped the same way
 #      — the Architect owns classification once a design exists.
 #   4. Re-running `/triage` is idempotent: the classified fixture keeps
-#      exactly one `Intake:*` label, never both.
+#      exactly one of `Bug`/`Feature`, and it's never flipped to the other.
 #
 # WARNING — REAL BACKLOG SIDE EFFECTS
 # ------------------------------------
@@ -72,7 +71,7 @@ else
   REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
 fi
 
-echo "=== Smoke Test — Product Agent (Provisional Classification) ==="
+echo "=== Smoke Test — Product Agent (Classification) ==="
 echo "Repo: $REPO"
 echo "Timestamp: $TIMESTAMP"
 echo ""
@@ -132,9 +131,8 @@ PROVISIONAL_CLASSIFICATION_CONFIGURED=$(jq -r 'if .product.provisional_classific
 echo "[1/6] Ensuring labels exist..."
 gh label create "smoke-test"    --color "FFA500" --description "Smoke test" $REPO_ARG 2>/dev/null || true
 gh label create "Bug"           --color "D73A4A" --description "Defective behavior in existing functionality" $REPO_ARG 2>/dev/null || true
+gh label create "Feature"       --color "A2EEEF" --description "New capability or enhancement" $REPO_ARG 2>/dev/null || true
 gh label create "Design:done"   --color "1F6FEB" --description "Design complete" $REPO_ARG 2>/dev/null || true
-gh label create "Intake:Bug"     --color "E4E4E4" --description "Autoducks provisional triage classification (non-authoritative)" $REPO_ARG 2>/dev/null || true
-gh label create "Intake:Feature" --color "E4E4E4" --description "Autoducks provisional triage classification (non-authoritative)" $REPO_ARG 2>/dev/null || true
 pass "Labels ensured"
 echo ""
 
@@ -145,7 +143,7 @@ UNCLASSIFIED_BODY=$(cat <<EOF
 # Classification smoke test (unclassified) — ${TIMESTAMP}
 
 Synthetic issue created by \`smoke-test-product-classify.sh\` to exercise the
-provisional \`Intake:<kind>\` classification pipeline end-to-end. Users
+authoritative \`Bug\`/\`Feature\` classification pipeline end-to-end. Users
 report that the login form throws an unhandled exception and shows a blank
 white screen whenever the password field contains a non-ASCII character —
 this used to work correctly and is a clear regression in existing,
@@ -209,35 +207,32 @@ UNCLASSIFIED_LABELS=$(gh issue view "$UNCLASSIFIED" $REPO_ARG --json labels --jq
 ALREADY_LABELED_LABELS=$(gh issue view "$ALREADY_LABELED" $REPO_ARG --json labels --jq '[.labels[].name] | join(",")')
 ALREADY_DESIGNED_LABELS=$(gh issue view "$ALREADY_DESIGNED" $REPO_ARG --json labels --jq '[.labels[].name] | join(",")')
 
+FIRST_KIND=""
 if [[ "$PROVISIONAL_CLASSIFICATION_CONFIGURED" == "true" ]]; then
-  if echo "$UNCLASSIFIED_LABELS" | grep -qE "Intake:(Bug|Feature)"; then
-    pass "Provisional label applied to #$UNCLASSIFIED (labels: $UNCLASSIFIED_LABELS)"
-  else
-    fail "No Intake:* label applied to #$UNCLASSIFIED after /triage (labels: ${UNCLASSIFIED_LABELS:-none})"
-  fi
   if echo "$UNCLASSIFIED_LABELS" | grep -qE '(^|,)(Bug|Feature)(,|$)'; then
-    fail "#$UNCLASSIFIED carries a bare Bug/Feature label — classification must stay provisional (labels: $UNCLASSIFIED_LABELS)"
+    FIRST_KIND=$(echo "$UNCLASSIFIED_LABELS" | tr ',' '\n' | grep -xE 'Bug|Feature' | head -1)
+    pass "Bug/Feature label applied to #$UNCLASSIFIED (labels: $UNCLASSIFIED_LABELS)"
   else
-    pass "#$UNCLASSIFIED carries no bare Bug/Feature label"
+    fail "No Bug/Feature label applied to #$UNCLASSIFIED after /triage (labels: ${UNCLASSIFIED_LABELS:-none})"
   fi
 else
-  if echo "$UNCLASSIFIED_LABELS" | grep -qE "Intake:(Bug|Feature)"; then
-    fail "Intake:* label applied to #$UNCLASSIFIED despite product.provisional_classification=false (labels: $UNCLASSIFIED_LABELS)"
+  if echo "$UNCLASSIFIED_LABELS" | grep -qE '(^|,)(Bug|Feature)(,|$)'; then
+    fail "Bug/Feature label applied to #$UNCLASSIFIED despite product.provisional_classification=false (labels: $UNCLASSIFIED_LABELS)"
   else
-    pass "No Intake:* label applied to #$UNCLASSIFIED — product.provisional_classification is false"
+    pass "No Bug/Feature label applied to #$UNCLASSIFIED — product.provisional_classification is false"
   fi
 fi
 
-if echo "$ALREADY_LABELED_LABELS" | grep -qE "Intake:(Bug|Feature)"; then
-  fail "#$ALREADY_LABELED (already carries Bug label) unexpectedly got an Intake:* label (labels: $ALREADY_LABELED_LABELS)"
+if echo "$ALREADY_LABELED_LABELS" | grep -qE '(^|,)Bug(,|$)' && ! echo "$ALREADY_LABELED_LABELS" | grep -qE '(^|,)Feature(,|$)'; then
+  pass "#$ALREADY_LABELED (already classified) was skipped — still carries only Bug"
 else
-  pass "#$ALREADY_LABELED (already classified) was skipped — no Intake:* label"
+  fail "#$ALREADY_LABELED (already carries Bug label) label set changed unexpectedly (labels: $ALREADY_LABELED_LABELS)"
 fi
 
-if echo "$ALREADY_DESIGNED_LABELS" | grep -qE "Intake:(Bug|Feature)"; then
-  fail "#$ALREADY_DESIGNED (already Design:done) unexpectedly got an Intake:* label (labels: $ALREADY_DESIGNED_LABELS)"
+if echo "$ALREADY_DESIGNED_LABELS" | grep -qE '(^|,)(Bug|Feature)(,|$)'; then
+  fail "#$ALREADY_DESIGNED (already Design:done) unexpectedly got a Bug/Feature label (labels: $ALREADY_DESIGNED_LABELS)"
 else
-  pass "#$ALREADY_DESIGNED (already designed) was skipped — no Intake:* label"
+  pass "#$ALREADY_DESIGNED (already designed) was skipped — no Bug/Feature label"
 fi
 echo ""
 
@@ -247,17 +242,18 @@ trigger_triage "$UNCLASSIFIED" "product-agent (classify, idempotency re-run)"
 
 REPEAT_LABELS=$(gh issue view "$UNCLASSIFIED" $REPO_ARG --json labels --jq '[.labels[].name] | join(",")')
 if [[ "$PROVISIONAL_CLASSIFICATION_CONFIGURED" == "true" ]]; then
-  INTAKE_COUNT=$(echo "$REPEAT_LABELS" | tr ',' '\n' | grep -cE '^Intake:(Bug|Feature)$' || true)
-  if [[ "$INTAKE_COUNT" -eq 1 ]]; then
-    pass "Re-running /triage is idempotent — #$UNCLASSIFIED still carries exactly one Intake:* label"
+  CLASSIFICATION_COUNT=$(echo "$REPEAT_LABELS" | tr ',' '\n' | grep -cxE 'Bug|Feature' || true)
+  REPEAT_KIND=$(echo "$REPEAT_LABELS" | tr ',' '\n' | grep -xE 'Bug|Feature' | head -1)
+  if [[ "$CLASSIFICATION_COUNT" -eq 1 && "$REPEAT_KIND" == "$FIRST_KIND" ]]; then
+    pass "Re-running /triage is idempotent — #$UNCLASSIFIED still carries exactly one \`$REPEAT_KIND\` label"
   else
-    fail "Re-running /triage changed #$UNCLASSIFIED's Intake:* label count to $INTAKE_COUNT (labels: $REPEAT_LABELS)"
+    fail "Re-running /triage changed #$UNCLASSIFIED's classification (was: \`$FIRST_KIND\`, now: $CLASSIFICATION_COUNT label(s) — $REPEAT_LABELS)"
   fi
 else
-  if echo "$REPEAT_LABELS" | grep -qE "Intake:(Bug|Feature)"; then
-    fail "Intake:* label appeared on #$UNCLASSIFIED after re-run despite product.provisional_classification=false"
+  if echo "$REPEAT_LABELS" | grep -qE '(^|,)(Bug|Feature)(,|$)'; then
+    fail "Bug/Feature label appeared on #$UNCLASSIFIED after re-run despite product.provisional_classification=false"
   else
-    pass "#$UNCLASSIFIED still carries no Intake:* label after re-run — config gate holds"
+    pass "#$UNCLASSIFIED still carries no Bug/Feature label after re-run — config gate holds"
   fi
 fi
 echo ""

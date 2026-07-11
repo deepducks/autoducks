@@ -180,7 +180,7 @@ if [[ -n "$DIRECTIVE" ]]; then
         is_chainable_verb "$_v" || continue
         # dedupe (loop protection: a verb may appear at most once in a chain)
         case "+${_chain_out}+" in *"+${_v}+"*) continue ;; esac
-        (( _count >= 5 )) && break
+        if (( _count >= 5 )); then break; fi
         _chain_out="${_chain_out:+$_chain_out+}$_v"
         (( _count++ )) || true
       done
@@ -212,7 +212,7 @@ if [[ -n "$DIRECTIVE" ]]; then
     fi
     if [[ "$_lc" =~ ^turns:([0-9]+)$ ]]; then
       _v="${BASH_REMATCH[1]}"
-      (( _v > 0 && _v <= 1000 )) && MAX_TURNS="$_v"
+      if (( _v > 0 && _v <= 1000 )); then MAX_TURNS="$_v"; fi
       continue
     fi
     if [[ "$_lc" =~ ^iters:([0-9]+)$ || "$_lc" =~ ^iterations:([0-9]+)$ ]]; then
@@ -247,7 +247,7 @@ if [[ -n "$DIRECTIVE" ]]; then
       # above, before ':' is stripped.
       turns=*|max-turns=*|max_turns=*)
         _v="${t#*=}"
-        [[ "$_v" =~ ^[0-9]+$ ]] && (( _v > 0 && _v <= 1000 )) && MAX_TURNS="$_v" ;;
+        if [[ "$_v" =~ ^[0-9]+$ ]] && (( _v > 0 && _v <= 1000 )); then MAX_TURNS="$_v"; fi ;;
     esac
   done
 

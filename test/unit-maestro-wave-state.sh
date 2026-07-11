@@ -117,7 +117,17 @@ cat > "$SCRATCH/bin/gh" <<'SHIM'
 case "$1 $2" in
   "issue view")
     id="$3"
-    if [[ -f "$MOCK_ISSUE_DIR/$id.json" ]]; then
+    if [[ "$*" == *"--json state,stateReason"* ]]; then
+      # Task-issue state lookup (DONE_TASKS closed-as-completed union) — a
+      # dedicated per-task fixture, separate from the issue body/labels file
+      # used by its::get_issue, so tests can set state without reshaping the
+      # full mock issue.
+      if [[ -f "$MOCK_ISSUE_DIR/$id.state.json" ]]; then
+        jq -r '(.state // "") + " " + (.stateReason // "")' "$MOCK_ISSUE_DIR/$id.state.json"
+      else
+        echo " "
+      fi
+    elif [[ -f "$MOCK_ISSUE_DIR/$id.json" ]]; then
       cat "$MOCK_ISSUE_DIR/$id.json"
     else
       echo '{}'
@@ -598,6 +608,96 @@ if [[ -n "$TRANSIENT_BODY_FIRSTRUN" ]] && echo "$TRANSIENT_BODY_FIRSTRUN" | grep
 else
   fail "single-task first run: transient status comment not resolved: $TRANSIENT_BODY_FIRSTRUN"
 fi
+
+echo ""
+
+# =============================================================================
+# Closed-as-completed no-PR task (Fix 3 part 2) — a no-code task that never
+# opens a sub-PR must still count as done once its issue is closed as
+# genuinely COMPLETED, so its wave advances instead of re-dispatching it
+# forever. A sibling task closed as NOT_PLANNED must NOT be masked as done.
+#
+#   Wave 1: task G (closed COMPLETED, no PR ever) — done, never (re-)dispatched
+#   Wave 2: task H (closed NOT_PLANNED, no PR)    — NOT done, still dispatched
+# =============================================================================
+echo "── Maestro: closed-as-completed no-PR task counts as done, not_planned does not ──"
+
+FEATURE=800
+TASK_G=801   # Wave 1 — closed COMPLETED, no PR — must count as done
+TASK_H=802   # Wave 2 — closed NOT_PLANNED, no PR — must NOT count as done
+
+FEATURE_BODY_NOCODE=$(cat <<EOF
+## Plan
+
+\`\`\`yaml
+waves:
+  - name: Wave 1
+    tasks: [$TASK_G]
+  - name: Wave 2
+    tasks: [$TASK_H]
+\`\`\`
+
+## Progress
+
+- [ ] #$TASK_G Task G \`P0\`
+- [ ] #$TASK_H Task H \`P0\`
+EOF
+)
+
+jq -n --arg body "$FEATURE_BODY_NOCODE" \
+  '{title: "No-code tasks", body: $body, labels: ["Tactics:done"], author: "alice"}' \
+  > "$MOCK_ISSUE_DIR/$FEATURE.json"
+
+jq -n '{state: "CLOSED", stateReason: "COMPLETED"}' > "$MOCK_ISSUE_DIR/$TASK_G.state.json"
+jq -n '{state: "CLOSED", stateReason: "NOT_PLANNED"}' > "$MOCK_ISSUE_DIR/$TASK_H.state.json"
+
+echo "[]" > "$MOCK_MERGED_PRS_FILE"
+echo "[]" > "$MOCK_OPEN_PRS_FILE"
+echo "[]" > "$MOCK_COMMENTS_FILE"
+: > "$DISPATCH_LOG"
+: > "$COMMENT_LOG"
+
+RC_NOCODE1=0
+run_maestro || RC_NOCODE1=$?
+[[ "$RC_NOCODE1" -eq 0 ]] \
+  && pass "no-code run 1: maestro exits 0" \
+  || fail "no-code run 1: rc=$RC_NOCODE1: $(tail -10 "$SCRATCH/stderr.log")"
+
+grep -qx "\\[maestro\\] Done tasks: $TASK_G" "$SCRATCH/stderr.log" \
+  && pass "DONE_TASKS contains the closed-completed no-PR task G (#$TASK_G), not the not_planned task H" \
+  || fail "expected 'Done tasks: $TASK_G', log has: $(grep '\[maestro\] Done tasks' "$SCRATCH/stderr.log" || echo none)"
+
+grep -qx "\\[maestro\\] Dispatching wave 1: Wave 2" "$SCRATCH/stderr.log" \
+  && pass "Wave 1 (closed-completed G) reached done — Maestro advanced to Wave 2" \
+  || fail "expected Wave 2 to be dispatched next, log has: $(grep '\[maestro\] Dispatching' "$SCRATCH/stderr.log" || echo none)"
+
+[[ "$(count_of "issue_number=$TASK_G" "$DISPATCH_LOG")" -eq 0 ]] \
+  && pass "no-code run 1: closed-completed task G (#$TASK_G) never dispatched" \
+  || fail "G (#$TASK_G) was dispatched despite being closed-completed: $(cat "$DISPATCH_LOG")"
+
+[[ "$(count_of "issue_number=$TASK_H" "$DISPATCH_LOG")" -eq 1 ]] \
+  && pass "no-code run 1: not_planned task H (#$TASK_H) is NOT masked as done — still dispatched" \
+  || fail "expected exactly one dispatch for #$TASK_H, dispatch log: $(cat "$DISPATCH_LOG")"
+
+CAPTURED_BODY_NOCODE="$GH_CAPTURE_DIR/$FEATURE.md"
+if [[ -f "$CAPTURED_BODY_NOCODE" ]] \
+  && grep -q "^- \[x\] #$TASK_G " "$CAPTURED_BODY_NOCODE" \
+  && grep -q "^- \[ \] #$TASK_H " "$CAPTURED_BODY_NOCODE"; then
+  pass "feature checkboxes: only the closed-completed task #$TASK_G flipped to done"
+else
+  fail "feature checkboxes did not match the no-code fixture: $(cat "$CAPTURED_BODY_NOCODE" 2>/dev/null || echo 'no capture')"
+fi
+
+# --- Re-run: convergence — the closed-completed task is never re-dispatched ---
+RC_NOCODE2=0
+run_maestro || RC_NOCODE2=$?
+[[ "$RC_NOCODE2" -eq 0 ]] \
+  && pass "no-code run 2: maestro exits 0" \
+  || fail "no-code run 2: rc=$RC_NOCODE2: $(tail -10 "$SCRATCH/stderr.log")"
+
+[[ "$(count_of "issue_number=$TASK_G" "$DISPATCH_LOG")" -eq 0 ]] \
+  && pass "no-code run 2: closed-completed task G (#$TASK_G) still never dispatched — no infinite re-dispatch" \
+  || fail "G (#$TASK_G) was dispatched across the two runs despite being closed-completed: $(cat "$DISPATCH_LOG")"
 
 echo ""
 

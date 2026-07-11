@@ -107,6 +107,12 @@ export AUTODUCKS_MARKER_DIR
 export AUTODUCKS_PRE_FAILED_MARKER="$AUTODUCKS_MARKER_DIR/pre-failed"
 export AUTODUCKS_DOR_DELEGATED_MARKER="$AUTODUCKS_MARKER_DIR/dor-delegated"
 
+# The no-code-result artifact is written by the LLM sandbox, whose only
+# writable working area is /tmp (not RUNNER_TEMP/AUTODUCKS_MARKER_DIR), so
+# this must be a fixed, sandbox-writable /tmp path rather than living
+# alongside the runner-private markers above.
+export AUTODUCKS_NO_CODE_RESULT="/tmp/no-code-result.md"
+
 # ── Review settings ─────────────────────────────────────────────────
 export AUTODUCKS_REVIEW_SECURITY_GUIDELINES
 AUTODUCKS_REVIEW_SECURITY_GUIDELINES="$(jq -r '.review.security_guidelines // ".autoducks/security-guidelines.md"' "$_config")"

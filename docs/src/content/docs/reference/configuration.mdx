@@ -321,9 +321,7 @@ When the open backlog exceeds this, the run is bounded and the excess is reporte
 
 ### `product.provisional_classification`
 
-Whether `/triage` proposes a provisional `Intake:Feature`/`Intake:Bug` label on un-classified issues. **Default:** `true`
-
-The label is a non-authoritative triage hint only — it is never route-critical and never affects branch naming. The [Architect](/agents/architect) is the sole authoritative source of the `Feature`/`Bug` classification; it confirms or overrides the hint on classify and strips the `Intake:*` label. Setting this to `false` disables the hint entirely — `/triage` still assigns priorities and proposes duplicates.
+Whether `/triage` classifies un-classified issues by applying the `Bug`/`Feature` label. The Architect remains the authoritative classifier and overrides the label if its design concludes differently. `false` disables triage classification entirely; `/triage` still assigns priorities and proposes duplicates.
 
 ## `triggers` — custom trigger aliases
 
