@@ -200,6 +200,22 @@ is_done() {
   return 1
 }
 
+# A no-code task never opens a sub-PR, so the merged-PR scan above can never
+# mark it done — it would be re-dispatched forever. Union in plan tasks whose
+# issue was closed as genuinely COMPLETED (not a human's not_planned/duplicate
+# closure, which must NOT mask a task that still needs doing). its::get_issue
+# doesn't expose state/stateReason, so query it directly (same gh issue view
+# used for reviewer assignment further below).
+for ((w=0; w<TOTAL_WAVES; w++)); do
+  for t in ${WAVE_TASKS[$w]:-}; do
+    [[ -z "$t" ]] && continue
+    is_done "$t" && continue
+    TASK_STATE=$(gh issue view "$t" --repo "$REPO" --json state,stateReason \
+      --jq '(.state // "") + " " + (.stateReason // "")' 2>/dev/null || true)
+    [[ "$TASK_STATE" == "CLOSED COMPLETED" ]] && DONE_TASKS+=("$t")
+  done
+done
+
 log "Done tasks: ${DONE_TASKS[*]:-none}"
 
 # Update checkboxes in the feature body
