@@ -66,7 +66,7 @@ if [[ "${LLM_ERROR_SUBTYPE:-}" == "error_max_turns" ]]; then
 fi
 
 # Check for changes (allow existing commits on reused branch)
-assert_changes || true
+assert_changes "$PR_BASE_BRANCH" || true
 
 # Commit and push (only if there are staged changes)
 if ! git diff --cached --quiet 2>/dev/null; then

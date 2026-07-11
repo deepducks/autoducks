@@ -2,13 +2,14 @@
 set -euo pipefail
 
 # Assert that the agent made changes to the working tree
-# Usage: assert_changes
+# Usage: assert_changes <base_branch>
 # Exits 1 if no changes were made
 assert_changes() {
+  local base="$1"
   git add -A
   if git diff --cached --quiet; then
-    if git log --oneline -1 &>/dev/null; then
-      echo "::warning::No new changes detected, but prior commits exist on this branch"
+    if [[ "$(git::commits_ahead "$base")" -gt 0 ]]; then
+      echo "::warning::No newly-staged changes, but this branch is ahead of base"
       return 0
     fi
     echo "::error::Agent made no changes to the codebase"
