@@ -118,7 +118,7 @@ The Engineer is **pure ITS** — it never touches git (D7).
 
 1. **DoR (D1):** a Task must have its pipeline context. When invoked by comment without one, it resolves the parent issue; if the parent branch is missing it delegates to the Maestro on the parent. Parentless standalone execution was retired — the pipeline guarantees a reviewed design and plan before code.
 2. Cuts a task branch from the pipeline branch, inheriting its prefix: `<feature|fix>/<parentNum>-issue-<taskNum>-<epoch>`.
-3. **[AGENT]** Implements the task spec (never runs git/gh itself); writes `/tmp/work-summary.md`.
+3. **[AGENT]** Implements the task spec (may read with `git`/`gh`, never mutates); writes `/tmp/work-summary.md`.
 4. Opens the task PR into the pipeline branch (`fixes #N` + Implementation Summary) and **auto-merges** it (adaptive method: `auto` probes merge/squash/rebase; 3 attempts with rebase in between; conflicts → `notify_conflict`).
 5. Closes the task explicitly (sub-PR merges don't fire GitHub's auto-close), `Work:coding` → `Work:done`, assigns the command author.
 6. On `max_turns` exhaustion: commits `WIP:`, pushes the branch, and reports it — `/fix` resumes from the preserved branch.
