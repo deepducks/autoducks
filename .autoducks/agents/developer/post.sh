@@ -139,7 +139,7 @@ git commit -m "Implement issue #${ISSUE_NUM}" || true
 CHECKS_NOTE=""
 if verify_loop::enabled; then
   ITERATION="${ITERATION:-1}"
-  MAX="$AUTODUCKS_CHECKS_MAX_ITERATIONS"
+  MAX="${MAX_ITERATIONS:-$AUTODUCKS_CHECKS_MAX_ITERATIONS}"
 
   # Capture the exit code immediately — set -e / the ERR trap / intermediate
   # commands would otherwise clobber a bare $? by the time the if runs.
@@ -168,7 +168,8 @@ if verify_loop::enabled; then
         ${COMMENTER:+-f actor="$COMMENTER"} \
         ${MODEL:+-f model="$MODEL"} \
         ${EFFORT:+-f effort="$EFFORT"} \
-        ${MAX_TURNS:+-f max_turns="$MAX_TURNS"}
+        ${MAX_TURNS:+-f max_turns="$MAX_TURNS"} \
+        ${MAX_ITERATIONS:+-f max_iterations="$MAX_ITERATIONS"}
     exit 0                                               # this iteration ends cleanly
   else
     verify_loop::clear_feedback_comment "$ISSUE_NUM"
