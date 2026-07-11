@@ -52,9 +52,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Pin the machinery to the pipeline's cut commit BEFORE the agent runs, so
+      # an agent editing .autoducks on its own branch cannot corrupt the scripts
+      # that run its build, and the machinery cannot drift across waves/reviews
+      # (bug #952). Every later step runs from "${AUTODUCKS_PINNED_ROOT}/.autoducks".
+      - name: Snapshot machinery
+        id: snapshot
+        run: bash .autoducks/core/robustness/snapshot-machinery.sh
       - name: Authorize
         id: authz
-        run: bash .autoducks/core/security/authorize.sh
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/security/authorize.sh"
         env:
           AUTODUCKS_AGENT: architect
           ACTOR: ${{ github.event.comment.user.login || github.event.sender.login }}
@@ -67,7 +74,7 @@ jobs:
       - name: Load agent defaults
         id: agent
         if: steps.authz.outcome == 'success'
-        run: AUTODUCKS_AGENT=architect bash .autoducks/core/config/load-agent-defaults.sh >> "$GITHUB_OUTPUT"
+        run: AUTODUCKS_AGENT=architect bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/config/load-agent-defaults.sh" >> "$GITHUB_OUTPUT"
       - name: Set context
         id: ctx
         if: steps.authz.outcome == 'success'
@@ -83,14 +90,14 @@ jobs:
           else
             echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
             echo "commenter=${{ github.event.comment.user.login }}" >> "$GITHUB_OUTPUT"
-            source .autoducks/core/config/parse-directive.sh >> "$GITHUB_OUTPUT"
+            source "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/config/parse-directive.sh" >> "$GITHUB_OUTPUT"
           fi
         env:
           COMMENT_BODY: ${{ github.event.comment.body || '' }}
       - name: Pre-execution
         id: pre
         if: steps.authz.outcome == 'success'
-        run: bash .autoducks/agents/architect/pre.sh
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/agents/architect/pre.sh"
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           REPO: ${{ github.repository }}
@@ -141,8 +148,9 @@ jobs:
           AGENT_OUTCOME: ${{ steps.llm.outcome }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Post-execution
+        id: post
         if: always() && steps.authz.outcome == 'success'
-        run: bash .autoducks/agents/architect/post.sh
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/agents/architect/post.sh"
         env:
           ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
           REPO: ${{ github.repository }}
@@ -160,3 +168,22 @@ jobs:
           LLM_SKIPPED: ${{ steps.llm.outputs.skipped }}
           LLM_ERROR_SUBTYPE: ${{ steps.llm.outputs.error_subtype }}
           GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      # Last-resort backstop: if the LLM step failed or Post-execution did not
+      # report cleanly (e.g. a corrupted hook that still exits 0), post a notice
+      # from pure YAML so a broken hook can never silently freeze a wave (#952).
+      - name: Failure watchdog
+        if: >-
+          always() && steps.authz.outcome == 'success' &&
+          (steps.llm.outcome == 'failure' || steps.post.outcome != 'success')
+        env:
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment "$ISSUE_NUM" --repo "$REPO" --body \
+            "⚠️ **Agent run failed and its post-execution hook did not report cleanly.** \
+          This is a last-resort watchdog notice — the run's own failure reporting was \
+          skipped or errored (possible corrupted \`post.sh\`). \
+          [View the run logs](https://github.com/$REPO/actions/runs/$RUN_ID). \
+          **Next:** re-run with a larger turn budget, or inspect the hook." || true

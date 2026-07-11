@@ -64,7 +64,7 @@ runs:
           max)    THINK_PHRASE="Ultrathink — take extensive time to reason before writing." ;;
           *)      THINK_PHRASE="Think very hard before writing." ;;
         esac
-        PROMPT=$(PROMPT_FILE="${{ inputs.prompt_file }}" bash .autoducks/core/config/resolve-prompt.sh)
+        PROMPT=$(PROMPT_FILE="${AUTODUCKS_PINNED_ROOT:-.}/${{ inputs.prompt_file }}" bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/config/resolve-prompt.sh")
         PROMPT="${PROMPT//\{\{THINK_PHRASE\}\}/$THINK_PHRASE}"
         {
           echo "content<<PROMPT_EOF"
@@ -83,7 +83,7 @@ runs:
         [[ -z "$MT" ]] && MT="50"
         ARGS="--model $MODEL --max-turns $MT --allowedTools '$ALLOWED_TOOLS'"
         echo "claude_args=$ARGS" >> "$GITHUB_OUTPUT"
-        SETTINGS=".autoducks/providers/llm/claude/settings.json"
+        SETTINGS="${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/providers/llm/claude/settings.json"
         [[ -f "$SETTINGS" ]] && echo "settings=$SETTINGS" >> "$GITHUB_OUTPUT" || echo "settings=" >> "$GITHUB_OUTPUT"
     - name: Run Claude agent
       id: claude
