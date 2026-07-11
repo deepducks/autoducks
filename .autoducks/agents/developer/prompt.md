@@ -1,5 +1,11 @@
 Implement the task described in `/tmp/task-spec.md`.
 
+Some inputs are conditional: files such as `/tmp/issue-comments.md`,
+`/tmp/issue-meta.md`, `/tmp/design-*.md`, and `/tmp/tactical-zone-current.md`
+are present only when your repository's context manifest selects them. A
+missing or empty file means that part was intentionally omitted — do not
+treat its absence as an error.
+
 Steps:
 1. Read `/tmp/task-spec.md` to understand the task (title, tasks, acceptance criteria).
 2. Use Write/Edit tools to create/modify files as needed to fulfill the spec.
