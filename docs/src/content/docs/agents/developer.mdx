@@ -46,7 +46,7 @@ A task needs its **pipeline context** — the parent issue's branch to cut from 
 1. Reacts 👀, posts the status comment.
 2. **Idempotency guard:** if any PR — open or merged — already claims this task (`fixes #N`), the run skips quietly (this is one of the three [duplicate-dispatch guards](/agents/maestro#duplicate-dispatch-protection)).
 3. Applies `Work:coding`; waits for the base branch to be visible; cuts the task branch, inheriting the pipeline prefix: `feature/<parent>-issue-<task>-<epoch>` or `fix/…`.
-4. **[LLM]** Implements the task spec — the LLM never runs git or the API; it only edits files and writes `/tmp/work-summary.md`.
+4. **[LLM]** Implements the task spec — read-only `git`/`gh` exploration is permitted, but the LLM never commits, pushes, or opens the PR (that stays with the workflow), and any code it writes must not embed a `gh`/GitHub-API call directly (that goes through the `its::*` / `git::*` provider interfaces); it edits files and writes `/tmp/work-summary.md`.
 5. Commits, pushes, opens the PR into the pipeline branch with `fixes #N` and an **Implementation Summary** (harvested later into the final PR's Work Log).
 6. **Auto-merges** with the adaptive method (`merge_method: auto` probes merge → squash → rebase; three attempts with a rebase onto the base in between). A conflict posts a 🔀 report with resolution steps.
 7. Closes the task explicitly (sub-PR merges don't fire GitHub's auto-close), `Work:coding` → `Work:done`, assigns the command author, flips the status comment to ✅. The merge event itself re-triggers the Maestro.

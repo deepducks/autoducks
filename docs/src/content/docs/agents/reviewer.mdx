@@ -102,7 +102,7 @@ The **verdict mapping is unchanged**: an unaddressed exploitable vulnerability i
 
 The Reviewer is constrained on both sides:
 
-- **Prompt-level:** the LLM's allowed tools are `Read,Grep,Glob,Write,Bash(read-only)` — no `Edit`, and `Bash` is restricted to read-only exploration. It may only `Write` to `/tmp/review.md` and `/tmp/review-verdict`.
+- **Prompt-level:** the LLM's allowed tools are `Read`, `Grep`, `Glob`, `Write`, and read-only `Bash` (including read-only `git`/`gh` exploration such as `git log`/`git diff`/`gh pr view`/`gh pr diff`) — no `Edit`, and no mutating `git`/`gh`. It may only `Write` to `/tmp/review.md` and `/tmp/review-verdict`.
 - **Script-level:** `pre.sh`/`post.sh` never check out a branch to modify, never commit, and never call a merge function — the only Git-provider write is posting the review itself.
 
 ## Next: rework or defer
