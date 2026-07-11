@@ -4,9 +4,7 @@
 # CLI — the same shim convention used by test/unit-architect-guard.sh.
 #
 # Confirms /tmp/issue-type drives both the native type and the authoritative
-# Feature/Bug label, that the opposite label is stripped, and that both
-# provisional Intake:* labels are always stripped alongside it so a guess
-# never lingers next to a confirmed classification.
+# Feature/Bug label, and that the opposite label is stripped.
 # Run: bash test/unit-architect-classify.sh
 set -euo pipefail
 
@@ -74,10 +72,10 @@ run_post() { # $1 = issue-type value to write to /tmp/issue-type
 }
 
 # ---------------------------------------------------------------------------
-echo "── Architect classify: Bug outcome sets native type + label, strips Feature and both Intake:* labels ──"
+echo "── Architect classify: Bug outcome sets native type + label, strips Feature ──"
 clean_tmp
 cat > "$MOCK_ISSUE_FILE" <<'JSON'
-{"title": "Crash on save", "body": "steps to repro", "labels": ["Design:draft", "Intake:Bug"], "author": "alice"}
+{"title": "Crash on save", "body": "steps to repro", "labels": ["Design:draft"], "author": "alice"}
 JSON
 run_post "Bug"
 [[ "$RC" -eq 0 ]] && pass "post exits 0" || fail "rc=$RC"
@@ -87,17 +85,13 @@ grep -q 'issue edit 10 --repo x/y --add-label Bug' "$GH_LOG" \
   && pass "Bug label added" || fail "Bug label not added: $(cat "$GH_LOG")"
 grep -q 'issue edit 10 --repo x/y --remove-label Feature' "$GH_LOG" \
   && pass "opposite Feature label stripped" || fail "Feature label not stripped: $(cat "$GH_LOG")"
-grep -q 'issue edit 10 --repo x/y --remove-label Intake:Bug' "$GH_LOG" \
-  && pass "Intake:Bug stripped" || fail "Intake:Bug not stripped: $(cat "$GH_LOG")"
-grep -q 'issue edit 10 --repo x/y --remove-label Intake:Feature' "$GH_LOG" \
-  && pass "Intake:Feature stripped" || fail "Intake:Feature not stripped: $(cat "$GH_LOG")"
 clean_tmp
 
 # ---------------------------------------------------------------------------
-echo "── Architect classify: Feature outcome sets native type + label, strips Bug and both Intake:* labels ──"
+echo "── Architect classify: Feature outcome sets native type + label, strips Bug ──"
 clean_tmp
 cat > "$MOCK_ISSUE_FILE" <<'JSON'
-{"title": "Add search", "body": "feature request", "labels": ["Design:draft", "Intake:Feature"], "author": "alice"}
+{"title": "Add search", "body": "feature request", "labels": ["Design:draft"], "author": "alice"}
 JSON
 run_post "Feature"
 [[ "$RC" -eq 0 ]] && pass "post exits 0" || fail "rc=$RC"
@@ -105,12 +99,10 @@ grep -q 'api repos/x/y/issues/10 --method PATCH -f type=Feature' "$GH_LOG" \
   && pass "native type set to Feature" || fail "type not set: $(cat "$GH_LOG")"
 grep -q 'issue edit 10 --repo x/y --add-label Feature' "$GH_LOG" \
   && pass "Feature label added" || fail "Feature label not added: $(cat "$GH_LOG")"
+grep -q 'label create Feature --repo x/y --color A2EEEF' "$GH_LOG" \
+  && pass "Feature label created with canonical color A2EEEF" || fail "Feature label create not seen: $(cat "$GH_LOG")"
 grep -q 'issue edit 10 --repo x/y --remove-label Bug' "$GH_LOG" \
   && pass "opposite Bug label stripped" || fail "Bug label not stripped: $(cat "$GH_LOG")"
-grep -q 'issue edit 10 --repo x/y --remove-label Intake:Bug' "$GH_LOG" \
-  && pass "Intake:Bug stripped" || fail "Intake:Bug not stripped: $(cat "$GH_LOG")"
-grep -q 'issue edit 10 --repo x/y --remove-label Intake:Feature' "$GH_LOG" \
-  && pass "Intake:Feature stripped" || fail "Intake:Feature not stripped: $(cat "$GH_LOG")"
 clean_tmp
 
 echo ""
