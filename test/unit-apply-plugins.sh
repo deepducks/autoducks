@@ -146,6 +146,10 @@ set_plugins "$REPO" '[
 ]'
 make_plugin "$REPO" alpha '[]' '[]'
 make_plugin "$REPO" beta '[]' '[]'
+jq '.mcpServers = ["shared"]' "$REPO/.autoducks/plugins/alpha/plugin.json" > "$REPO/.autoducks/plugins/alpha/plugin.json.tmp" \
+  && mv "$REPO/.autoducks/plugins/alpha/plugin.json.tmp" "$REPO/.autoducks/plugins/alpha/plugin.json"
+jq '.mcpServers = ["shared"]' "$REPO/.autoducks/plugins/beta/plugin.json" > "$REPO/.autoducks/plugins/beta/plugin.json.tmp" \
+  && mv "$REPO/.autoducks/plugins/beta/plugin.json.tmp" "$REPO/.autoducks/plugins/beta/plugin.json"
 mkdir -p "$REPO/.autoducks/plugins/alpha/claude" "$REPO/.autoducks/plugins/beta/claude"
 echo '{"mcpServers":{"shared":{"command":"a"}}}' > "$REPO/.autoducks/plugins/alpha/claude/mcp.json"
 echo '{"mcpServers":{"shared":{"command":"b"}}}' > "$REPO/.autoducks/plugins/beta/claude/mcp.json"
@@ -243,6 +247,71 @@ if [[ -f "$OUTROOT/.github/actions/autoducks/developer-pre/action.yml" ]]; then
   pass "dry-run mode writes the same artifact under the output root"
 else
   fail "dry-run mode did not write the expected artifact under the output root"
+fi
+
+echo "── non-vendored './' source resolves aggregator uses: to the actual path ──"
+new_repo relsource
+mkdir -p "$REPO/other/path/hooks/developer-pre"
+jq -n '{schemaVersion:1,name:"gamma",version:"1.0.0",hooks:["developer-pre"],allowedTools:[]}' > "$REPO/other/path/plugin.json"
+cat > "$REPO/other/path/hooks/developer-pre/action.yml" <<'EOF'
+name: 'gamma developer-pre'
+runs:
+  using: 'composite'
+  steps:
+    - run: echo gamma
+      shell: bash
+EOF
+set_plugins "$REPO" '[{"name":"gamma","source":"./other/path","config":{}}]'
+run_compiler "$REPO" >/tmp/apply-plugins-relsource.log 2>&1 || { fail "non-vendored source run failed"; cat /tmp/apply-plugins-relsource.log; }
+AGG="$REPO/.github/actions/autoducks/developer-pre/action.yml"
+grep -qF "uses: ./other/path/hooks/developer-pre" "$AGG" \
+  && pass "aggregator uses: resolves to the actual non-vendored source path" \
+  || fail "aggregator uses: did not resolve to the non-vendored source path"
+
+echo "── plugin Claude Code hook merges into compiled settings ──"
+new_repo hooksmerge
+set_plugins "$REPO" '[{"name":"alpha","source":".autoducks/plugins/alpha","config":{}}]'
+make_plugin "$REPO" alpha '[]' '[]'
+jq '.claudeHooks = ["PreToolUse"]' "$REPO/.autoducks/plugins/alpha/plugin.json" > "$REPO/.autoducks/plugins/alpha/plugin.json.tmp" \
+  && mv "$REPO/.autoducks/plugins/alpha/plugin.json.tmp" "$REPO/.autoducks/plugins/alpha/plugin.json"
+mkdir -p "$REPO/.autoducks/plugins/alpha/claude"
+cat > "$REPO/.autoducks/plugins/alpha/claude/hooks.json" <<'EOF'
+{"hooks":{"PreToolUse":[{"matcher":"mcp__alpha__.*","hooks":[{"type":"command","command":"echo alpha"}]}]}}
+EOF
+run_compiler "$REPO" >/tmp/apply-plugins-hooksmerge.log 2>&1 || { fail "hooks-merge run failed"; cat /tmp/apply-plugins-hooksmerge.log; }
+COMPILED="$REPO/.autoducks/providers/llm/claude/compiled/developer.settings.json"
+if [[ -f "$COMPILED" ]] && jq -e '.hooks.PreToolUse[0].matcher == "mcp__alpha__.*"' "$COMPILED" >/dev/null 2>&1; then
+  pass "plugin PreToolUse hook merges into compiled/<agent>.settings.json under .hooks"
+else
+  fail "plugin PreToolUse hook missing from compiled settings"
+fi
+
+echo "── declared claudeHooks event with no matching hooks.json entry fails validation ──"
+new_repo crossvalidate
+set_plugins "$REPO" '[{"name":"alpha","source":".autoducks/plugins/alpha","config":{}}]'
+make_plugin "$REPO" alpha '[]' '[]'
+jq '.claudeHooks = ["PreToolUse"]' "$REPO/.autoducks/plugins/alpha/plugin.json" > "$REPO/.autoducks/plugins/alpha/plugin.json.tmp" \
+  && mv "$REPO/.autoducks/plugins/alpha/plugin.json.tmp" "$REPO/.autoducks/plugins/alpha/plugin.json"
+if run_compiler "$REPO" >/tmp/apply-plugins-crossvalidate.log 2>&1; then
+  fail "declared claudeHooks with no matching hooks.json entry did not fail"
+else
+  grep -qi "declares claudeHooks 'PreToolUse' but claude/hooks.json has no matching entry" /tmp/apply-plugins-crossvalidate.log \
+    && pass "declared-but-missing claudeHooks entry fails validation with an actionable message" \
+    || fail "wrong error for missing claudeHooks entry"
+fi
+
+echo "── mcp.json entry with no manifest 'mcpServers' declaration fails validation ──"
+new_repo crossvalidate2
+set_plugins "$REPO" '[{"name":"alpha","source":".autoducks/plugins/alpha","config":{}}]'
+make_plugin "$REPO" alpha '[]' '[]'
+mkdir -p "$REPO/.autoducks/plugins/alpha/claude"
+echo '{"mcpServers":{"undeclared":{"command":"x"}}}' > "$REPO/.autoducks/plugins/alpha/claude/mcp.json"
+if run_compiler "$REPO" >/tmp/apply-plugins-crossvalidate2.log 2>&1; then
+  fail "undeclared mcpServers entry did not fail"
+else
+  grep -qi "claude/mcp.json defines server 'undeclared' but manifest 'mcpServers' does not declare it" /tmp/apply-plugins-crossvalidate2.log \
+    && pass "mcp.json entry with no manifest declaration fails validation with an actionable message" \
+    || fail "wrong error for undeclared mcpServers entry"
 fi
 
 echo ""

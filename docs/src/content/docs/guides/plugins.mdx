@@ -32,6 +32,20 @@ A plugin package is a directory containing a `plugin.json` manifest plus any of 
 
 The [reference plugin](#reference-plugin) at `examples/plugins/playwright-browser/` exercises every one of these except `prompts/`.
 
+`claude/mcp.json` and `claude/hooks.json` are both merged directly into the compiled Claude settings, so each must be wrapped in the same top-level key the base `.autoducks/providers/llm/claude/settings.json` uses — `mcpServers` and `hooks` respectively — not a bare object of server/event names:
+
+```json
+// claude/mcp.json
+{ "mcpServers": { "playwright": { "command": "npx", "args": ["--yes", "@playwright/mcp@latest"] } } }
+```
+
+```json
+// claude/hooks.json
+{ "hooks": { "PreToolUse": [ { "matcher": "mcp__playwright__.*", "hooks": [ { "type": "command", "command": "…" } ] } ] } }
+```
+
+A `claude/hooks.json` with events at the top level (no `hooks` wrapper) fails manifest validation: the compiler cross-checks every `claudeHooks` entry against `claude/hooks.json`'s `hooks` keys (and every `mcpServers` entry against `claude/mcp.json`'s `mcpServers` keys) in both directions, so an unwrapped file — or any other declared-but-missing or undeclared-but-present name — is rejected before it can be silently dropped from `compiled/<agent>.settings.json`.
+
 ## The manifest (`plugin.json`)
 
 Validated field-by-field against [`plugin.schema.json`](https://github.com/deepducks/autoducks/blob/main/.autoducks/core/config/plugin.schema.json) by the shell-based compiler (there's no `ajv`/JSON-Schema engine in this repo — `jq` checks each field directly).
@@ -47,8 +61,8 @@ Validated field-by-field against [`plugin.schema.json`](https://github.com/deepd
 | `hooks` | | Hook points this plugin contributes, each requiring a matching `hooks/<point>/action.yml`. Must be drawn from the 24 valid `<agent>-<stage>` names. |
 | `prompts.global` | | When `true`, `prompts/instructions.md` is injected into every targeted agent's prompt. |
 | `prompts.agents` | | Agents for which `prompts/agents/<agent>/instructions.md` is injected. |
-| `mcpServers` | | MCP server names this plugin registers; each must exist in `claude/mcp.json`. |
-| `claudeHooks` | | Claude Code hook lifecycle events this plugin wires up; each must exist in `claude/hooks.json`. |
+| `mcpServers` | | MCP server names this plugin registers; each must exist in `claude/mcp.json`'s `mcpServers`, and vice versa — cross-validated in both directions. |
+| `claudeHooks` | | Claude Code hook lifecycle events this plugin wires up; each must exist in `claude/hooks.json`'s `hooks`, and vice versa — cross-validated in both directions. |
 | `allowedTools` | | Tool names (built-in or `mcp__<server>__<tool>`) this plugin needs allow-listed. |
 | `requiresSecrets` | | Advisory-only list of secret/env names the plugin expects the host to provide. Not enforced by the loader. |
 | `configSchema` | | A JSON Schema fragment describing the enablement entry's `config` object (below), checked field-by-field the same way `plugin.schema.json` itself is. |
