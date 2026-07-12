@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "playwright-browser",
+  "version": "1.0.0",
+  "description": "Installs a Chromium browser toolchain and a Playwright MCP server for the Developer agent, with a PreToolUse hook that audits every browser tool call.",
+  "author": "autoducks",
+  "homepage": "https://github.com/deepducks/autoducks/tree/main/examples/plugins/playwright-browser",
+  "license": "MIT",
+  "autoducksVersion": ">=0.4.0",
+  "targets": ["developer"],
+  "hooks": ["developer-pre"],
+  "mcpServers": ["playwright"],
+  "claudeHooks": ["PreToolUse"],
+  "allowedTools": [
+    "mcp__playwright__browser_navigate",
+    "mcp__playwright__browser_click",
+    "mcp__playwright__browser_type",
+    "mcp__playwright__browser_snapshot",
+    "mcp__playwright__browser_take_screenshot"
+  ],
+  "requiresSecrets": []
+}
