@@ -10,7 +10,6 @@ set -euo pipefail
 #   original_command — the raw verb the user typed, before alias normalization
 #   model            — claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5, or empty
 #   effort           — off, low, medium, high, max, or empty
-#   think_phrase     — mapped from effort level (empty when effort is empty)
 #   max_turns        — positive integer within a sane upper bound, or empty.
 #                       Set via a `turns=<n>`, `max-turns=<n>`, `max_turns=<n>`,
 #                       or `turns:<n>` token (digits only; malformed/out-of-range
@@ -270,17 +269,6 @@ if [[ -n "$DIRECTIVE" ]]; then
   TRAILING_BODY=$(printf '%s\n' "$BODY" | tail -n +"$((_DIRECTIVE_LINE_NUM + 1))")
 fi
 
-# ── Map effort level → think phrase ──────────────────────────────────
-# Empty EFFORT must yield empty THINK_PHRASE so downstream defaults win.
-THINK_PHRASE=""
-case "$EFFORT" in
-  off)    THINK_PHRASE="" ;;
-  low)    THINK_PHRASE="Think before writing." ;;
-  medium) THINK_PHRASE="Think hard before writing." ;;
-  high)   THINK_PHRASE="Think very hard before writing." ;;
-  max)    THINK_PHRASE="Ultrathink — take extensive time to reason before writing." ;;
-esac
-
 # ── Assemble steering prompt: leftover directive-line tokens + trailing
 # body lines, verbatim, trimmed of surrounding whitespace, then
 # base64-encoded to a single line so it survives the $GITHUB_OUTPUT
@@ -306,7 +294,6 @@ echo "command=$COMMAND"
 echo "original_command=$ORIGINAL_COMMAND"
 echo "model=$MODEL"
 echo "effort=$EFFORT"
-echo "think_phrase=$THINK_PHRASE"
 echo "max_turns=$MAX_TURNS"
 echo "max_iterations=$MAX_ITERATIONS"
 echo "mode=$MODE"
