@@ -1,4 +1,4 @@
-import type { CommandModule } from '../types.js';
+import type { CommandContext, CommandModule } from '../types.js';
 
 /**
  * Static name -> lazy module registry the dispatcher resolves commands
@@ -18,4 +18,19 @@ export const COMMANDS: Record<string, () => Promise<CommandModule>> = {
 
 export function resolveCommand(name: string): (() => Promise<CommandModule>) | undefined {
   return COMMANDS[name];
+}
+
+/**
+ * Hands off to another command by name through the registry — never a direct
+ * module import — so callers (e.g. `install` continuing into `setup`,
+ * `wizard` dispatching to `config`) stay decoupled from whichever task
+ * implements the target command. `args` resets to `[]` unless overridden.
+ */
+export async function dispatchCommand(name: string, ctx: CommandContext, args: string[] = []): Promise<number> {
+  const resolve = resolveCommand(name);
+  if (!resolve) {
+    throw new Error(`Unknown command: ${name}`);
+  }
+  const mod = await resolve();
+  return mod.run({ ...ctx, command: name, args });
 }

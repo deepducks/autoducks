@@ -31,6 +31,7 @@ export function parseArgv(argv: string[]): ParsedArgv {
       // `{ 'no-input': true }`, regardless of the boolean list — detect the
       // flag off that negation instead of a literal `no-input` key.
       noInput: parsed.input === false,
+      noSetup: parsed.setup === false,
       yes: Boolean(parsed.yes),
       help: Boolean(parsed.help),
     },

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { resolveCommand } from '../src/core/registry.js';
+import { dispatchCommand, resolveCommand } from '../src/core/registry.js';
+import type { CommandContext } from '../src/types.js';
 
 const EXPECTED_COMMANDS = ['install', 'update', 'setup', 'wizard', 'config', 'plugin', 'version', 'help'];
 
@@ -21,5 +22,17 @@ describe('resolveCommand', () => {
 
   it('returns undefined for an unknown command', () => {
     expect(resolveCommand('frobnicate')).toBeUndefined();
+  });
+});
+
+describe('dispatchCommand', () => {
+  it('throws on an unknown command instead of hanging', async () => {
+    const ctx: CommandContext = {
+      command: 'install',
+      args: [],
+      options: { noInput: true, noSetup: false, yes: false, help: false },
+      isInteractive: false,
+    };
+    await expect(dispatchCommand('frobnicate', ctx)).rejects.toThrow('Unknown command: frobnicate');
   });
 });
