@@ -28,6 +28,9 @@ export interface CommandModule {
   run: CommandRun;
 }
 
+/** Outcome of a single check/step: `manual` means it needs human action. */
+export type CheckStatus = 'pass' | 'fail' | 'manual';
+
 /**
  * Generic result shape for a single check/step (setup checks, install
  * steps, etc.), shared so future tasks don't invent their own variants.
@@ -35,8 +38,8 @@ export interface CommandModule {
 export interface CheckResult {
   id: string;
   title: string;
-  status: 'pass' | 'fail' | 'manual';
-  message?: string;
+  status: CheckStatus;
+  message: string;
   remediation?: string;
 }
 
