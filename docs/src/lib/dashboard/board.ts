@@ -41,7 +41,7 @@ export async function loadBoard(repo: string): Promise<BoardLoad> {
 export function assemblePanels(issues: BoardIssue[]): PanelData[] {
   const panels = {} as Record<PanelId, PanelData>;
   for (const id of PANEL_ORDER) {
-    panels[id] = { id, title: PANEL_TITLES[id], progress: [], done: [] };
+    panels[id] = { id, title: PANEL_TITLES[id], progress: [], changes: [], done: [] };
   }
 
   for (const issue of issues) {

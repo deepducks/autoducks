@@ -35,13 +35,16 @@
     ondrop,
   }: Props = $props();
 
-  let title = $derived(lane === 'progress' ? 'In progress' : 'Done');
+  let title = $derived(
+    lane === 'progress' ? 'In progress' : lane === 'changes' ? 'Changes requested' : 'Done',
+  );
   let draggable = $derived(lane === 'done');
 </script>
 
 <div
   class="lane"
   class:lane--done={lane === 'done'}
+  class:lane--changes={lane === 'changes'}
   class:lane--drop-valid={dropState === 'valid'}
   class:lane--drop-invalid={dropState === 'invalid'}
   ondragover={ondragover}
@@ -85,6 +88,9 @@
   }
   .lane--done {
     background: color-mix(in srgb, var(--sl-color-green, #3fb950) 6%, transparent);
+  }
+  .lane--changes {
+    background: color-mix(in srgb, #d93f0b 8%, transparent);
   }
   .lane--drop-valid {
     box-shadow: inset 0 0 0 2px var(--sl-color-accent, #3b82f6);

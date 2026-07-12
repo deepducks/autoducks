@@ -46,10 +46,11 @@ export interface BoardIssue {
   priority: Priority | null;
   branch: string | null; // head branch (from PR) for workflow-run matching
   run: WorkflowRun | null; // filled after runs are matched
+  maxTurnsWarning: boolean; // latest agent status on this issue is a max_turns stall
 }
 
 export type PanelId = 'inbox' | 'design' | 'tactics' | 'delivery' | 'review';
-export type LaneId = 'progress' | 'done';
+export type LaneId = 'progress' | 'changes' | 'done';
 
 export interface Classification {
   panel: PanelId;
@@ -60,6 +61,7 @@ export interface PanelData {
   id: PanelId;
   title: string;
   progress: BoardIssue[];
+  changes: BoardIssue[]; // populated only for the review panel
   done: BoardIssue[];
 }
 

@@ -21,6 +21,9 @@ interface GqlPr {
   isDraft: boolean;
   headRefName: string | null;
 }
+interface GqlComment {
+  body: string;
+}
 interface GqlIssue {
   number: number;
   title: string;
@@ -33,6 +36,7 @@ interface GqlIssue {
   projectItems: {
     nodes: Array<{ priority: { name: string } | null }>;
   } | null;
+  comments: { nodes: GqlComment[] } | null;
 }
 interface QueryResult {
   repository: {
@@ -67,6 +71,7 @@ function buildQuery(): string {
                 }
               }
             }
+            comments(last: 10) { nodes { body } }
           }
         }
       }
@@ -101,6 +106,25 @@ function parseProgressChecklist(body: string): SubtaskSummary | null {
   return total > 0 ? { total, completed: done } : null;
 }
 
+// Marker strings must stay in sync with the source of truth in
+// .autoducks/core/feedback/notify-failure.sh (failure category, "run failed")
+// and status-comment.sh ("finished" status).
+const MAX_TURNS_MARKER = /\*\*Category:\*\*\s*`max_turns`/;
+const RUN_FAILED = /\*\*Agent run failed\.\*\*|\*\*Task #\d+ failed\.\*\*/;
+const RUN_FINISHED = /✅ \*\*`[^`]+`\*\*: finished/;
+
+// True when the newest terminal-status comment (a failure or a "finished"
+// status) is a max_turns failure — i.e. the most recent run stalled on turns
+// and nothing has since resumed and finished. Scans newest→oldest.
+export function detectMaxTurns(comments: string[]): boolean {
+  for (let i = comments.length - 1; i >= 0; i -= 1) {
+    const body = comments[i];
+    if (RUN_FINISHED.test(body)) return false; // resolved since
+    if (RUN_FAILED.test(body)) return MAX_TURNS_MARKER.test(body);
+  }
+  return false;
+}
+
 function normalize(node: GqlIssue): BoardIssue {
   const labels: Label[] = (node.labels?.nodes ?? []).map((l) => ({ name: l.name, color: l.color }));
   const type = node.issueType?.name?.toLowerCase() ?? null;
@@ -133,6 +157,7 @@ function normalize(node: GqlIssue): BoardIssue {
     priority: resolvePriority(labels, projectPriority),
     branch: pr?.headRefName ?? null,
     run: null,
+    maxTurnsWarning: detectMaxTurns((node.comments?.nodes ?? []).map((c) => c.body ?? '')),
   };
 }
 

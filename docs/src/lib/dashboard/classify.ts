@@ -68,10 +68,9 @@ export function classify(issue: BoardIssue): Classification | null {
   const l = issue.labels;
 
   // Review (most advanced)
-  if (hasLabel(l, 'Review:reviewing') || hasLabel(l, 'Review:changes')) {
-    return { panel: 'review', lane: 'progress' };
-  }
-  if (hasLabel(l, 'Review:done')) return { panel: 'review', lane: 'done' };
+  if (hasLabel(l, 'Review:changes'))   return { panel: 'review', lane: 'changes' };
+  if (hasLabel(l, 'Review:reviewing')) return { panel: 'review', lane: 'progress' };
+  if (hasLabel(l, 'Review:done'))      return { panel: 'review', lane: 'done' };
 
   // Delivery — feature/bug pipelines only
   if (isFeatureOrBug(issue)) {
@@ -115,4 +114,18 @@ export function resolvePriority(labels: Label[], projectPriority: string | null)
   if (!raw) return null;
   const color = PRIORITY_COLORS[raw.toLowerCase()] ?? PRIORITY_FALLBACK_COLOR;
   return { value: raw, color };
+}
+
+export type PriorityGlyph = 'critical' | 'high' | 'medium' | 'low' | 'unknown';
+
+// Map a (possibly custom) priority value to a chevron glyph. Mirrors the
+// PRIORITY_COLORS keys; anything unrecognized → 'unknown' (neutral bar).
+export function priorityGlyph(value: string): PriorityGlyph {
+  switch (value.toLowerCase()) {
+    case 'critical': return 'critical';
+    case 'high':     return 'high';
+    case 'medium':   return 'medium';
+    case 'low':      return 'low';
+    default:         return 'unknown';
+  }
 }
