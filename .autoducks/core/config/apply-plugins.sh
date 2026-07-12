@@ -213,6 +213,33 @@ validate_manifest() { # $1 = resolved dir, $2 = declared enablement name
   for tg in $(jq -r '.targets // [] | .[]' "$manifest"); do
     is_valid_agent "$tg" || die "plugin '$declared_name': invalid target agent '$tg' in manifest"
   done
+
+  # Cross-validate declared mcpServers/claudeHooks against claude/mcp.json
+  # and claude/hooks.json (plugin.schema.json:76-90) — a declared name/event
+  # with no matching entry (or vice versa) is a diagnostic, not a silent gap.
+  local mcpsrv mcpf="$dir/claude/mcp.json"
+  for mcpsrv in $(jq -r '.mcpServers // [] | .[]' "$manifest"); do
+    { [[ -f "$mcpf" ]] && jq -e --arg n "$mcpsrv" '(.mcpServers // {}) | has($n)' "$mcpf" >/dev/null; } \
+      || die "plugin '$declared_name': manifest declares mcpServers '$mcpsrv' but claude/mcp.json has no matching entry"
+  done
+  if [[ -f "$mcpf" ]]; then
+    for mcpsrv in $(jq -r '.mcpServers // {} | keys[]' "$mcpf"); do
+      jq -e --arg n "$mcpsrv" '(.mcpServers // []) | index($n) != null' "$manifest" >/dev/null \
+        || die "plugin '$declared_name': claude/mcp.json defines server '$mcpsrv' but manifest 'mcpServers' does not declare it"
+    done
+  fi
+
+  local hookev hooksf="$dir/claude/hooks.json"
+  for hookev in $(jq -r '.claudeHooks // [] | .[]' "$manifest"); do
+    { [[ -f "$hooksf" ]] && jq -e --arg e "$hookev" '(.hooks // {}) | has($e)' "$hooksf" >/dev/null; } \
+      || die "plugin '$declared_name': manifest declares claudeHooks '$hookev' but claude/hooks.json has no matching entry"
+  done
+  if [[ -f "$hooksf" ]]; then
+    for hookev in $(jq -r '.hooks // {} | keys[]' "$hooksf"); do
+      jq -e --arg e "$hookev" '(.claudeHooks // []) | index($e) != null' "$manifest" >/dev/null \
+        || die "plugin '$declared_name': claude/hooks.json defines event '$hookev' but manifest 'claudeHooks' does not declare it"
+    done
+  fi
 }
 
 # ── Config validation against configSchema (field-by-field, not a full
@@ -312,14 +339,16 @@ render_aggregator_body() { # $1 = hook point, remaining = contributors ("@local"
   printf "name: 'autoducks plugin aggregator: %s'\n" "$point"
   printf "description: 'Aggregated plugin hook contributions for %s'\n" "$point"
   printf 'runs:\n  using: '"'"'composite'"'"'\n  steps:\n'
-  local c step_name step_uses
+  local c step_name step_uses pdir prel
   for c in "$@"; do
     if [[ "$c" == "@local" ]]; then
       step_name="local"
       step_uses="./.autoducks/plugins/@local/hooks/$point"
     else
       step_name="plugin: $c"
-      step_uses="./.autoducks/plugins/$c/hooks/$point"
+      pdir="${PLUGIN_DIR[$c]}"
+      prel="${pdir#"$REPO_ROOT"/}"
+      step_uses="./$prel/hooks/$point"
     fi
     cat <<STEP
     - name: '$step_name'
