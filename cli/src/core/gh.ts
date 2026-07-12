@@ -84,6 +84,11 @@ export function git(args: string[], options: RunOptions = {}): Promise<RunResult
   return execBin('git', args, options);
 }
 
+/** Runs an arbitrary subprocess (`tar`, `bash scripts/foo.sh`, ...), sharing the same debug logging/redaction as `gh`/`git`. */
+export function run(bin: string, args: string[], options: RunOptions = {}): Promise<RunResult> {
+  return execBin(bin, args, options);
+}
+
 /** Detects the current repo (`OWNER/REPO`) via `gh repo view`, or undefined if not resolvable. */
 export async function detectRepo(cwd?: string): Promise<string | undefined> {
   const result = await gh(['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], { cwd });
