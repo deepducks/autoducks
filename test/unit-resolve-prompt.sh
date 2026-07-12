@@ -8,8 +8,7 @@
 #   3. global instructions.md → appended under its heading
 #   4. per-agent instructions.md → appended after the global block
 #   5. all three combined    → custom base + both appends, in order
-#   6. {{THINK_PHRASE}}      → left untouched by the resolver
-#   7. agent name            → derived from PROMPT_FILE's parent directory
+#   6. agent name            → derived from PROMPT_FILE's parent directory
 #
 # Run: bash test/unit-resolve-prompt.sh
 set -euo pipefail
@@ -29,7 +28,7 @@ SANDBOX="$SCRATCH/sandbox"
 mkdir -p "$SANDBOX/.autoducks/agents/engineer"
 
 ENGINEER_PROMPT_REL=".autoducks/agents/engineer/prompt.md"
-SHIPPED_CONTENT=$'You are the engineer agent.\n\nThink phrase: {{THINK_PHRASE}}\n'
+SHIPPED_CONTENT=$'You are the engineer agent.\n'
 printf '%s' "$SHIPPED_CONTENT" > "$SANDBOX/$ENGINEER_PROMPT_REL"
 
 GLOBAL_CONTENT=$'Follow repo lint rules strictly.\n'
@@ -126,17 +125,7 @@ assert_file_eq "custom base + global append + per-agent append, in order" \
   "$SCRATCH/expected5" "$SCRATCH/out5"
 
 # ---------------------------------------------------------------------------
-echo "── 6. {{THINK_PHRASE}} is left untouched by the resolver ──"
-clean_custom
-run_resolve > "$SCRATCH/out6"
-if grep -qF '{{THINK_PHRASE}}' "$SCRATCH/out6"; then
-  pass "literal {{THINK_PHRASE}} placeholder survives assembly unsubstituted"
-else
-  fail "{{THINK_PHRASE}} placeholder was altered or dropped: $(cat "$SCRATCH/out6")"
-fi
-
-# ---------------------------------------------------------------------------
-echo "── 7. agent name is derived from PROMPT_FILE's parent directory ──"
+echo "── 6. agent name is derived from PROMPT_FILE's parent directory ──"
 clean_custom
 mkdir -p "$SANDBOX/.autoducks/agents/reviewer" "$SANDBOX/.autoducks/custom/agents/reviewer"
 REVIEWER_SHIPPED=$'You are the reviewer agent.\n'

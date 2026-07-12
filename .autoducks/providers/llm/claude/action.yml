@@ -53,19 +53,8 @@ runs:
     - name: Read prompt
       id: prompt
       shell: bash
-      env:
-        EFFORT: ${{ inputs.effort }}
       run: |
-        case "$EFFORT" in
-          off)    THINK_PHRASE="" ;;
-          low)    THINK_PHRASE="Think before writing." ;;
-          medium) THINK_PHRASE="Think hard before writing." ;;
-          high)   THINK_PHRASE="Think very hard before writing." ;;
-          max)    THINK_PHRASE="Ultrathink — take extensive time to reason before writing." ;;
-          *)      THINK_PHRASE="Think very hard before writing." ;;
-        esac
         PROMPT=$(PROMPT_FILE="${AUTODUCKS_PINNED_ROOT:-.}/${{ inputs.prompt_file }}" bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/config/resolve-prompt.sh")
-        PROMPT="${PROMPT//\{\{THINK_PHRASE\}\}/$THINK_PHRASE}"
         {
           echo "content<<PROMPT_EOF"
           echo "$PROMPT"
@@ -78,16 +67,26 @@ runs:
         MODEL: ${{ inputs.model }}
         MAX_TURNS: ${{ inputs.max_turns }}
         ALLOWED_TOOLS: ${{ inputs.allowed_tools }}
+        EFFORT: ${{ inputs.effort }}
       run: |
         MT="${MAX_TURNS:-}"
         [[ -z "$MT" ]] && MT="50"
         ARGS="--model $MODEL --max-turns $MT --allowedTools '$ALLOWED_TOOLS'"
+
+        case "$EFFORT" in
+          low|medium|high|max) ARGS="$ARGS --effort $EFFORT" ;;
+          off)                 THINKING_DISABLED=1 ;;   # no --effort; disable via env below
+          *)                   ARGS="$ARGS --effort high" ;;
+        esac
         echo "claude_args=$ARGS" >> "$GITHUB_OUTPUT"
+        echo "max_thinking_tokens=${THINKING_DISABLED:+0}" >> "$GITHUB_OUTPUT"
         SETTINGS="${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/providers/llm/claude/settings.json"
         [[ -f "$SETTINGS" ]] && echo "settings=$SETTINGS" >> "$GITHUB_OUTPUT" || echo "settings=" >> "$GITHUB_OUTPUT"
     - name: Run Claude agent
       id: claude
       uses: anthropics/claude-code-action@v1
+      env:
+        MAX_THINKING_TOKENS: ${{ steps.args.outputs.max_thinking_tokens }}
       with:
         prompt: ${{ steps.prompt.outputs.content }}
         anthropic_api_key: ${{ inputs.anthropic_api_key }}

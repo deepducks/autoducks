@@ -85,16 +85,13 @@ assert_out "named model:claude-sonnet-5" "/execute model:claude-sonnet-5" \
 assert_out "unknown model ignored" "/execute model:gpt-4" "model="
 
 echo "── effort overrides ──"
-assert_out "positional high" "/execute high" \
-  "effort=high" "think_phrase=Think very hard before writing."
+assert_out "positional high" "/execute high" "effort=high"
 assert_out "positional max" "/execute max" "effort=max"
-assert_out "named effort:low" "/execute effort:low" \
-  "effort=low" "think_phrase=Think before writing."
+assert_out "named effort:low" "/execute effort:low" "effort=low"
 assert_out "named effort:medium" "/execute effort:med" "effort=medium"
-assert_out "effort off yields empty think phrase" "/execute effort:off" \
-  "effort=off" "think_phrase="
+assert_out "effort off" "/execute effort:off" "effort=off"
 assert_out "no effort yields empty (defaults win downstream)" "/execute" \
-  "effort=" "think_phrase="
+  "effort="
 assert_out "combined model+effort" "/architect opus max" \
   "model=claude-opus-4-8" "effort=max"
 assert_out "model:opus effort:max" "/execute model:opus effort:max" \
