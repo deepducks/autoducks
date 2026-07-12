@@ -117,6 +117,15 @@ export AUTODUCKS_NO_CODE_RESULT="/tmp/no-code-result.md"
 export AUTODUCKS_REVIEW_SECURITY_GUIDELINES
 AUTODUCKS_REVIEW_SECURITY_GUIDELINES="$(jq -r '.review.security_guidelines // ".autoducks/security-guidelines.md"' "$_config")"
 
+export AUTODUCKS_REVIEW_AUTO_REWORK
+AUTODUCKS_REVIEW_AUTO_REWORK="$(jq -r 'if .review.auto_rework == null then true else .review.auto_rework end' "$_config")"
+
+export AUTODUCKS_REVIEW_MAX_ITERATIONS
+AUTODUCKS_REVIEW_MAX_ITERATIONS="$(jq -r '.review.max_iterations // 3' "$_config")"
+[[ "$AUTODUCKS_REVIEW_MAX_ITERATIONS" =~ ^[0-9]+$ ]] || AUTODUCKS_REVIEW_MAX_ITERATIONS=3
+(( AUTODUCKS_REVIEW_MAX_ITERATIONS < 1 ))  && AUTODUCKS_REVIEW_MAX_ITERATIONS=1
+(( AUTODUCKS_REVIEW_MAX_ITERATIONS > 10 )) && AUTODUCKS_REVIEW_MAX_ITERATIONS=10
+
 # ── Checks (verification loop) settings ──────────────────────────────
 export AUTODUCKS_CHECKS_ENABLED
 AUTODUCKS_CHECKS_ENABLED="$(jq -r '.checks.enabled // false' "$_config")"
