@@ -87,12 +87,14 @@ PR_STATE=$(echo "$PR_META_JSON" | jq -r '.state')
 # failure (ERR trap), or the verdict in post.sh — resolves it; a required
 # check that never appeared would otherwise deadlock the PR forever.
 CHECK_RUN_ID=""
+# PR_HEAD_SHA also feeds the review-loop duplicate-event guard in post.sh
+# (review_loop::sha), so it's resolved unconditionally, not just on the
+# final feature/fix → integration-branch PRs that get a Check-run.
+PR_HEAD_SHA=$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null || true)
 if [[ "$PR_BASE" == "$AUTODUCKS_INTEGRATION_BRANCH" ]] \
-   && { [[ "$PR_HEAD" == feature/* ]] || [[ "$PR_HEAD" == fix/* ]]; }; then
-  PR_HEAD_SHA=$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null || true)
-  if [[ -n "$PR_HEAD_SHA" ]]; then
-    CHECK_RUN_ID=$(git::start_check_run "$AUTODUCKS_REVIEW_CHECK_NAME" "$PR_HEAD_SHA" 2>/dev/null || true)
-  fi
+   && { [[ "$PR_HEAD" == feature/* ]] || [[ "$PR_HEAD" == fix/* ]]; } \
+   && [[ -n "$PR_HEAD_SHA" ]]; then
+  CHECK_RUN_ID=$(git::start_check_run "$AUTODUCKS_REVIEW_CHECK_NAME" "$PR_HEAD_SHA" 2>/dev/null || true)
 fi
 
 # ── Resolve the feature/bug issue this PR implements ───────────────────
@@ -155,13 +157,14 @@ if [[ "$PR_STATE" != "OPEN" ]]; then
 fi
 
 # Share PR state with post.sh (separate GHA step — a fresh process).
-export PR_NUM PR_BASE PR_HEAD FEATURE_NUM CHECK_RUN_ID
+export PR_NUM PR_BASE PR_HEAD PR_HEAD_SHA FEATURE_NUM CHECK_RUN_ID
 REVIEW_TARGETS_CSV=$(IFS=,; echo "${REVIEW_TARGETS[*]}")
 export REVIEW_TARGETS_CSV
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   echo "PR_NUM=$PR_NUM" >> "$GITHUB_ENV"
   echo "PR_BASE=$PR_BASE" >> "$GITHUB_ENV"
   echo "PR_HEAD=$PR_HEAD" >> "$GITHUB_ENV"
+  echo "PR_HEAD_SHA=${PR_HEAD_SHA:-}" >> "$GITHUB_ENV"
   echo "FEATURE_NUM=${FEATURE_NUM:-}" >> "$GITHUB_ENV"
   echo "CHECK_RUN_ID=${CHECK_RUN_ID:-}" >> "$GITHUB_ENV"
   echo "REVIEW_TARGETS_CSV=$REVIEW_TARGETS_CSV" >> "$GITHUB_ENV"

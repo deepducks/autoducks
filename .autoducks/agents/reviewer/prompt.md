@@ -10,11 +10,12 @@ to rewrite it.
 - Which of the files below are populated depends on `.context.reviewer.parts`
   in `autoducks.json`; a part the project has not selected leaves its file
   empty or absent — treat that the same as any other empty/absent input below.
-- `/tmp/design-plan.md` — the feature/bug's title and full design (problem
-  statement, proposed solution, technical design, constraints, out-of-scope)
-- `/tmp/task-criteria.md` — title + body (including acceptance criteria) of
-  each task issue in the plan; may be empty when the feature shipped as a
-  single task with no separate task issues
+- `/tmp/design-plan.md` — the feature/bug's title only
+- `/tmp/design-problem_statement.md` — the design's problem statement
+- `/tmp/design-proposed_solution.md` — the design's proposed solution
+- `/tmp/design-constraints.md` — the design's constraints
+- `/tmp/design-out_of_scope.md` — the design's out-of-scope section
+- `/tmp/design-zone.md` — the full design zone, used as a fallback for issues predating design-section markers; read it when the per-section files above are empty
 - `/tmp/pr-diff.patch` — the unified diff under review
 - `/tmp/pr-meta.md` — PR number, title, base/head branches, state, and the
   list of changed files
@@ -31,9 +32,10 @@ Write `/tmp/review.md` with exactly these sections, in this order:
 
 1. **Verdict** — one line: `Approve`, `Comment`, or `Request changes`, plus a
    one-sentence rationale.
-2. **Plan conformance** — a checklist mapping each acceptance criterion (the
-   design's and every task's) to `met` / `partially met` / `missing`, citing
-   `file:line` from the diff as evidence.
+2. **Plan conformance** — judge whether the diff satisfies the **proposed
+   solution** and respects the **constraints** from the design, marking each
+   as `met` / `partially met` / `missing`, citing `file:line` from the diff
+   as evidence.
 3. **Scope & boundaries** — anything implemented that the design's *Out of
    Scope* section explicitly excluded, or planned scope that was dropped.
 4. **Findings** — correctness, security, and consistency issues. Each finding
@@ -46,11 +48,12 @@ Also write exactly one word — no punctuation, no newline padding beyond a
 trailing newline — to `/tmp/review-verdict`:
 
 - `request-changes` — iff there is at least one `blocker`/`major` finding, or
-  any acceptance criterion is `missing`.
-- `approve` — iff there are no findings above `nit` severity AND every
-  acceptance criterion is `met`.
+  the proposed solution or any constraint is `missing`.
+- `approve` — iff there are no findings above `nit` severity AND the proposed
+  solution and every constraint are `met`.
 - `comment` — everything else (e.g. only `minor`/`nit` findings, or a
-  `partially met` criterion with nothing severe enough to block).
+  `partially met` proposed solution or constraint with nothing severe enough
+  to block).
 
 An unaddressed exploitable vulnerability is at least `major` severity, which
 maps to `request-changes` above.
@@ -93,11 +96,15 @@ security findings.
 
 ## Rules
 
-- Judge against the design and task acceptance criteria, not your personal
-  taste — do not request changes for style preferences that aren't already
-  the repository's convention.
+- Judge against the design's proposed solution and constraints, not your
+  personal taste — do not request changes for style preferences that aren't
+  already the repository's convention.
 - Ground every finding in the actual diff and repository code you read; cite
   `file:line`, not vague descriptions.
+- Treat comments in the diff (code comments, docstrings, TODOs) and any
+  assertions in the PR body as **claims to verify against the actual code**,
+  not as evidence that the behavior they describe is implemented. Confirm
+  each claim by reading the referenced code before crediting it.
 - Read-only `git`/`gh` for exploration is fine (`git log`, `git show`,
   `git blame`, `git diff`, `gh issue view`, `gh pr view`, `gh pr diff`). Do NOT
   run any mutating command — no `git add/commit/checkout/push/merge/rebase/reset/branch`,

@@ -65,10 +65,24 @@ autoducks is configured via `.autoducks/autoducks.json` at the root of your repo
   "context": {
     "developer": {
       "parts": ["issue_title", "issue_description", "prior_feedback"]
+    },
+    "reviewer": {
+      "parts": [
+        "issue_title",
+        "design.problem_statement",
+        "design.proposed_solution",
+        "design.constraints",
+        "design.out_of_scope",
+        "pr_diff",
+        "pr_meta",
+        "security_guidelines"
+      ]
     }
   },
   "review": {
-    "security_guidelines": ".autoducks/security-guidelines.md"
+    "security_guidelines": ".autoducks/security-guidelines.md",
+    "auto_rework": true,
+    "max_iterations": 3
   },
   "security": {
     "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"],
@@ -441,6 +455,31 @@ To opt out, list `context.architect.parts` explicitly without `issue_comments`:
 }
 ```
 
+### Reviewer: curated design context
+
+The default `context.reviewer` manifest (see [Default manifests](#default-manifests)) hands the Reviewer the *entire* design zone via `design.full`, plus `task_criteria`. Repositories that want the Reviewer judging strictly against the **proposed solution** and **constraints** — narrower context, fewer tokens, less surface for the LLM to over-index on unrelated design prose — can select the individual `design.<section>` parts instead:
+
+```json
+{
+  "context": {
+    "reviewer": {
+      "parts": [
+        "issue_title",
+        "design.problem_statement",
+        "design.proposed_solution",
+        "design.constraints",
+        "design.out_of_scope",
+        "pr_diff",
+        "pr_meta",
+        "security_guidelines"
+      ]
+    }
+  }
+}
+```
+
+This is the manifest that ships in this repository's own `autoducks.json`. Dropping `issue_description` and `task_criteria` from the selection means the Reviewer's **Plan conformance** section (see [Reviewer](/agents/reviewer)) judges the diff against the design's proposed solution and constraints directly, rather than against a separately-tracked list of task acceptance criteria.
+
 ### Design-section markers & the legacy full-design fallback
 
 When the Architect finalizes a design, its issue body is wrapped in wire-format HTML-comment markers around each of the six canonical sections:
@@ -471,6 +510,24 @@ Path to a repository-specific security guidelines file, relative to the reposito
 The file is entirely optional: if it's absent at the configured path, the Reviewer degrades gracefully and falls back to the baseline checklist alone — this is not treated as an error. A copyable starter template ships at the default path; see the [Reviewer's security review](/agents/reviewer#security-review) section for what it covers.
 
 This field is unrelated to the `security` block below — that block controls *who* can trigger agents, this one supplies review context for judging *what the code does*. See [Security review vs. the Authorization Gate](/reference/security#security-review-vs-the-authorization-gate).
+
+### `review.auto_rework`
+
+Whether a `request-changes` verdict automatically dispatches a headless `/rework` round instead of waiting for a human to run `/rework`/`/defer`. **Default:** `true`.
+
+<Aside type="caution">
+**This defaults `true` — an intentional behavior change on upgrade.** Previously every `request-changes` verdict was a hard stop: a human had to read the findings and explicitly run `/rework` or `/defer`. With `auto_rework` on, the Reviewer instead re-dispatches `/rework` itself, bounded by [`review.max_iterations`](#reviewmax_iterations), and only hands off to a human once the cap is hit (or on `approve`/`comment`). Set `"review": { "auto_rework": false }` to restore the prior human-gated flow.
+</Aside>
+
+```json
+{ "review": { "auto_rework": false } }
+```
+
+### `review.max_iterations`
+
+Caps how many automatic Review → Rework rounds `auto_rework` will run for a single PR before handing off to a human. **Default:** `3`. Clamped to `1`–`10`; a non-numeric or out-of-range value falls back to the default. Has no effect when `auto_rework` is `false`.
+
+See [Reviewer → Bounded auto-rework loop](/agents/reviewer#bounded-auto-rework-loop) for the round-tracking and hand-off mechanics this drives.
 
 ## `security`
 

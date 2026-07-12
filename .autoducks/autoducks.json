@@ -49,7 +49,23 @@
     "merge":     []
   },
   "review": {
-    "security_guidelines": ".autoducks/security-guidelines.md"
+    "security_guidelines": ".autoducks/security-guidelines.md",
+    "auto_rework": true,
+    "max_iterations": 3
+  },
+  "context": {
+    "reviewer": {
+      "parts": [
+        "issue_title",
+        "design.problem_statement",
+        "design.proposed_solution",
+        "design.constraints",
+        "design.out_of_scope",
+        "pr_diff",
+        "pr_meta",
+        "security_guidelines"
+      ]
+    }
   },
   "security": {
     "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"],

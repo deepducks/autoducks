@@ -52,10 +52,21 @@ If no open PR is found, the diff is empty, or the PR is already closed/merged, t
 ## Behavior
 
 1. Reacts 👀, posts the status comment, applies `Review:reviewing` — the label and status comment are mirrored to both the feature/bug issue and its PR.
-2. Resolves the target PR and the feature/bug issue it implements, then gathers context: the design and full issue body (`/tmp/design-plan.md`), every linked task's title and acceptance criteria (`/tmp/task-criteria.md`), the unified diff (`/tmp/pr-diff.patch`), PR metadata (`/tmp/pr-meta.md`), and the repository's optional security guidelines (`/tmp/security-guidelines.md`).
-3. **[LLM]** Explores the repository read-only (`Read`, `Grep`, `Glob`, read-only `Bash` — no write tools) and writes `/tmp/review.md`: a verdict line, a plan-conformance checklist against every acceptance criterion, scope/boundary notes, severity-ranked findings (`blocker`/`major`/`minor`/`nit`) with `file:line` citations, and a summary.
+2. Resolves the target PR and the feature/bug issue it implements, then gathers context per [`context.reviewer.parts`](/reference/configuration#context) — which pieces are populated is configurable per repository; see [Curated design context](#curated-design-context) below for the default.
+3. **[LLM]** Explores the repository read-only (`Read`, `Grep`, `Glob`, read-only `Bash` — no write tools) and writes `/tmp/review.md`: a verdict line, a plan-conformance checklist judging the diff against the design's proposed solution and constraints, scope/boundary notes, severity-ranked findings (`blocker`/`major`/`minor`/`nit`) with `file:line` citations, and a summary.
 4. Submits the review to the PR via the Git provider (`git::submit_pr_review`).
 5. `Review:reviewing` → `Review:done` (verdict `approve` or `comment`) or `Review:changes` (verdict `request-changes`). Edits the status comment to ✅ with the next step; continues the `#auto:` chain if one is queued.
+6. On `request-changes`, if [`review.auto_rework`](/reference/configuration#reviewauto_rework) is enabled (the default), auto-dispatches a headless rework round instead of waiting on a human — see [Bounded auto-rework loop](#bounded-auto-rework-loop).
+
+## Curated design context
+
+Which context files are populated is controlled by [`context.reviewer.parts`](/reference/configuration#context) — see the [part catalog](/reference/configuration#part-catalog--availability) for every available part. This repository's own `autoducks.json` ships a curated manifest: `issue_title`, `design.problem_statement`, `design.proposed_solution`, `design.constraints`, `design.out_of_scope`, `pr_diff`, `pr_meta`, and `security_guidelines` — the individual design-section extracts rather than the whole design zone or a separate task-acceptance-criteria file. This narrows the **Plan conformance** judgment (see [Output contract](#output-contract) below) to the design's proposed solution and constraints specifically, rather than a broader mix of the full design plus every task's acceptance criteria.
+
+A project that omits `context.reviewer` entirely falls back to the Reviewer's built-in default manifest (`issue_title`, `issue_description`, `task_criteria`, `design.full`, `pr_diff`, `pr_meta`, `security_guidelines`) — see [Default manifests](/reference/configuration#default-manifests).
+
+### Comments-are-claims
+
+The Reviewer treats **code comments, docstrings, TODOs, and assertions in the PR body** as claims to verify against the actual code, never as evidence on their own that the described behavior is implemented. A comment saying `// validates input` or a PR description saying "adds rate limiting" only counts once the LLM has read the referenced code and confirmed it does what the comment/description claims. This closes off a class of false-negative reviews where a plausible-sounding comment (accurate or not, written by a human or a prior agent run) is taken at face value instead of checked.
 
 ## Output contract
 
@@ -63,9 +74,9 @@ The LLM writes exactly one word to `/tmp/review-verdict`, which `post.sh` maps t
 
 | Verdict | Meaning | Label applied | GitHub review event | Check-run |
 |---------|---------|----------------|----------------------|-----------|
-| `approve` | No findings above `nit`, every acceptance criterion `met` | `Review:done` | `COMMENT` | `success` |
-| `comment` | Only `minor`/`nit` findings, or a `partially met` criterion with nothing blocking | `Review:done` | `COMMENT` | `success` |
-| `request-changes` | At least one `blocker`/`major` finding, or any criterion `missing` | `Review:changes` | `REQUEST_CHANGES` | `failure` |
+| `approve` | No findings above `nit`, and the proposed solution and every constraint are `met` | `Review:done` | `COMMENT` | `success` |
+| `comment` | Only `minor`/`nit` findings, or a `partially met` proposed solution/constraint with nothing blocking | `Review:done` | `COMMENT` | `success` |
+| `request-changes` | At least one `blocker`/`major` finding, or the proposed solution or any constraint is `missing` | `Review:changes` | `REQUEST_CHANGES` | `failure` |
 
 A missing or malformed verdict file falls back to `comment`, the conservative middle ground.
 
@@ -105,6 +116,20 @@ The Reviewer is constrained on both sides:
 - **Prompt-level:** the LLM's allowed tools are `Read`, `Grep`, `Glob`, `Write`, and read-only `Bash` (including read-only `git`/`gh` exploration such as `git log`/`git diff`/`gh pr view`/`gh pr diff`) — no `Edit`, and no mutating `git`/`gh`. It may only `Write` to `/tmp/review.md` and `/tmp/review-verdict`.
 - **Script-level:** `pre.sh`/`post.sh` never check out a branch to modify, never commit, and never call a merge function — the only Git-provider write is posting the review itself.
 
+## Bounded auto-rework loop
+
+When [`review.auto_rework`](/reference/configuration#reviewauto_rework) is enabled (the **default**), a `request-changes` verdict does not stop and wait for a human — the Reviewer immediately dispatches a headless `/rework` round on the PR itself, then re-runs `/review` once the rework lands, repeating until the PR clears (`approve`/`comment`) or the round cap is hit.
+
+<Aside type="caution">
+**This is a behavior change from human-gated review.** Before `auto_rework` existed, every `request-changes` verdict was a hard stop requiring a human to run `/rework` or `/defer`. `auto_rework` defaults to `true`, so upgrading picks up the automatic loop without any config change. Set `"review": { "auto_rework": false }` in `autoducks.json` to restore the prior fully human-gated flow.
+</Aside>
+
+**Round tracking.** The current round number for a (feature, PR) pair lives in a single marker-anchored comment on the PR (`<!-- autoducks:review-loop: feature=<F> pr=<P> iteration=<N> max=<M> -->`), maintained by `core/orchestration/review-loop.sh`. This is stateless across runs — any workflow run can recover the round by reading the marker, edited in place rather than duplicated on every round.
+
+**Bound and hand-off — no silent merges.** Each `request-changes` verdict increments the round counter and re-dispatches `/rework` only while `iteration < review.max_iterations` (default `3`, clamped `[1, 10]`). Once the cap is reached, the automatic loop stops **without merging or approving anything** — the PR stays blocked (`Review:changes`, and a `failure` Check-run when [`reviewer.required_check`](/reference/configuration#reviewerrequired_check) is on), and the status comment's **Next** line falls back to the manual `/rework` or `/defer` instructions, plus a note that the iteration cap was hit. A PR can only ever leave the loop via an explicit `approve`/`comment` verdict or a human's own action — the loop never merges on its own.
+
+On the rework side, a headless auto-dispatch (no triggering comment, so there's no thread for a human to notice a quiet "nothing to rework" on) that finds nothing actionable still posts an explicit **human handoff** — "Nothing to rework — PR #`<n>` is still blocked," with the same `/rework`/`/defer` next steps — rather than finishing silently green. See [`/rework`](/agents/utilities#rework) for the full behavior.
+
 ## Next: rework or defer
 
 The status comment's **Next** line depends on the verdict:
@@ -112,9 +137,11 @@ The status comment's **Next** line depends on the verdict:
 | Verdict | Next line |
 |---------|-----------|
 | `approve` | Merge PR #`<n>` when you're ready — the bot review is informational only (posted as a comment, not a formal approval). |
-| `comment` / `request-changes` | Run `/rework` to address the findings on this PR now, or `/defer` to save them as a follow-up issue and merge as-is. |
+| `comment` | Run `/rework` to address the findings on this PR now, or `/defer` to save them as a follow-up issue and merge as-is. |
+| `request-changes`, auto-rework dispatched | A round was just auto-dispatched: `🔁 Auto-rework round <n>/<max> dispatched.` — no action needed. |
+| `request-changes`, auto-rework off or capped | Run `/rework` to address the findings on this PR now, or `/defer` to save them as a follow-up issue and merge as-is (plus a cap-reached warning, if applicable). |
 
-`/review` itself never changes code or blocks a merge — it only produces a verdict and findings. Turning those findings into action is a separate, explicit step:
+`/review` itself never changes code or blocks a merge — it only produces a verdict and findings. Turning those findings into action, whether automatically (above) or by hand, is a separate step:
 
 - [`/rework`](/agents/utilities#rework) distills the unresolved feedback into one follow-up task, reverts the PR to draft, and re-dispatches execution so the Maestro/Developer builds the fix.
 - [`/defer`](/agents/utilities#defer) captures the same feedback as a standalone follow-up issue instead, leaving the PR untouched so you can merge or close it immediately.

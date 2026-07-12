@@ -75,7 +75,7 @@ flowchart LR
 
 Distills unresolved PR review feedback into a single follow-up task, then hands it back to the pipeline. Unlike `/review`, it needs no prior `/review` run — it reads raw PR reviews, inline review-thread comments, PR conversation comments, and feature-issue comments directly.
 
-**Scripts:** `.autoducks/agents/rework/{pre,post}.sh` · **Trigger:** `/rework` on the feature/bug issue or directly on its pull request
+**Scripts:** `.autoducks/agents/rework/{pre,post}.sh` · **Trigger:** `/rework` on the feature/bug issue or directly on its pull request, or a **headless `workflow_dispatch`** from the [Reviewer's auto-rework loop](/agents/reviewer#bounded-auto-rework-loop) (`pr_number` set, no triggering comment)
 
 ### Behavior
 
@@ -90,6 +90,19 @@ Distills unresolved PR review feedback into a single follow-up task, then hands 
 <Aside type="note">
 `/rework` produces **at most one** task per run — several distinct concerns are folded into that task's checklists, not split into separate tasks.
 </Aside>
+
+### Headless dispatch and the `rework-none` hand-off
+
+The Reviewer's [bounded auto-rework loop](/agents/reviewer#bounded-auto-rework-loop) drives `/rework` via `workflow_dispatch` — `pr_number` (and, when available, `actor`) set directly, with **no triggering comment**, so `COMMENT_ID` defaults to `"0"`. `pre.sh`/`post.sh` tolerate this: every step that would otherwise react to or read a triggering comment degrades gracefully when there isn't one.
+
+That headless origin changes what step 4 above does when it finds **nothing to rework** (everything already resolved, or purely informational feedback):
+
+| Origin | On nothing-to-rework |
+|--------|----------------------|
+| Manual `/rework` (a triggering comment exists) | Finishes green: posts "Nothing to rework," no sub-issue, no draft flip, no dispatch. |
+| Headless auto-dispatch (no triggering comment, `COMMENT_ID` is `"0"`/empty) | Posts an explicit **human hand-off**: "Nothing to rework — PR #`<n>` is still blocked," plus the same `/rework`/`/defer` next-step instructions the Reviewer posts on `request-changes`. |
+
+The distinction exists because a headless dispatch has no comment thread for a human to notice the outcome on — the PR the Reviewer requested changes on is *still blocked* either way, so a silent green stop from an unattended loop would strand it with no visible next step. A manual `/rework` always has a human already watching the thread it was run from, so a quiet green finish is safe there.
 
 ---
 
