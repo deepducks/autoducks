@@ -1,0 +1,197 @@
+---
+title: Plugins
+description: Package hooks, prompt fragments, and Claude settings into a versioned, distributable plugin.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A plugin is a packaged, versioned bundle of the same primitives described in [Customizing workflows and prompts](/guides/customization): hooks, prompt fragments, and Claude settings. Where a hand-authored hook or `.autoducks/custom/` override is local to one repository, a plugin is a directory with a manifest that can be vendored into many repositories, shared with others, or pinned to a specific commit of someone else's package.
+
+Plugins are entirely optional. A shipped `.autoducks/autoducks.json` has `"plugins": []`, and an empty array is a documented no-op: [`apply-plugins.sh`](#compiling-a-repositorys-plugins) exits 0 without writing anything.
+
+## Package layout
+
+A plugin package is a directory containing a `plugin.json` manifest plus any of the following, all optional beyond the manifest itself:
+
+```
+<plugin-dir>/
+├── plugin.json                          # manifest — required
+├── hooks/
+│   └── <agent>-<stage>/
+│       └── action.yml                   # composite action for one hook point
+├── prompts/
+│   ├── instructions.md                  # global prompt fragment
+│   └── agents/
+│       └── <agent>/
+│           └── instructions.md          # per-agent prompt fragment
+└── claude/
+    ├── mcp.json                         # MCP server definitions
+    ├── hooks.json                       # Claude Code hook definitions
+    └── settings.patch.json              # merge patch onto the base claude/settings.json
+```
+
+The [reference plugin](#reference-plugin) at `examples/plugins/playwright-browser/` exercises every one of these except `prompts/`.
+
+`claude/mcp.json` and `claude/hooks.json` are both merged directly into the compiled Claude settings, so each must be wrapped in the same top-level key the base `.autoducks/providers/llm/claude/settings.json` uses — `mcpServers` and `hooks` respectively — not a bare object of server/event names:
+
+```json
+// claude/mcp.json
+{ "mcpServers": { "playwright": { "command": "npx", "args": ["--yes", "@playwright/mcp@latest"] } } }
+```
+
+```json
+// claude/hooks.json
+{ "hooks": { "PreToolUse": [ { "matcher": "mcp__playwright__.*", "hooks": [ { "type": "command", "command": "…" } ] } ] } }
+```
+
+A `claude/hooks.json` with events at the top level (no `hooks` wrapper) fails manifest validation: the compiler cross-checks every `claudeHooks` entry against `claude/hooks.json`'s `hooks` keys (and every `mcpServers` entry against `claude/mcp.json`'s `mcpServers` keys) in both directions, so an unwrapped file — or any other declared-but-missing or undeclared-but-present name — is rejected before it can be silently dropped from `compiled/<agent>.settings.json`.
+
+## The manifest (`plugin.json`)
+
+Validated field-by-field against [`plugin.schema.json`](https://github.com/deepducks/autoducks/blob/main/.autoducks/core/config/plugin.schema.json) by the shell-based compiler (there's no `ajv`/JSON-Schema engine in this repo — `jq` checks each field directly).
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `schemaVersion` | ✅ | Must be `1`. See [schema evolution](#schema-evolution-why-schemaversion-exists). |
+| `name` | ✅ | Kebab-case (`^[a-z0-9-]+$`), must match the `name` in the enabling `plugins[]` entry. |
+| `version` | ✅ | The plugin's own semver, e.g. `"1.2.0"`. |
+| `description`, `author`, `homepage`, `license` | | Human-readable metadata. |
+| `autoducksVersion` | | Compat gate against the host's `autoducks.json` `"version"`, e.g. `">=0.4.0"`. Advisory-only when the host has no version set. |
+| `targets` | | Subset of the [9 LLM-backed agents](#the-9-llm-backed-agents) this plugin's `claude/` and `prompts/` contributions apply to. Omit to target all 9. |
+| `hooks` | | Hook points this plugin contributes, each requiring a matching `hooks/<point>/action.yml`. Must be drawn from the 24 valid `<agent>-<stage>` names. |
+| `prompts.global` | | When `true`, `prompts/instructions.md` is injected into every targeted agent's prompt. |
+| `prompts.agents` | | Agents for which `prompts/agents/<agent>/instructions.md` is injected. |
+| `mcpServers` | | MCP server names this plugin registers; each must exist in `claude/mcp.json`'s `mcpServers`, and vice versa — cross-validated in both directions. |
+| `claudeHooks` | | Claude Code hook lifecycle events this plugin wires up; each must exist in `claude/hooks.json`'s `hooks`, and vice versa — cross-validated in both directions. |
+| `allowedTools` | | Tool names (built-in or `mcp__<server>__<tool>`) this plugin needs allow-listed. |
+| `requiresSecrets` | | Advisory-only list of secret/env names the plugin expects the host to provide. Not enforced by the loader. |
+| `configSchema` | | A JSON Schema fragment describing the enablement entry's `config` object (below), checked field-by-field the same way `plugin.schema.json` itself is. |
+
+### The 9 LLM-backed agents
+
+`targets` and `prompts.agents` are drawn from the same 9 agents that run an LLM step and therefore support prompt overrides: **architect, engineer, developer, reviewer, fix, resolver, rework, defer, product**. The remaining pipeline/utility agents — maestro, close, revert — are pure bash orchestration with no LLM step, so they're not valid `targets` or `prompts.agents` entries (though they *are* valid `hooks` targets — hooks wrap a workflow step, not an LLM turn).
+
+## Enabling a plugin — the `source` grammar
+
+A repository enables a plugin by adding an entry to `autoducks.json`'s top-level `"plugins"` array:
+
+```jsonc
+// .autoducks/autoducks.json
+{
+  "plugins": [
+    {
+      "name": "playwright-browser",
+      "source": "./examples/plugins/playwright-browser",
+      "config": {}
+    }
+  ]
+}
+```
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `name` | ✅ | Must match the `name` in the referenced plugin's manifest. |
+| `source` | ✅ | Where to resolve the package from — see forms below. |
+| `config` | | Plugin-specific configuration, validated against that plugin's `configSchema`. |
+
+`source` takes exactly one of four forms:
+
+| Form | Example | Resolution |
+|------|---------|------------|
+| Relative path | `./examples/plugins/playwright-browser` | Read directly from the repo checkout — the whole package lives in your own tree, reviewed the same way as any other repo file. |
+| Vendored path | `.autoducks/plugins/playwright-browser` | Same as above, but under the conventional vendoring directory (see below). |
+| Pinned GitHub source | `github:acme/some-plugin@<40-char SHA>` | Cloned once to `.autoducks/plugins/<name>` and checked out at that exact commit. |
+| Registry reference | `registry:some-plugin@1.2.0` | Reserved for a future package registry — the compiler currently refuses this form outright. |
+
+<Aside type="caution">
+**`github:` sources must pin a full 40-character commit SHA — floating refs (branch names, tags, `HEAD`) are refused.** A tag can be force-moved by the plugin's author after you've reviewed it; a commit SHA can't. `github:acme/some-plugin@main` fails the compiler with an explicit "floating ref refused" error before anything is cloned.
+</Aside>
+
+## Ordering & conflict semantics
+
+The compiler is deterministic: given the same `autoducks.json` and the same plugin packages, it produces byte-identical output every run.
+
+- **Declared array order, applied symmetrically to pre and post.** When two plugins both contribute a hook point (e.g. `developer-pre`), their steps appear in the generated aggregator in the order they're listed in `plugins[]` — first-declared runs first. That ordering is the same for a plugin's `-pre` and `-post` contributions; a post hook doesn't reverse the pre-hook order the way a call stack unwinds.
+- **One step per contributor, in an aggregator action.** For every hook point at least one plugin (or a local contribution, see below) targets, the compiler generates `.github/actions/autoducks/<point>/action.yml` — a composite action whose steps `uses:` each contributor's `hooks/<point>/action.yml` in turn, forwarding the same [environment contract](/guides/customization#environment-contract) documented for hand-authored hooks — including the per-agent extras (`BASE_BRANCH`, `IS_PR`, `AGENT_OUTCOME`, `COMMENT_ISSUE_NUM`, `DRY_RUN`) that only some agents/stages set; forwarding an unset var is a no-op, so a plugin hook sees the exact same environment a hand-authored hook at that point would.
+- **Duplicate plugin names are rejected.** Two `plugins[]` entries with the same `name` hard-fail before anything is compiled.
+- **A plugin may freely override a base-defined `mcpServers`/`env` value; two plugins may not disagree with each other.** Conflict detection is plugin-vs-plugin only — it never seeds from the repository's base `.autoducks/providers/llm/claude/settings.json`. A plugin registering an MCP server name or `env.SOME_KEY` that the base already defines silently layers over the base value (per the merge-patch rule below). If **two plugins** targeting the same agent register the same MCP server name, or set `env.SOME_KEY` to *different* values, the compiler refuses — the same key set to the same value by multiple plugins is fine.
+- **A plugin can never set `model`.** `claude/settings.patch.json` containing a `"model"` key hard-fails the compiler outright — plugins extend permissions, env, and MCP servers, not the model an agent runs on.
+- **`mcpServers` and `hooks` in `settings.patch.json` are ignored.** Those keys have dedicated, conflict-checked channels (`claude/mcp.json`, `claude/hooks.json` — see below); putting them in `settings.patch.json` instead doesn't reach the compiled settings, so they can't bypass conflict detection via a silent last-writer-wins or replace a `hooks` event array outright instead of concatenating onto it.
+- **Everything else in `settings.patch.json` merges as a JSON merge-patch**, layered on top of the repository's base `.autoducks/providers/llm/claude/settings.json` (or `{}` if that file doesn't exist), in declared plugin order — this includes `env`, which is deep-merged key-by-key with later plugins' values taking precedence over the base's.
+- **`allowedTools` unions.** Every targeting plugin's `allowedTools` are combined, deduplicated, and sorted into `.autoducks/providers/llm/claude/compiled/<agent>.allowed-tools` — a delta the claude provider action unions with the agent's own built-in tool list at run time.
+
+## The `@local` relocation rule
+
+A hook point can have at most one owner: either a hand-authored `.github/actions/autoducks/<point>/action.yml`, or plugin-contributed steps (one or more), never both. If a plugin declares a hook for a point where a hand-authored action already exists, the compiler refuses immediately:
+
+```
+apply-plugins: hook point 'developer-post' has a hand-authored action at
+.github/actions/autoducks/developer-post/action.yml that a plugin also
+targets — relocate it into .autoducks/plugins/@local/hooks/developer-post/
+before enabling plugins for this hook point (never auto-migrated)
+```
+
+To keep your own hand-written steps at that hook point *and* enable a plugin there, move your action to `.autoducks/plugins/@local/hooks/<point>/action.yml` — the compiler treats `@local` as an implicit first-class contributor, always ordered before the declared `plugins[]` array, and folds it into the same generated aggregator. This relocation is never automatic — the compiler only ever refuses and tells you where to move the file, so you consciously opt in to composing your local steps with a plugin's rather than accidentally losing one.
+
+A hand-authored hook at a point **no** plugin touches is left completely untouched — no relocation needed until a plugin actually wants that same point.
+
+## Compiling a repository's plugins
+
+[`.autoducks/core/config/apply-plugins.sh`](https://github.com/deepducks/autoducks/blob/main/.autoducks/core/config/apply-plugins.sh) reads `autoducks.json`'s `plugins[]`, resolves and validates every package, and regenerates three kinds of artifact wholesale:
+
+1. Aggregator hook actions at `.github/actions/autoducks/<point>/action.yml`.
+2. Per-agent compiled Claude settings at `.autoducks/providers/llm/claude/compiled/<agent>.settings.json`.
+3. Per-agent tool-grant deltas at `.autoducks/providers/llm/claude/compiled/<agent>.allowed-tools`.
+
+```bash
+bash .autoducks/core/config/apply-plugins.sh
+```
+
+It's idempotent — re-running it with no config changes produces byte-identical output — and it's meant to be re-run (and the resulting diff committed) any time `plugins[]` or a vendored package changes, the same way you'd re-run a lockfile installer.
+
+### Checking for drift
+
+Pass `--output-root DIR` (or set `AUTODUCKS_APPLY_PLUGINS_OUTPUT_ROOT=DIR`) to compute every artifact under `DIR` instead of writing into the live tree:
+
+```bash
+bash .autoducks/core/config/apply-plugins.sh --output-root /tmp/plugins-check
+diff -r /tmp/plugins-check/.github/actions/autoducks .github/actions/autoducks
+diff -r /tmp/plugins-check/.autoducks/providers/llm/claude/compiled \
+        .autoducks/providers/llm/claude/compiled
+```
+
+This is the same "recompute and diff" shape as [`setup.sh` check 9](/guides/customization#why-you-cant-edit-the-shipped-files-directly) uses to catch drifted runtime workflows — a clean diff means the committed artifacts still match what `plugins[]` and the vendored packages declare. Ownership checks (the `@local` relocation rule) always read the real committed files even in dry-run mode, since a collision is about what a real run would refuse to do.
+
+### Update survival
+
+An `install.sh` update overwrites the whole `.autoducks/` tree and restores `autoducks.json`, `claude/settings.json`, and `.autoducks/custom/` from a stash — see the [update-survival table](/guides/customization#the-update-survival-guarantee). `.autoducks/plugins/` and `.autoducks/providers/llm/claude/compiled/` are **not** in that stash: a `github:`-sourced plugin's clone and every compiled artifact are wiped by an update. Re-run `apply-plugins.sh` after updating to re-clone pinned sources and regenerate compiled output. A `./relative-path` source that lives outside `.autoducks/` (e.g. `./examples/plugins/...` or your own top-level `plugins/` directory) isn't touched by the update at all.
+
+## Trust model
+
+<Aside type="caution">
+**Installing a plugin means trusting its author with your CI token.** Every plugin hook step and MCP server runs inside the same GitHub Actions job as the agent it targets, with the same `GH_TOKEN` and repository checkout — there is no additional sandboxing beyond what the workflow itself has. Read every `hooks/*/action.yml`, `claude/mcp.json`, and `claude/hooks.json` in a package before enabling it, the same way you'd review any other CI change.
+</Aside>
+
+Two design choices exist specifically to make that review possible instead of opaque:
+
+- **Vendoring, not fetch-at-run-time.** A `github:` source is cloned once, at compile time, to `.autoducks/plugins/<name>` — a real directory under version control in your repo, diffable in a PR, not code fetched fresh on every workflow run. A relative-path source is even more direct: it's just a directory already in your tree.
+- **Pinned commits, not floating refs.** As covered above, `github:` sources require a full 40-character commit SHA. What you reviewed is exactly what runs, on every subsequent run, until you deliberately bump the pin.
+
+Neither of these substitutes for actually reading the package. A pinned commit is still whatever code that commit contains.
+
+## Schema evolution: why `schemaVersion` exists
+
+`schemaVersion: 1` is a required field, and today it's the only value the compiler accepts. Its purpose is forward-looking: pinning the manifest shape a plugin is written against means a future compiler version can introduce `schemaVersion: 2` with a different or extended manifest contract, keep validating `schemaVersion: 1` packages under the old rules, and give plugin authors an explicit, versioned migration path instead of silently changing what a manifest field means underneath existing packages. A plugin manifest is a contract between the package and the compiler version reading it — `schemaVersion` is how that contract stays honest as the plugin system grows.
+
+## Reference plugin
+
+`examples/plugins/playwright-browser/` is a real, working package — not enabled by default — that exercises the two plugin capabilities end to end:
+
+- **Workflow step injection + MCP/tools**: `hooks/developer-pre/action.yml` installs a Chromium toolchain before the Developer agent runs; `claude/mcp.json` registers a Playwright MCP server; `allowedTools` grants the `mcp__playwright__*` tools needed to drive it.
+- **A Claude Code hook**: `claude/hooks.json` registers a `PreToolUse` hook that logs every `mcp__playwright__*` tool call.
+
+Its [`README.md`](https://github.com/deepducks/autoducks/blob/main/examples/plugins/playwright-browser/README.md) walks through exactly what enabling it grants and how to enable it — read it end to end before writing your own plugin from scratch, or use the package directly as a starting point.
+
+## See also
+
+[Customizing workflows and prompts](/guides/customization) covers the same three primitives — hooks, prompt overrides, and Claude settings — as they work without any plugin involved: hand-authored, single-repository, `install.sh`-preserved. Reach for a plugin when you want to package, version, and share one of those customizations across repositories instead of hand-authoring it locally in each one.

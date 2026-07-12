@@ -86,5 +86,6 @@
       "product":   { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
       "merge":     { "trusted_associations": ["OWNER", "MEMBER"] }
     }
-  }
+  },
+  "plugins": []
 }

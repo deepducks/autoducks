@@ -1,0 +1,16 @@
+name: 'Install Playwright'
+description: 'Set up a Chromium browser toolchain before the Developer agent runs'
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    - name: Install Playwright
+      shell: bash
+      run: npx --yes playwright install --with-deps chromium
+    - name: Log context
+      shell: bash
+      run: |
+        echo "[playwright-browser] preparing $AUTODUCKS_AGENT/$AUTODUCKS_STAGE for issue $ISSUE_NUM on $REPO (run $RUN_ID)"

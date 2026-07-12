@@ -1,0 +1,170 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://autoducks.dev/schemas/plugin.schema.json",
+  "title": "autoducks plugin manifest (plugin.json)",
+  "description": "Contract for a plugin package's plugin.json manifest. There is no ajv/jsonschema tooling in this repo: this file is a machine-readable reference that the shell validators (core/config/load-config.sh, core/config/resolve-prompt.sh, setup.sh) check field-by-field with jq, plus a shared reference for the on-disk package layout every downstream task builds against:\n  hooks/<agent>-<stage>/action.yml        - one dir per hook point, see $defs.hookPoint for the 24 valid names\n  prompts/instructions.md                 - global prompt fragment, injected when prompts.global is true\n  prompts/agents/<agent>/instructions.md  - per-agent prompt fragment, injected when <agent> is listed in prompts.agents\n  claude/mcp.json                         - MCP server definitions; names referenced by mcpServers\n  claude/hooks.json                       - Claude Code hook definitions; events referenced by claudeHooks\n  claude/settings.patch.json              - settings merge patch applied on top of the base claude/settings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "name", "version"],
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "description": "Manifest schema version. Only 1 exists today."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "description": "Kebab-case, unique plugin identifier, e.g. \"playwright-browser\". Must match [a-z0-9-]."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$",
+      "description": "The plugin's own semver version, e.g. \"1.2.0\"."
+    },
+    "description": {
+      "type": "string",
+      "description": "One-line human-readable summary of what the plugin does."
+    },
+    "author": {
+      "type": "string",
+      "description": "Plugin author or organization, e.g. \"acme\"."
+    },
+    "homepage": {
+      "type": "string",
+      "format": "uri",
+      "description": "Canonical URL for the plugin's source/docs, e.g. its repository."
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX license identifier, e.g. \"MIT\"."
+    },
+    "autoducksVersion": {
+      "type": "string",
+      "pattern": "^(>=|<=|>|<|=)?\\d+\\.\\d+\\.\\d+$",
+      "description": "Compat gate against the host autoducks.json top-level \"version\", e.g. \">=0.4.0\". Optional comparison operator (>=, <=, >, <, =) followed by a semver triple; no operator means exact match."
+    },
+    "targets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/llmAgent" },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Subset of the 9 LLM-backed agents (see $defs.llmAgent) this plugin scopes its claude/ + prompts/ contributions to. Omit this field entirely to target all 9 agents."
+    },
+    "hooks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/hookPoint" },
+      "uniqueItems": true,
+      "description": "Hook points this plugin contributes, each of which must have a matching hooks/<agent>-<stage>/action.yml directory in the package. Must be drawn from the 24 valid <agent>-<stage> names in $defs.hookPoint."
+    },
+    "prompts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "global": {
+          "type": "boolean",
+          "description": "When true, prompts/instructions.md is injected into every targeted agent's context."
+        },
+        "agents": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/llmAgent" },
+          "uniqueItems": true,
+          "description": "Agents for which prompts/agents/<agent>/instructions.md is injected. Each entry must be one of the 9 LLM agents in $defs.llmAgent, and a corresponding prompts/agents/<agent>/instructions.md file must exist in the package."
+        }
+      },
+      "description": "Prompt contributions. Both fields are optional; omit the whole object if the plugin contributes no prompt text."
+    },
+    "mcpServers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]+$"
+      },
+      "uniqueItems": true,
+      "description": "MCP server names this plugin registers. Each name must match an entry in the package's claude/mcp.json."
+    },
+    "claudeHooks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/claudeHookEvent" },
+      "uniqueItems": true,
+      "description": "Claude Code hook lifecycle events this plugin wires up. Each event must match an entry in the package's claude/hooks.json."
+    },
+    "allowedTools": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "uniqueItems": true,
+      "description": "Tool names (built-in or mcp__<server>__<tool>) this plugin needs allow-listed in the host's claude settings."
+    },
+    "requiresSecrets": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9_]*$"
+      },
+      "uniqueItems": true,
+      "description": "Advisory-only list of environment/secret names the plugin expects the host repository to provide (e.g. for its MCP servers or hooks). Not enforced by the loader."
+    },
+    "configSchema": {
+      "type": "object",
+      "description": "A JSON Schema fragment (typically { \"type\": \"object\", \"properties\": {...} }) describing the shape of the enablement entry's \"config\" object in autoducks.json's plugins[] array. Validated field-by-field by the shell loader, not by a JSON Schema engine."
+    }
+  },
+  "$defs": {
+    "llmAgent": {
+      "type": "string",
+      "description": "One of the 9 LLM-backed agents: architect, engineer, developer, reviewer, fix, resolver, rework, defer, product. (The remaining pipeline/utility agents - close, close-guard, maestro, revert - are pure orchestration and never run an LLM step, so they are not valid targets/prompts.agents entries.)",
+      "enum": ["architect", "engineer", "developer", "reviewer", "fix", "resolver", "rework", "defer", "product"]
+    },
+    "hookPoint": {
+      "type": "string",
+      "description": "One of the 24 valid <agent>-<stage> hook-point names: the 12 pipeline/utility agents (architect, close, defer, developer, engineer, fix, maestro, product, resolver, revert, reviewer, rework) each crossed with the 2 stages every agent workflow runs (pre, post - matching that agent's pre.sh/post.sh hand-off points, or the equivalent boundary in the agents that ship a single run.sh). close-guard is an internal guard step, not an addressable hook point.",
+      "enum": [
+        "architect-pre", "architect-post",
+        "close-pre", "close-post",
+        "defer-pre", "defer-post",
+        "developer-pre", "developer-post",
+        "engineer-pre", "engineer-post",
+        "fix-pre", "fix-post",
+        "maestro-pre", "maestro-post",
+        "product-pre", "product-post",
+        "resolver-pre", "resolver-post",
+        "revert-pre", "revert-post",
+        "reviewer-pre", "reviewer-post",
+        "rework-pre", "rework-post"
+      ]
+    },
+    "claudeHookEvent": {
+      "type": "string",
+      "description": "A Claude Code hook lifecycle event name, as used in claude/hooks.json.",
+      "enum": [
+        "PreToolUse", "PostToolUse", "Notification", "UserPromptSubmit",
+        "Stop", "SubagentStop", "PreCompact", "SessionStart", "SessionEnd"
+      ]
+    },
+    "sourceGrammar": {
+      "description": "Grammar for the \"source\" field of a plugins[] enablement entry in autoducks.json (see $defs.enablementEntry). Exactly one form: a vendored on-disk path (\"./relative/path\" or \".autoducks/plugins/<name>\"), or \"github:owner/repo@ref\" with the @ref required (floating/unpinned refs are refused), or the registry:name@version form reserved for a future package registry.",
+      "type": "string",
+      "pattern": "^(\\./.+|\\.autoducks/plugins/[a-z0-9-]+|github:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[^\\s]+|registry:[a-z0-9-]+@[^\\s]+)$"
+    },
+    "enablementEntry": {
+      "description": "Shape of one entry in autoducks.json's top-level \"plugins\" array (the enablement contract, distinct from the plugin.json manifest validated by the root of this schema).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "source"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$",
+          "description": "Must match the \"name\" in the referenced plugin's plugin.json."
+        },
+        "source": { "$ref": "#/$defs/sourceGrammar" },
+        "config": {
+          "type": "object",
+          "description": "Plugin-specific configuration, validated against that plugin's configSchema."
+        }
+      }
+    }
+  }
+}

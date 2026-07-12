@@ -83,6 +83,7 @@ export default defineConfig({
             { label: 'Re-running agents', slug: 'guides/re-running-agents' },
             { label: 'When things fail', slug: 'guides/when-things-fail' },
             { label: 'Customization', slug: 'guides/customization' },
+            { label: 'Plugins', slug: 'guides/plugins' },
             { label: 'Migrating from /agents', slug: 'guides/migrating-from-agents' },
           ],
         },

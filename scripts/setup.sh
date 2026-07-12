@@ -24,6 +24,9 @@
 #   9. Runtime workflow sync — verifies .autoducks/runtimes match .github/workflows
 #  10. Reviewer required-check ruleset — when reviewer.required_check=true, requires
 #      the reviewer Check on the integration/base branch (needs repo admin)
+#  11. Plugin compilation sync — recomputes apply-plugins.sh's output and diffs it
+#      against the committed aggregators/compiled/* artifacts; validates each
+#      enabled plugin's manifest, config, and version gate; surfaces requiresSecrets
 # =============================================================================
 
 set -euo pipefail
@@ -64,7 +67,7 @@ echo "=== Setup check for $REPO ==="
 echo ""
 
 # --- Check 1: gh CLI auth ---
-echo "[1/10] GitHub CLI authentication"
+echo "[1/11] GitHub CLI authentication"
 if gh auth status &>/dev/null; then
   pass "gh CLI is authenticated"
 else
@@ -74,7 +77,7 @@ fi
 echo ""
 
 # --- Check 2: Labels ---
-echo "[2/10] Required labels"
+echo "[2/11] Required labels"
 LABELS=("Feature|6F42C1|Orchestration feature issue"
         "Bug|D73A4A|Autoducks bug pipeline"
         "Task|1D76DB|Autoducks task issue"
@@ -107,7 +110,7 @@ done
 echo ""
 
 # --- Check 3: Secret ---
-echo "[3/10] Required secrets"
+echo "[3/11] Required secrets"
 if gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null | grep -qx "ANTHROPIC_API_KEY"; then
   pass "Secret ANTHROPIC_API_KEY is configured"
 else
@@ -119,7 +122,7 @@ fi
 echo ""
 
 # --- Check 4: Actions permissions ---
-echo "[4/10] Actions workflow permissions"
+echo "[4/11] Actions workflow permissions"
 PERMS=$(gh api "repos/$REPO/actions/permissions/workflow" --jq '.default_workflow_permissions + "|" + (.can_approve_pull_request_reviews | tostring)' 2>/dev/null || echo "")
 
 if [[ -z "$PERMS" ]]; then
@@ -135,7 +138,7 @@ fi
 echo ""
 
 # --- Check 5: Claude Code GitHub App ---
-echo "[5/10] Claude Code GitHub App"
+echo "[5/11] Claude Code GitHub App"
 # There is no public API to list installations on a repo without proper auth.
 # Best we can do is check if the workflows can authenticate — which only happens at runtime.
 manual "Verify the Claude Code GitHub App is installed on this repository
@@ -145,7 +148,7 @@ manual "Verify the Claude Code GitHub App is installed on this repository
 echo ""
 
 # --- Check 6: Sub-issues API availability ---
-echo "[6/10] Sub-issues API availability"
+echo "[6/11] Sub-issues API availability"
 # Probe against an arbitrary issue in the repo. If the repo has zero issues,
 # the check is inconclusive — report a soft manual item.
 FIRST_ISSUE=$(gh issue list $REPO_ARG --state all --limit 1 --json number \
@@ -175,7 +178,7 @@ echo ""
 # Issue types are an org-level feature. Workflows degrade gracefully if
 # types aren't configured — the type parameter is silently ignored by the
 # API. But without them, typed feature/task relationships don't render.
-echo "[7/10] Issue types (Feature, Task)"
+echo "[7/11] Issue types (Feature, Task)"
 ORG=$(echo "$REPO" | cut -d/ -f1)
 TYPES_JSON=$(gh api "orgs/$ORG/issue-types" 2>/dev/null || echo "")
 if [[ -z "$TYPES_JSON" ]]; then
@@ -204,7 +207,7 @@ echo ""
 # --- Check 8: Public-repo security ---
 VISIBILITY=$(gh repo view "$REPO" --json visibility --jq '.visibility' 2>/dev/null || echo "")
 if [[ "$VISIBILITY" == "PUBLIC" ]]; then
-  echo "[8/10] Public-repo security posture"
+  echo "[8/11] Public-repo security posture"
   HAS_SEC=$(jq -r '.security != null' .autoducks/autoducks.json 2>/dev/null || echo "false")
   if [[ "$HAS_SEC" == "true" ]]; then
     pass "security block present in .autoducks/autoducks.json"
@@ -217,7 +220,7 @@ if [[ "$VISIBILITY" == "PUBLIC" ]]; then
 fi
 
 # --- Check 9: Runtime sync ---
-echo "[9/10] Runtime workflow sync"
+echo "[9/11] Runtime workflow sync"
 SYNC_OK=true
 for runtime in .autoducks/runtimes/github-actions/autoducks-*.yml; do
   bn=$(basename "$runtime")
@@ -239,7 +242,7 @@ echo ""
 # Opt-in (reviewer.required_check=true). Requires the reviewer's Check-run on
 # the integration/base branch so a request-changes verdict blocks the merge.
 # Uses the operator's own gh admin credentials (no stored PAT) and is idempotent.
-echo "[10/10] Reviewer required-check ruleset"
+echo "[10/11] Reviewer required-check ruleset"
 REQUIRED_CHECK=$(jq -r '.reviewer.required_check // false' .autoducks/autoducks.json 2>/dev/null || echo "false")
 if [[ "$REQUIRED_CHECK" != "true" ]]; then
   pass "Reviewer required-check disabled (reviewer.required_check=false) — nothing to enforce"
@@ -280,6 +283,80 @@ Re-run setup.sh with an admin token, or set the '$CHECK_NAME' required check on 
 Require the '$CHECK_NAME' status check on '$GATE_BRANCH' via Settings → Rules, or re-run setup.sh with an admin token."
     fi
   fi
+fi
+echo ""
+
+# --- Check 11: Plugin compilation sync ---
+# Mirrors check 9's diff-based drift detection, but for the plugin compiler:
+# recompute every artifact into a scratch dir via apply-plugins.sh's dry-run
+# interface (AUTODUCKS_APPLY_PLUGINS_OUTPUT_ROOT) and diff it against the
+# committed aggregators/compiled/* files. The compiler itself performs manifest,
+# configSchema, version-gate, and merge-conflict/collision validation and dies
+# with an actionable message on any of those — we just surface that failure.
+echo "[11/11] Plugin compilation sync"
+COMPILER=".autoducks/core/config/apply-plugins.sh"
+if [[ ! -f "$COMPILER" ]]; then
+  manual "Plugin compiler not found at $COMPILER — skipping plugin compilation sync"
+else
+  DRYRUN_ROOT="$(mktemp -d)"
+  COMPILE_LOG="$(mktemp)"
+  if AUTODUCKS_APPLY_PLUGINS_OUTPUT_ROOT="$DRYRUN_ROOT" bash "$COMPILER" >"$COMPILE_LOG" 2>&1; then
+    SYNC_OK=true
+
+    # Every recomputed artifact must match its committed counterpart byte-for-byte.
+    while IFS= read -r -d '' f; do
+      rel="${f#"$DRYRUN_ROOT"/}"
+      if [[ ! -f "$rel" ]]; then
+        fail "Plugin artifact missing from repo: $rel is produced by plugins[] but not committed (run: bash $COMPILER)"
+        SYNC_OK=false
+      elif ! diff -q "$f" "$rel" &>/dev/null; then
+        fail "Stale plugin artifact: $rel is out of sync with plugins[] (run: bash $COMPILER)"
+        SYNC_OK=false
+      fi
+    done < <(find "$DRYRUN_ROOT" -type f -print0)
+
+    # A committed generated artifact with no recomputed counterpart is orphaned
+    # (e.g. a plugin/hook was removed from plugins[] but never recompiled).
+    for agg in .github/actions/autoducks/*/action.yml; do
+      [[ -f "$agg" ]] || continue
+      head -n1 "$agg" | grep -qF "GENERATED BY autoducks apply-plugins.sh" || continue
+      if [[ ! -f "$DRYRUN_ROOT/$agg" ]]; then
+        fail "Stale plugin artifact: $agg is committed but no longer produced by plugins[] (run: bash $COMPILER)"
+        SYNC_OK=false
+      fi
+    done
+    for f in .autoducks/providers/llm/claude/compiled/*.settings.json .autoducks/providers/llm/claude/compiled/*.allowed-tools; do
+      [[ -f "$f" ]] || continue
+      if [[ ! -f "$DRYRUN_ROOT/$f" ]]; then
+        fail "Stale plugin artifact: $f is committed but no longer produced by plugins[] (run: bash $COMPILER)"
+        SYNC_OK=false
+      fi
+    done
+
+    if [[ "$SYNC_OK" == "true" ]]; then
+      pass "Plugin compiler output matches committed artifacts"
+    fi
+
+    # Surface each enabled plugin's requiresSecrets as a manual checklist item.
+    while IFS= read -r entry; do
+      pname="$(jq -r '.name' <<< "$entry")"
+      psource="$(jq -r '.source' <<< "$entry")"
+      case "$psource" in
+        ./*) pdir="${psource#./}" ;;
+        .autoducks/plugins/*) pdir="$psource" ;;
+        github:*) pdir=".autoducks/plugins/$pname" ;;
+        *) pdir="" ;;
+      esac
+      if [[ -n "$pdir" && -f "$pdir/plugin.json" ]]; then
+        secrets="$(jq -r '.requiresSecrets // [] | join(", ")' "$pdir/plugin.json")"
+        [[ -n "$secrets" ]] && manual "Plugin '$pname' requires secrets: $secrets — verify they are configured (gh secret set <NAME> $REPO_ARG)"
+      fi
+    done < <(jq -c '.plugins // [] | .[]' .autoducks/autoducks.json 2>/dev/null || true)
+  else
+    fail "Plugin compiler failed — a plugin manifest, config, or merge is invalid: $(tail -n 3 "$COMPILE_LOG" | tr '\n' ' ')"
+  fi
+  rm -rf "$DRYRUN_ROOT"
+  rm -f "$COMPILE_LOG"
 fi
 echo ""
 
