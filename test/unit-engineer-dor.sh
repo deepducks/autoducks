@@ -37,6 +37,7 @@ run_pre() { # $1 = issue json file; env passthrough via TEST_* vars
   export GH_LOG="$SCRATCH/gh.log"
   : > "$GH_LOG"
   export MOCK_ISSUE_FILE="$1"
+  : > "$SCRATCH/gh_env"
   RC=0
   (
     cd "$SCRATCH"     # /tmp markers are global; cwd only matters for nothing else
@@ -44,6 +45,7 @@ run_pre() { # $1 = issue json file; env passthrough via TEST_* vars
     GITHUB_ACTIONS=true \
     ISSUE_NUM=10 REPO=x/y RUN_ID=999 COMMENT_ID=555 COMMENTER=alice \
     GITHUB_OUTPUT="$SCRATCH/gh_output" \
+    GITHUB_ENV="$SCRATCH/gh_env" \
     RUNNER_TEMP="$SCRATCH" GITHUB_RUN_ID=dortest \
     AUTO_CHAIN="${TEST_AUTO_CHAIN:-}" COMMAND="${TEST_COMMAND:-}" \
     GH_TOKEN=t \
@@ -156,6 +158,25 @@ run_pre "$SCRATCH/issue-revision.json"
 [[ "$RC" -eq 0 ]] && pass "revision pre exits 0" || fail "rc=$RC"
 # IS_REVISION is persisted via GITHUB_ENV when set; we can only assert no crash
 # here — the flag propagation is covered by the workflow env contract.
+
+rm -f /tmp/autoducks-pre-failed /tmp/autoducks-dor-delegated /tmp/autoducks-status-comment-id
+
+# A prior Architect re-design clears Tactics:done (bug #880) but the tactical
+# zone still lists the tasks — the Engineer must still detect a revision and
+# capture OLD_NUMBERS, else those tasks get orphaned (#1026).
+echo "── revision detected via tactical-zone refs when Tactics:done is absent (#1026) ──"
+cat > "$SCRATCH/issue-refs.json" <<'JSON'
+{"title": "Add search", "body": "Design text.\n\n<!-- autoducks:tactical:begin -->\n## Plan\n\n```yaml\nwaves:\n  - name: W1\n    tasks: [863, 870]\n```\n<!-- autoducks:tactical:end -->", "labels": ["Design:done", "Feature"], "author": "alice"}
+JSON
+run_pre "$SCRATCH/issue-refs.json"
+[[ "$RC" -eq 0 ]] && pass "refs-revision: pre exits 0" || fail "refs-revision: rc=$RC"
+grep -qx 'IS_REVISION=true' "$SCRATCH/gh_env" \
+  && pass "refs-revision: IS_REVISION=true even without Tactics:done" \
+  || fail "refs-revision: IS_REVISION not true: $(cat "$SCRATCH/gh_env" 2>/dev/null)"
+_old=$(grep '^OLD_NUMBERS=' "$SCRATCH/gh_env" | head -1)
+[[ "$_old" == *863* && "$_old" == *870* ]] \
+  && pass "refs-revision: OLD_NUMBERS captured the tactical-zone task refs" \
+  || fail "refs-revision: OLD_NUMBERS missing refs: $_old"
 
 rm -f /tmp/autoducks-pre-failed /tmp/autoducks-dor-delegated /tmp/autoducks-status-comment-id
 
