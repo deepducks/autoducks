@@ -39,7 +39,7 @@
   <header class="panel__header" style={`--accent:${color}`}>
     <span class="panel__title">{panel.title}</span>
     <span class="panel__badge" title="in progress / done">
-      {panel.progress.length}/{panel.done.length}
+      {panel.progress.length}{panel.changes.length > 0 ? `/${panel.changes.length}` : ''}/{panel.done.length}
     </span>
   </header>
 
@@ -58,6 +58,16 @@
       {ondragstartcard}
       {ondragendcard}
     />
+    {#if panel.id === 'review'}
+      <Lane
+        panel={panel.id}
+        lane="changes"
+        issues={panel.changes}
+        {pending}
+        {ondragstartcard}
+        {ondragendcard}
+      />
+    {/if}
     <Lane
       panel={panel.id}
       lane="done"
