@@ -42,8 +42,7 @@ export interface CheckResult {
 
 /**
  * Re-export point for the `.autoducks/autoducks.json` config shape, owned
- * by the config engine task. Left as `unknown` until that task lands so
- * other modules can reference `AutoducksConfig` without a circular task
- * dependency.
+ * by `core/config.ts` — other modules should import `AutoducksConfig` from
+ * here rather than reaching into `core/config.js` directly.
  */
-export type AutoducksConfig = Record<string, unknown>;
+export type { AutoducksConfig } from './core/config.js';
