@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Unit tests for .autoducks/core/orchestration/review-loop.sh —
 # review_loop::iteration / ::decide / ::record, the marker-anchored
-# reviewer request-changes round tracker. its::list_comments /
+# reviewer request-changes round tracker, plus the SHA-less duplicate-event
+# fallback review_loop::rework_inflight / ::already_dispatched (Task #1045 /
+# ggondim's PR #1038 review, empty-PR_HEAD_SHA case). its::list_comments /
 # its::comment_issue / its::update_comment are mocked against an in-memory
-# JSON comment store so no network/gh access is needed. Same style as
+# JSON comment store, and its::list_sub_issues / its::get_issue against an
+# in-memory sub-issue store, so no network/gh access is needed. Same style as
 # test/unit-fold-duplicate.sh and test/unit-delivery-phase.sh.
 # Run: bash test/unit-review-loop.sh
 set -euo pipefail
@@ -42,6 +45,32 @@ its::update_comment() {
   jq --arg id "$comment_id" --arg body "$body" \
     'map(if (.id | tostring) == $id then .body = $body | .updated_at = "t1" else . end)' \
     "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+}
+
+# ── Fake sub-issue store (JSON array of {number, state}) + per-number bodies ──
+SUB_STORE=$(mktemp)
+SUB_BODIES=$(mktemp)
+reset_sub_store() { echo '[]' > "$SUB_STORE"; echo '{}' > "$SUB_BODIES"; }
+reset_sub_store
+
+its::list_sub_issues() {
+  cat "$SUB_STORE"
+}
+
+its::get_issue() {
+  local issue_id="$1"
+  local body
+  body=$(jq -r --arg n "$issue_id" '.[$n] // ""' "$SUB_BODIES")
+  jq -n --arg body "$body" '{title: "", body: $body, labels: [], author: "bot"}'
+}
+
+# seed_sub_issue NUM STATE BODY
+seed_sub_issue() {
+  local tmp; tmp=$(mktemp)
+  jq --arg n "$1" --arg s "$2" '. + [{number: ($n | tonumber), title: "rework", state: $s}]' \
+    "$SUB_STORE" > "$tmp" && mv "$tmp" "$SUB_STORE"
+  tmp=$(mktemp)
+  jq --arg n "$1" --arg b "$3" '. + {($n): $b}' "$SUB_BODIES" > "$tmp" && mv "$tmp" "$SUB_BODIES"
 }
 
 # shellcheck source=/dev/null
@@ -152,6 +181,64 @@ else
 fi
 
 rm -f "$STORE"
+
+echo "── review_loop::rework_inflight ──"
+reset_sub_store
+if ! review_loop::rework_inflight 42; then
+  pass "false when there are no sub-issues at all"
+else
+  fail "expected false with no sub-issues"
+fi
+
+seed_sub_issue 900 closed "<!-- autoducks:rework: feature=42 pr=7 since=t0 -->"
+if ! review_loop::rework_inflight 42; then
+  pass "false when the only matching sub-issue is closed"
+else
+  fail "expected false for a closed-only match"
+fi
+
+seed_sub_issue 901 open "<!-- autoducks:rework: feature=42 pr=7 since=t0 -->"
+if review_loop::rework_inflight 42; then
+  pass "true when an open sub-issue carries the feature's rework marker"
+else
+  fail "expected true with an open matching sub-issue"
+fi
+
+reset_sub_store
+seed_sub_issue 902 open "<!-- autoducks:rework: feature=99 pr=7 since=t0 -->"
+if ! review_loop::rework_inflight 42; then
+  pass "false when the open sub-issue belongs to a different feature"
+else
+  fail "cross-feature rework sub-issue leaked"
+fi
+
+echo "── review_loop::already_dispatched ──"
+reset_store
+reset_sub_store
+if ! review_loop::already_dispatched 42 7 0; then
+  pass "false on a genuinely first round (no marker ahead, no rework in flight)"
+else
+  fail "expected false for a legitimate first round"
+fi
+
+reset_store
+review_loop::record 42 7 1
+if review_loop::already_dispatched 42 7 0; then
+  pass "true when the marker already recorded the round this call would record"
+else
+  fail "expected true when the marker is already at iteration+1"
+fi
+
+reset_store
+reset_sub_store
+seed_sub_issue 903 open "<!-- autoducks:rework: feature=42 pr=7 since=t0 -->"
+if review_loop::already_dispatched 42 7 0; then
+  pass "true when an in-flight rework sub-issue exists, even with the marker untouched"
+else
+  fail "expected true via the rework-sub-issue fallback"
+fi
+
+rm -f "$SUB_STORE" "$SUB_BODIES"
 
 echo ""
 echo "═══ review-loop: $PASS passed, $FAIL failed ═══"
