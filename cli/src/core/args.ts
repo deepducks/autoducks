@@ -15,7 +15,7 @@ export interface ParsedArgv {
 export function parseArgv(argv: string[]): ParsedArgv {
   const parsed = mri(argv, {
     string: ['repo', 'version'],
-    boolean: ['no-input', 'yes', 'help'],
+    boolean: ['yes', 'help'],
     alias: { h: 'help' },
   });
 
@@ -27,7 +27,10 @@ export function parseArgv(argv: string[]): ParsedArgv {
     options: {
       repo: typeof parsed.repo === 'string' ? parsed.repo : undefined,
       version: typeof parsed.version === 'string' ? parsed.version : undefined,
-      noInput: Boolean(parsed['no-input']),
+      // mri rewrites `--no-input` into `{ input: false }` rather than
+      // `{ 'no-input': true }`, regardless of the boolean list — detect the
+      // flag off that negation instead of a literal `no-input` key.
+      noInput: parsed.input === false,
       yes: Boolean(parsed.yes),
       help: Boolean(parsed.help),
     },
