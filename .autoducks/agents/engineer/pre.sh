@@ -113,16 +113,27 @@ else
   : > /tmp/tactical-zone-current.md
 fi
 
-if [[ "$IS_REVISION" == "true" ]]; then
-  # Get existing task numbers from YAML block in the tactical zone
-  YAML_BLOCK=$(awk '/^```yaml[[:space:]]*$/{flag=1;next}/^```[[:space:]]*$/{flag=0}flag' /tmp/tactical-zone-current.md)
-  OLD_NUMBERS=""
-  if [[ -n "$YAML_BLOCK" ]]; then
-    OLD_NUMBERS=$(tactical_zone::task_refs "$YAML_BLOCK" | tr '\n' ' ')
-  fi
+# Existing task numbers referenced in the tactical zone's YAML wave block.
+# tactical_zone::task_refs returns only real issue numbers (Tn placeholders are
+# filtered out). Extracted UNCONDITIONALLY: a prior Architect re-design clears
+# Tactics:done (bug #880) while the tactical zone still lists the tasks, so
+# without this the superseded tasks are orphaned instead of closed (bug #1026).
+YAML_BLOCK=$(awk '/^```yaml[[:space:]]*$/{flag=1;next}/^```[[:space:]]*$/{flag=0}flag' /tmp/tactical-zone-current.md)
+OLD_NUMBERS=""
+if [[ -n "$YAML_BLOCK" ]]; then
+  OLD_NUMBERS=$(tactical_zone::task_refs "$YAML_BLOCK" | tr '\n' ' ')
+fi
+export OLD_NUMBERS
 
+# Revision mode: `Tactics:done` is the usual signal, but a tactical zone that
+# already references real task issues is an equally valid one — treat it as a
+# revision so those tasks get reconciled/closed rather than orphaned (#1026).
+if [[ -n "${OLD_NUMBERS// /}" ]]; then
+  IS_REVISION="true"
+fi
+
+if [[ "$IS_REVISION" == "true" ]]; then
   build_revision_context "$ISSUE_NUM" "$OLD_NUMBERS" /tmp/conversation.md
-  export OLD_NUMBERS
 
   # Surface the steering prompt explicitly: if the trigger comment falls
   # outside `build_revision_context`'s last-20-comments window, it would
