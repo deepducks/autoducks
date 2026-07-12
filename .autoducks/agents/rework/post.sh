@@ -45,15 +45,30 @@ if [[ "${LLM_SKIPPED:-}" == "true" ]]; then
 fi
 
 # Nothing actionable — the LLM judged the feedback already resolved or
-# purely informational. Green finish: no sub-issue, no draft flip, no
-# dispatch.
+# purely informational. A manual `/rework` finishes green here: no
+# sub-issue, no draft flip, no dispatch. A headless auto-loop dispatch
+# (workflow_dispatch with pr_number, no triggering comment — COMMENT_ID
+# defaults to "0") has no comment thread for a human to notice the outcome
+# on, and the PR is still blocked, so a silent green stop would strand it.
+# Fall back to the same human handoff the reviewer posts on request-changes.
 if [[ -f /tmp/rework-none.md ]]; then
   react_to_comment "${COMMENT_ID:-}" "+1"
-  status_comment::finish "$ISSUE_NUM" "**Nothing to rework.**
+  if [[ -z "${COMMENT_ID:-}" || "${COMMENT_ID:-0}" == "0" ]]; then
+    status_comment::finish "$ISSUE_NUM" "**Nothing to rework** — PR #$PR_NUM is still blocked.
+
+$(cat /tmp/rework-none.md)
+
+**Next:** run \`$(autoducks_command_for rework)\` to address the findings on this PR now,
+or \`$(autoducks_command_for defer)\` to save them as a follow-up issue and merge as-is.
+
+_Ran with \`${MODEL:-unknown}\` at effort \`${EFFORT:-unknown}\`._"
+  else
+    status_comment::finish "$ISSUE_NUM" "**Nothing to rework.**
 
 $(cat /tmp/rework-none.md)
 
 _Ran with \`${MODEL:-unknown}\` at effort \`${EFFORT:-unknown}\`._"
+  fi
   exit 0
 fi
 
