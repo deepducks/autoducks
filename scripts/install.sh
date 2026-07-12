@@ -72,6 +72,9 @@ fi
 if [[ -d ".autoducks/custom" ]]; then
   cp -R ".autoducks/custom" "$STASH_DIR/custom"
 fi
+if [[ -d ".autoducks/plugins" ]]; then
+  cp -R ".autoducks/plugins" "$STASH_DIR/plugins"
+fi
 
 rm -rf .autoducks
 cp -R "$TMP_DIR/.autoducks" .autoducks
@@ -86,6 +89,10 @@ fi
 if [[ -d "$STASH_DIR/custom" ]]; then
   rm -rf ".autoducks/custom"
   cp -R "$STASH_DIR/custom" ".autoducks/custom"
+fi
+if [[ -d "$STASH_DIR/plugins" ]]; then
+  rm -rf ".autoducks/plugins"
+  cp -R "$STASH_DIR/plugins" ".autoducks/plugins"
 fi
 
 rm -rf "$STASH_DIR"
@@ -130,6 +137,15 @@ if [[ -f ".autoducks/autoducks.json" ]] && [[ -f "scripts/update-triggers.sh" ]]
   echo ""
   echo "Applying custom trigger aliases..."
   bash scripts/update-triggers.sh
+fi
+
+# Compile plugins[] (autoducks.json) into aggregator hook actions and per-agent
+# Claude settings/tool-grant deltas. No-op when no plugins are configured.
+if [[ -f ".autoducks/autoducks.json" ]] && [[ -f ".autoducks/core/config/apply-plugins.sh" ]] \
+   && command -v jq &>/dev/null; then
+  echo ""
+  echo "Applying plugins..."
+  bash .autoducks/core/config/apply-plugins.sh
 fi
 
 echo ""

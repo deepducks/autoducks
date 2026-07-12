@@ -97,6 +97,16 @@ echo "$FRESH_OUT" | grep -q "Installing autoducks" \
   && pass "fresh install: install mode detected" \
   || fail "fresh install: install mode not detected"
 
+echo "$FRESH_OUT" | grep -q "Applying plugins" \
+  && pass "fresh install: plugin compiler invoked" \
+  || fail "fresh install: plugin compiler not invoked"
+
+if [[ ! -d "$CONSUMER/.autoducks/providers/llm/claude/compiled" ]]; then
+  pass "fresh install: plugins: [] produces no compiled/ files"
+else
+  fail "fresh install: unexpected compiled/ files with empty plugins[]"
+fi
+
 # ═══ Update ═══
 echo "── update ──"
 
@@ -118,6 +128,13 @@ echo "sentinel custom developer prompt" > "$CONSUMER/.autoducks/custom/agents/de
 
 echo "stale file that should not survive an update" > "$CONSUMER/.autoducks/OBSOLETE.txt"
 
+# Seed vendored plugins that MUST survive an update (#1061): plugin.schema.json
+# resolves `.autoducks/plugins/<name>` and `.autoducks/plugins/@local` sources,
+# so both must persist across the rm -rf/copy of .autoducks/.
+mkdir -p "$CONSUMER/.autoducks/plugins/foo" "$CONSUMER/.autoducks/plugins/@local"
+echo '{"schemaVersion":1,"name":"foo","version":"1.0.0"}' > "$CONSUMER/.autoducks/plugins/foo/plugin.json"
+echo "sentinel local contribution" > "$CONSUMER/.autoducks/plugins/@local/README.md"
+
 mkdir -p "$CONSUMER/.github/actions/autoducks/developer-pre"
 cat > "$CONSUMER/.github/actions/autoducks/developer-pre/action.yml" <<'EOF'
 name: sentinel developer-pre hook
@@ -137,12 +154,38 @@ CUSTOM_SNAPSHOT="$SCRATCH/custom-before-update"
 cp -R "$CONSUMER/.autoducks/custom" "$CUSTOM_SNAPSHOT"
 ACTION_SNAPSHOT="$SCRATCH/action-before-update.yml"
 cp "$CONSUMER/.github/actions/autoducks/developer-pre/action.yml" "$ACTION_SNAPSHOT"
+PLUGINS_SNAPSHOT="$SCRATCH/plugins-before-update"
+cp -R "$CONSUMER/.autoducks/plugins" "$PLUGINS_SNAPSHOT"
 
 UPDATE_OUT="$(run_install 2>&1)"
 
 echo "$UPDATE_OUT" | grep -q "Updating autoducks" \
   && pass "update: update mode detected" \
   || fail "update: update mode not detected"
+
+echo "$UPDATE_OUT" | grep -q "Applying plugins" \
+  && pass "update: plugin compiler invoked" \
+  || fail "update: plugin compiler not invoked"
+
+TRIGGERS_LINE=$(echo "$UPDATE_OUT" | grep -n "Applying custom trigger aliases" | head -1 | cut -d: -f1)
+PLUGINS_LINE=$(echo "$UPDATE_OUT" | grep -n "Applying plugins" | head -1 | cut -d: -f1)
+if [[ -n "$TRIGGERS_LINE" && -n "$PLUGINS_LINE" && "$TRIGGERS_LINE" -lt "$PLUGINS_LINE" ]]; then
+  pass "update: plugin compiler invoked after update-triggers.sh"
+else
+  fail "update: plugin compiler not invoked after update-triggers.sh"
+fi
+
+if diff -r "$CONSUMER/.autoducks/plugins" "$PLUGINS_SNAPSHOT" >/dev/null; then
+  pass "update: .autoducks/plugins/ (foo/ and @local/) preserved byte-identical"
+else
+  fail "update: .autoducks/plugins/ was not preserved"
+fi
+
+if [[ ! -d "$CONSUMER/.autoducks/providers/llm/claude/compiled" ]]; then
+  pass "update: plugins: [] produces no compiled/ files"
+else
+  fail "update: unexpected compiled/ files with empty plugins[]"
+fi
 
 if cmp -s "$CONSUMER/.autoducks/autoducks.json" "$CONFIG_SNAPSHOT"; then
   pass "update: config (sentinel command) preserved byte-identical"
