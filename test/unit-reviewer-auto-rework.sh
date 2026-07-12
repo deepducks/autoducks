@@ -11,7 +11,11 @@
 # event / manual re-trigger) must not double-dispatch or double-increment
 # the review-loop marker, while a genuinely new round (different
 # PR_HEAD_SHA) still advances normally (Task #1043 / ggondim's PR #1038
-# review Finding #2).
+# review Finding #2); and, when PR_HEAD_SHA can't be resolved at all (a
+# transient `gh pr view` failure in pre.sh), the SHA-less fallback still
+# suppresses a duplicate via an in-flight open rework sub-issue instead of
+# falling through to a second increment + dispatch (Task #1045 / ggondim's
+# PR #1038 review, 2026-07-12T00:51:27Z).
 #
 # Runs the real reviewer/post.sh as a subprocess with `gh` shimmed out (same
 # technique as test/unit-reviewer-max-turns.sh), pointed at a scratch
@@ -20,7 +24,9 @@
 # per case without touching the repo's real config — same scratch-root trick
 # as test/unit-review-config-clamp.sh. The gh shim backs its::list_comments /
 # its::comment_issue / its::update_comment with an in-memory JSON comment
-# store, so review_loop::iteration/::record round-trip for real.
+# store, and its::list_sub_issues / its::get_issue with an in-memory
+# sub-issue store, so review_loop::iteration/::record/::rework_inflight
+# round-trip for real.
 # Run: bash test/unit-reviewer-auto-rework.sh
 set -euo pipefail
 
@@ -40,6 +46,8 @@ GH_LOG="$SCRATCH/gh.log"
 BODIES_LOG="$SCRATCH/bodies.log"
 COMMENTS_STORE="$SCRATCH/comments.json"
 NEXT_ID_FILE="$SCRATCH/next_id"
+SUBISSUES_STORE="$SCRATCH/subissues.json"
+SUBISSUE_BODIES_STORE="$SCRATCH/subissue-bodies.json"
 
 # ── Scratch AUTODUCKS_ROOT: symlink the real tree, own autoducks.json ───────
 CONFIG_ROOT="$SCRATCH/autoducks-root"
@@ -127,7 +135,25 @@ if [[ "$1" == "api" ]]; then
       cat "$COMMENTS_STORE"
       exit 0
       ;;
+    */sub_issues)
+      echo "SUBISSUES_QUERY:$url" >> "$GH_LOG"
+      cat "${SUBISSUES_STORE:-/dev/null}" 2>/dev/null || echo '[]'
+      exit 0
+      ;;
+    */issues/[0-9]*)
+      # its::get_issue's issue-type lookup — untyped for these tests.
+      echo ""
+      exit 0
+      ;;
   esac
+  exit 0
+fi
+
+if [[ "$1" == "issue" && "$2" == "view" ]]; then
+  issue="$3"
+  echo "ISSUE_VIEW:$issue" >> "$GH_LOG"
+  body=$(jq -r --arg n "$issue" '.[$n] // ""' "${SUBISSUE_BODIES_STORE:-/dev/null}" 2>/dev/null || echo "")
+  jq -n --arg body "$body" '{title: "", body: $body, labels: [], author: "github-actions[bot]"}'
   exit 0
 fi
 
@@ -147,6 +173,8 @@ run_post() {
       BODIES_LOG="$BODIES_LOG" \
       COMMENTS_STORE="$COMMENTS_STORE" \
       NEXT_ID_FILE="$NEXT_ID_FILE" \
+      SUBISSUES_STORE="$SUBISSUES_STORE" \
+      SUBISSUE_BODIES_STORE="$SUBISSUE_BODIES_STORE" \
       AUTODUCKS_ROOT="$CONFIG_ROOT" \
       RUNNER_TEMP="$runner_temp" \
       GITHUB_ACTIONS=true \
@@ -162,6 +190,8 @@ reset_run() {
   : > "$GH_LOG"
   : > "$BODIES_LOG"
   echo '[]' > "$COMMENTS_STORE"
+  echo '[]' > "$SUBISSUES_STORE"
+  echo '{}' > "$SUBISSUE_BODIES_STORE"
   echo 1000 > "$NEXT_ID_FILE"
   rm -f /tmp/review.md /tmp/review-verdict /tmp/work-summary.md
   rm -f /tmp/autoducks-status-comment-id.500 /tmp/autoducks-status-comment-id.77
@@ -172,6 +202,18 @@ seed_marker() { # feature pr iteration max
     '[{id: 900, author: "github-actions[bot]",
        body: ("<!-- autoducks:review-loop: feature=" + $f + " pr=" + $p + " iteration=" + $it + " max=" + $mx + " -->"),
        created_at: "t0", updated_at: "t0"}]' > "$COMMENTS_STORE"
+}
+
+# seed_rework_subissue NUM STATE FEATURE PR — an open (or closed) rework
+# sub-issue carrying the `autoducks:rework` marker for FEATURE/PR, as
+# agents/rework/post.sh would file/update it once a round is actually
+# in flight.
+seed_rework_subissue() {
+  jq -n --arg n "$1" --arg s "$2" \
+    '[{number: ($n | tonumber), title: "rework", state: $s}]' > "$SUBISSUES_STORE"
+  jq -n --arg n "$1" --arg f "$3" --arg p "$4" \
+    '{($n): ("<!-- autoducks:rework: feature=" + $f + " pr=" + $p + " since=t0 -->")}' \
+    > "$SUBISSUE_BODIES_STORE"
 }
 
 # =============================================================================
@@ -368,6 +410,81 @@ if [[ "$(jq -r '.[] | select(.body | contains("feature=500 pr=77")) | .body' "$C
   pass "marker advances to iteration=2 for the new round"
 else
   fail "marker did not advance for the new round: $(cat "$COMMENTS_STORE")"
+fi
+
+echo ""
+
+# =============================================================================
+# 6. Empty PR_HEAD_SHA (pre.sh's `gh pr view` transiently failed to resolve
+#    the head commit) with the round already dispatched: the marker already
+#    records iteration=1 and an open rework sub-issue is already in flight
+#    for the feature — a second request-changes run must not double-dispatch
+#    or double-increment (Task #1045 / ggondim's PR #1038 review, empty-SHA
+#    fallback for the Finding #2 idempotency guard).
+# =============================================================================
+echo "── empty PR_HEAD_SHA, round already dispatched: second run is a no-op ──"
+reset_run
+write_config '{}'
+seed_marker 500 77 1 3
+seed_rework_subissue 601 open 500 77
+echo "review body" > /tmp/review.md
+echo "request-changes" > /tmp/review-verdict
+RC=0
+run_post ISSUE_NUM=500 RUN_ID=999 COMMENT_ID=42 COMMENTER=bob PR_NUM=77 FEATURE_NUM=500 \
+  REVIEW_TARGETS_CSV="500,77" PR_HEAD_SHA= || RC=$?
+
+[[ "$RC" -eq 0 ]] \
+  && pass "exits 0" \
+  || fail "expected exit 0, got rc=$RC: $(tail -5 "$SCRATCH/stderr.log")"
+
+if grep -q '^DISPATCH:' "$GH_LOG"; then
+  fail "rework dispatched a second time despite empty PR_HEAD_SHA and an in-flight rework sub-issue: $(cat "$GH_LOG")"
+else
+  pass "no rework dispatch when PR_HEAD_SHA is empty and a rework round is already in flight"
+fi
+
+if [[ "$(jq -r '.[] | select(.body | contains("feature=500 pr=77")) | .body' "$COMMENTS_STORE")" == *"iteration=1"* ]]; then
+  pass "marker stays at iteration=1 (not double-incremented to 2)"
+else
+  fail "marker unexpectedly changed: $(cat "$COMMENTS_STORE")"
+fi
+
+if grep -qF '🔁 Auto-rework round 1/3 already dispatched — skipping duplicate.' "$BODIES_LOG"; then
+  pass "status comment reports the already-dispatched/skipping-duplicate footer"
+else
+  fail "already-dispatched footer missing: $(cat "$BODIES_LOG")"
+fi
+
+echo ""
+
+# =============================================================================
+# 7. Empty PR_HEAD_SHA with a genuinely first dispatch (no prior marker, no
+#    rework sub-issue in flight): the SHA-less fallback must not block a
+#    legitimate first round just because there's no SHA to compare.
+# =============================================================================
+echo "── empty PR_HEAD_SHA, first round: dispatches and advances normally ──"
+reset_run
+write_config '{}'
+echo "review body" > /tmp/review.md
+echo "request-changes" > /tmp/review-verdict
+RC=0
+run_post ISSUE_NUM=500 RUN_ID=999 COMMENT_ID=42 COMMENTER=bob PR_NUM=77 FEATURE_NUM=500 \
+  REVIEW_TARGETS_CSV="500,77" PR_HEAD_SHA= || RC=$?
+
+[[ "$RC" -eq 0 ]] \
+  && pass "exits 0" \
+  || fail "expected exit 0, got rc=$RC: $(tail -5 "$SCRATCH/stderr.log")"
+
+if grep -q '^DISPATCH:workflow run autoducks-rework.yml' "$GH_LOG"; then
+  pass "rework dispatched for the first round despite the empty PR_HEAD_SHA"
+else
+  fail "rework not dispatched for a genuinely new round: $(cat "$GH_LOG")"
+fi
+
+if [[ "$(jq -r '.[] | select(.body | contains("feature=500 pr=77")) | .body' "$COMMENTS_STORE")" == *"iteration=1"* ]]; then
+  pass "marker advances to iteration=1 for the first round"
+else
+  fail "marker did not advance for the first round: $(cat "$COMMENTS_STORE")"
 fi
 
 echo ""

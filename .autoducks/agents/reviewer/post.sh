@@ -124,7 +124,10 @@ done
 # for — that's this exact round already dispatched, not a new one, so it's
 # a no-op rather than a second increment + dispatch. No workflow-local
 # state: the comparison is entirely against the marker comment already on
-# the PR (review_loop::sha).
+# the PR (review_loop::sha). When PR_HEAD_SHA is empty (pre.sh's `gh pr
+# view` transiently failed to resolve it), there's nothing to compare
+# against — fall back to review_loop::already_dispatched's SHA-less signals
+# instead of falling straight through to a second increment + dispatch.
 AUTO_REWORK_FOOTER=""
 if [[ "$VERDICT" == "request-changes" && "$AUTODUCKS_REVIEW_AUTO_REWORK" == "true" ]]; then
   review_loop_iteration=$(review_loop::iteration "$FEATURE_NUM" "$PR_NUM")
@@ -133,6 +136,8 @@ if [[ "$VERDICT" == "request-changes" && "$AUTODUCKS_REVIEW_AUTO_REWORK" == "tru
     continue)
       if [[ -n "$review_loop_prev_sha" && -n "${PR_HEAD_SHA:-}" && "$review_loop_prev_sha" == "$PR_HEAD_SHA" ]]; then
         AUTO_REWORK_FOOTER="🔁 Auto-rework round ${review_loop_iteration}/${AUTODUCKS_REVIEW_MAX_ITERATIONS} already dispatched for this commit — skipping duplicate."
+      elif [[ -z "${PR_HEAD_SHA:-}" ]] && review_loop::already_dispatched "$FEATURE_NUM" "$PR_NUM" "$review_loop_iteration"; then
+        AUTO_REWORK_FOOTER="🔁 Auto-rework round ${review_loop_iteration}/${AUTODUCKS_REVIEW_MAX_ITERATIONS} already dispatched — skipping duplicate."
       else
         review_loop::record "$FEATURE_NUM" "$PR_NUM" "$((review_loop_iteration + 1))" "" "${PR_HEAD_SHA:-}"
         # Headless rework dispatch — actor carried forward for the D15 assignee.

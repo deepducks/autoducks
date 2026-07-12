@@ -102,6 +102,40 @@ review_loop::decide() {
 # there is no prior marker to inherit from. SHA (optional) is the PR head
 # commit this round was recorded for; omitted/empty drops the `sha` field
 # from the marker rather than writing it empty.
+# review_loop::rework_inflight FEATURE_NUM — true (exit 0) if an open rework
+# sub-issue already tracks FEATURE_NUM (mirrors the idempotency scan in
+# agents/rework/pre.sh). Used as a SHA-less signal that a round has already
+# been dispatched: the rework agent only files/updates this sub-issue once a
+# round has actually kicked off.
+review_loop::rework_inflight() {
+  local feature_num="$1"
+  local sub_issues num body
+  sub_issues=$(its::list_sub_issues "$feature_num" 2>/dev/null) || return 1
+  [[ -z "$sub_issues" ]] && return 1
+
+  while IFS= read -r num; do
+    [[ -z "$num" ]] && continue
+    body=$(its::get_issue "$num" 2>/dev/null | jq -r '.body // ""')
+    grep -qF "<!-- autoducks:rework: feature=${feature_num} " <<< "$body" && return 0
+  done < <(echo "$sub_issues" | jq -r '.[] | select((.state | ascii_downcase) == "open") | .number')
+
+  return 1
+}
+
+# review_loop::already_dispatched FEATURE_NUM PR_NUM ITERATION — true (exit 0)
+# when there's no PR_HEAD_SHA to compare against (the sha-based guard in
+# post.sh): falls back to two SHA-less signals for "this round is already
+# dispatched" — a fresh re-read of the marker already at/past the round this
+# call is about to record, or an in-flight open rework sub-issue.
+review_loop::already_dispatched() {
+  local feature_num="$1" pr_num="$2" iteration="$3"
+  local fresh
+  fresh=$(review_loop::iteration "$feature_num" "$pr_num")
+  [[ "$fresh" -ge $((iteration + 1)) ]] && return 0
+  review_loop::rework_inflight "$feature_num" && return 0
+  return 1
+}
+
 review_loop::record() {
   local feature_num="$1" pr_num="$2" iteration="$3" max="${4:-}" sha="${5:-}"
 
