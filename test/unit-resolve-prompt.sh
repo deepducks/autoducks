@@ -15,6 +15,13 @@
 #                              heading
 #   9. plugin "targets"      → a plugin scoped to ["developer"] contributes
 #                              nothing when resolving the "fix" prompt
+#  10. "./relative-path" source → global + per-agent fragments resolved and
+#                              injected from the source dir directly, not
+#                              from .autoducks/plugins/<name>
+#  11. "prompts.*" gating     → a fragment file that exists on disk is NOT
+#                              injected when the manifest doesn't select it
+#                              (prompts.global unset/false, agent not listed
+#                              in prompts.agents)
 #
 # Run: bash test/unit-resolve-prompt.sh
 set -euo pipefail
@@ -171,6 +178,12 @@ BETA_GLOBAL=$'Beta plugin global instructions.\n'
 ALPHA_GLOBAL=$'Alpha plugin global instructions.\n'
 printf '%s' "$BETA_GLOBAL" > "$SANDBOX/.autoducks/plugins/beta/prompts/instructions.md"
 printf '%s' "$ALPHA_GLOBAL" > "$SANDBOX/.autoducks/plugins/alpha/prompts/instructions.md"
+cat > "$SANDBOX/.autoducks/plugins/beta/plugin.json" <<'EOF'
+{"schemaVersion": 1, "name": "beta", "version": "1.0.0", "prompts": {"global": true}}
+EOF
+cat > "$SANDBOX/.autoducks/plugins/alpha/plugin.json" <<'EOF'
+{"schemaVersion": 1, "name": "alpha", "version": "1.0.0", "prompts": {"global": true}}
+EOF
 cat > "$SANDBOX/.autoducks/autoducks.json" <<'EOF'
 {"plugins": [
   {"name": "beta", "source": ".autoducks/plugins/beta"},
@@ -212,6 +225,52 @@ EOF
 run_resolve ".autoducks/agents/fix/prompt.md" > "$SCRATCH/out10"
 assert_file_eq "fix prompt untouched — devonly targets only 'developer'" \
   "$SANDBOX/.autoducks/agents/fix/prompt.md" "$SCRATCH/out10"
+clean_plugins
+
+# ---------------------------------------------------------------------------
+echo "── 10. \"./relative-path\" source → global + per-agent fragments injected ──"
+clean_custom
+clean_plugins
+mkdir -p "$SANDBOX/other/path/prompts/agents/engineer"
+RELPATH_GLOBAL=$'Relative-path plugin global instructions.\n'
+RELPATH_AGENT=$'Relative-path plugin engineer-specific instructions.\n'
+printf '%s' "$RELPATH_GLOBAL" > "$SANDBOX/other/path/prompts/instructions.md"
+printf '%s' "$RELPATH_AGENT" > "$SANDBOX/other/path/prompts/agents/engineer/instructions.md"
+cat > "$SANDBOX/other/path/plugin.json" <<'EOF'
+{"schemaVersion": 1, "name": "relpath", "version": "1.0.0", "prompts": {"global": true, "agents": ["engineer"]}}
+EOF
+cat > "$SANDBOX/.autoducks/autoducks.json" <<'EOF'
+{"plugins": [{"name": "relpath", "source": "./other/path"}]}
+EOF
+run_resolve > "$SCRATCH/out11"
+{
+  printf '%s' "$SHIPPED_CONTENT"
+  printf '\n\n# Plugin instructions\n'
+  printf '\n'
+  printf '%s' "$RELPATH_GLOBAL"
+  printf '\n'
+  printf '%s' "$RELPATH_AGENT"
+} > "$SCRATCH/expected11"
+assert_file_eq "fragments resolved and injected from a './relative-path' source dir" \
+  "$SCRATCH/expected11" "$SCRATCH/out11"
+clean_plugins
+
+# ---------------------------------------------------------------------------
+echo "── 11. prompts.* gating → fragment files on disk are not injected unless selected ──"
+clean_custom
+clean_plugins
+mkdir -p "$SANDBOX/.autoducks/plugins/gated/prompts/agents/engineer"
+printf '%s' $'gated plugin global instructions.\n' > "$SANDBOX/.autoducks/plugins/gated/prompts/instructions.md"
+printf '%s' $'gated plugin engineer instructions.\n' > "$SANDBOX/.autoducks/plugins/gated/prompts/agents/engineer/instructions.md"
+cat > "$SANDBOX/.autoducks/plugins/gated/plugin.json" <<'EOF'
+{"schemaVersion": 1, "name": "gated", "version": "1.0.0"}
+EOF
+cat > "$SANDBOX/.autoducks/autoducks.json" <<'EOF'
+{"plugins": [{"name": "gated", "source": ".autoducks/plugins/gated"}]}
+EOF
+run_resolve > "$SCRATCH/out12"
+assert_file_eq "no prompts.global/prompts.agents in manifest → fragments not injected despite existing on disk" \
+  "$SANDBOX/$ENGINEER_PROMPT_REL" "$SCRATCH/out12"
 clean_plugins
 
 # ---------------------------------------------------------------------------
