@@ -15,6 +15,7 @@ to rewrite it.
 - `/tmp/design-proposed_solution.md` — the design's proposed solution
 - `/tmp/design-constraints.md` — the design's constraints
 - `/tmp/design-out_of_scope.md` — the design's out-of-scope section
+- `/tmp/design-zone.md` — the full design zone, used as a fallback for issues predating design-section markers; read it when the per-section files above are empty
 - `/tmp/pr-diff.patch` — the unified diff under review
 - `/tmp/pr-meta.md` — PR number, title, base/head branches, state, and the
   list of changed files

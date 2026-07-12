@@ -6,7 +6,12 @@
 # review-loop marker instead of waiting on a human /rework; once the marker's
 # round hits review.max_iterations it stops dispatching and hands off to a
 # human instead; and an explicit auto_rework:false restores that human-handoff
-# path unconditionally.
+# path unconditionally. Also covers the Idempotency guard: a duplicate
+# request-changes run for the same PR_HEAD_SHA (a retried ready_for_review
+# event / manual re-trigger) must not double-dispatch or double-increment
+# the review-loop marker, while a genuinely new round (different
+# PR_HEAD_SHA) still advances normally (Task #1043 / ggondim's PR #1038
+# review Finding #2).
 #
 # Runs the real reviewer/post.sh as a subprocess with `gh` shimmed out (same
 # technique as test/unit-reviewer-max-turns.sh), pointed at a scratch
@@ -282,6 +287,87 @@ if grep -qF "$(printf '/rework')" "$BODIES_LOG" && grep -qF "$(printf '/defer')"
   pass "human handoff (rework or defer) restored in the status comment"
 else
   fail "human handoff missing: $(cat "$BODIES_LOG")"
+fi
+
+echo ""
+
+# =============================================================================
+# 4. Duplicate ready_for_review / re-trigger for the same PR_HEAD_SHA: the
+#    second run must not double-dispatch or double-increment the marker
+#    (Idempotency constraint, Finding #2 of ggondim's PR #1038 review).
+# =============================================================================
+echo "── duplicate event, same PR_HEAD_SHA: second run is a no-op ──"
+reset_run
+write_config '{}'
+echo "review body" > /tmp/review.md
+echo "request-changes" > /tmp/review-verdict
+RC=0
+run_post ISSUE_NUM=500 RUN_ID=999 COMMENT_ID=42 COMMENTER=bob PR_NUM=77 FEATURE_NUM=500 \
+  REVIEW_TARGETS_CSV="500,77" PR_HEAD_SHA=deadbeef || RC=$?
+[[ "$RC" -eq 0 ]] \
+  && pass "first run exits 0" \
+  || fail "expected exit 0 on first run, got rc=$RC: $(tail -5 "$SCRATCH/stderr.log")"
+
+echo "review body" > /tmp/review.md
+echo "request-changes" > /tmp/review-verdict
+RC=0
+run_post ISSUE_NUM=500 RUN_ID=999 COMMENT_ID=42 COMMENTER=bob PR_NUM=77 FEATURE_NUM=500 \
+  REVIEW_TARGETS_CSV="500,77" PR_HEAD_SHA=deadbeef || RC=$?
+[[ "$RC" -eq 0 ]] \
+  && pass "second (duplicate) run exits 0" \
+  || fail "expected exit 0 on second run, got rc=$RC: $(tail -5 "$SCRATCH/stderr.log")"
+
+DISPATCH_COUNT=$(grep -c '^DISPATCH:workflow run autoducks-rework.yml' "$GH_LOG" || true)
+if [[ "$DISPATCH_COUNT" -eq 1 ]]; then
+  pass "autoducks-rework.yml dispatched exactly once across both runs"
+else
+  fail "expected exactly 1 dispatch, got $DISPATCH_COUNT: $(cat "$GH_LOG")"
+fi
+
+MARKER_COUNT=$(jq '[.[] | select(.body | contains("feature=500 pr=77"))] | length' "$COMMENTS_STORE")
+if [[ "$MARKER_COUNT" -eq 1 ]]; then
+  pass "still exactly one review-loop marker comment (edited in place, not duplicated)"
+else
+  fail "expected 1 marker comment, got $MARKER_COUNT: $(cat "$COMMENTS_STORE")"
+fi
+
+if [[ "$(jq -r '.[] | select(.body | contains("feature=500 pr=77")) | .body' "$COMMENTS_STORE")" == *"iteration=1"* ]]; then
+  pass "marker advanced to iteration=1 only once (not double-incremented to 2)"
+else
+  fail "marker iteration wrong after duplicate run: $(cat "$COMMENTS_STORE")"
+fi
+
+echo ""
+
+# =============================================================================
+# 5. A genuinely new round (different PR_HEAD_SHA, e.g. after rework pushed
+#    new commits) still advances and dispatches normally — the guard only
+#    suppresses an exact-commit repeat, not legitimate subsequent rounds.
+# =============================================================================
+echo "── new commit, different PR_HEAD_SHA: dispatches and advances normally ──"
+reset_run
+write_config '{}'
+seed_marker 500 77 1 3
+echo "review body" > /tmp/review.md
+echo "request-changes" > /tmp/review-verdict
+RC=0
+run_post ISSUE_NUM=500 RUN_ID=999 COMMENT_ID=42 COMMENTER=bob PR_NUM=77 FEATURE_NUM=500 \
+  REVIEW_TARGETS_CSV="500,77" PR_HEAD_SHA=newsha123 || RC=$?
+
+[[ "$RC" -eq 0 ]] \
+  && pass "exits 0" \
+  || fail "expected exit 0, got rc=$RC: $(tail -5 "$SCRATCH/stderr.log")"
+
+if grep -q '^DISPATCH:workflow run autoducks-rework.yml' "$GH_LOG"; then
+  pass "rework dispatched for the new commit"
+else
+  fail "rework not dispatched for a genuinely new round: $(cat "$GH_LOG")"
+fi
+
+if [[ "$(jq -r '.[] | select(.body | contains("feature=500 pr=77")) | .body' "$COMMENTS_STORE")" == *"iteration=2"* ]]; then
+  pass "marker advances to iteration=2 for the new round"
+else
+  fail "marker did not advance for the new round: $(cat "$COMMENTS_STORE")"
 fi
 
 echo ""

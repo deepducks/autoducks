@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Reviewer request-changes/approve round tracking — three pure functions
-# over ITS state. No workflow-local state: the current round lives entirely
-# in a single marker-anchored comment on the PR, so any runner on any run
-# can recover it (stateless re-run contract, .autoducks/design/AGENTS.md
-# §Re-run semantics). Mirrors the marker-scan pattern used by
+# Reviewer request-changes/approve round tracking — pure functions over ITS
+# state. No workflow-local state: the current round lives entirely in a
+# single marker-anchored comment on the PR, so any runner on any run can
+# recover it (stateless re-run contract, .autoducks/design/AGENTS.md §Re-run
+# semantics). Mirrors the marker-scan pattern used by
 # orchestrator_comment::upsert (core/feedback/status-comment.sh) and the
 # verify-loop feedback comment (agents/developer/post.sh).
 #
-#   <!-- autoducks:review-loop: feature=<F> pr=<P> iteration=<N> max=<M> -->
+#   <!-- autoducks:review-loop: feature=<F> pr=<P> iteration=<N> max=<M> sha=<S> -->
+#
+# `sha` (optional) is the PR head commit the marker's round was recorded
+# against — it lets a caller tell a genuinely new round apart from a
+# duplicate/re-triggered review of a commit already accounted for, without
+# any state beyond this one comment (Idempotency constraint).
 
 # _review_loop::marker_prefix FEATURE_NUM PR_NUM
 # The feature+pr-scoped portion of the marker, used both to build the full
@@ -56,6 +61,21 @@ review_loop::iteration() {
   echo "${n:-0}"
 }
 
+# review_loop::sha FEATURE_NUM PR_NUM → echoes the PR head SHA the current
+# marker was recorded against (empty if there is no marker, or it predates
+# sha tracking).
+review_loop::sha() {
+  local feature_num="$1" pr_num="$2"
+  local found
+  found=$(_review_loop::find_marker_comment "$feature_num" "$pr_num")
+  [[ -z "$found" ]] && { echo ""; return 0; }
+
+  local body s
+  body=$(cut -f2- <<< "$found")
+  s=$(grep -oE 'sha=[^ ]+' <<< "$body" | head -1 | cut -d= -f2)
+  echo "${s:-}"
+}
+
 # review_loop::decide VERDICT ITERATION MAX → continue | stop-approved | stop-blocked-max
 # request-changes with rounds left → continue; request-changes at/over the
 # cap → stop-blocked-max; anything else (approve, comment, or a garbage
@@ -74,14 +94,16 @@ review_loop::decide() {
   fi
 }
 
-# review_loop::record FEATURE_NUM PR_NUM N [MAX]
+# review_loop::record FEATURE_NUM PR_NUM N [MAX] [SHA]
 # Persists the new round marker: edits the existing marker comment in place
 # when one is found, otherwise posts a fresh one. Idempotent — a re-run in
 # the same round finds and edits the same comment rather than duplicating
 # it. MAX defaults to the value already on the existing marker, or 3 when
-# there is no prior marker to inherit from.
+# there is no prior marker to inherit from. SHA (optional) is the PR head
+# commit this round was recorded for; omitted/empty drops the `sha` field
+# from the marker rather than writing it empty.
 review_loop::record() {
-  local feature_num="$1" pr_num="$2" iteration="$3" max="${4:-}"
+  local feature_num="$1" pr_num="$2" iteration="$3" max="${4:-}" sha="${5:-}"
 
   local found cid="" body="" prev_max=""
   found=$(_review_loop::find_marker_comment "$feature_num" "$pr_num")
@@ -92,8 +114,11 @@ review_loop::record() {
   fi
   [[ -z "$max" ]] && max="${prev_max:-3}"
 
+  local sha_field=""
+  [[ -n "$sha" ]] && sha_field=" sha=${sha}"
+
   local marker
-  marker="<!-- autoducks:review-loop: feature=${feature_num} pr=${pr_num} iteration=${iteration} max=${max} -->"
+  marker="<!-- autoducks:review-loop: feature=${feature_num} pr=${pr_num} iteration=${iteration} max=${max}${sha_field} -->"
 
   if [[ -n "$cid" && "$cid" != "null" ]]; then
     its::update_comment "$cid" "$marker" 2>/dev/null || true
