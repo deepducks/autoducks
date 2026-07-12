@@ -5,7 +5,9 @@ description: Extend autoducks with hooks and prompt overrides without editing ma
 
 import { Aside } from '@astrojs/starlight/components';
 
-autoducks ships two supported customization surfaces: **hooks**, which run your own steps around each agent, and **prompt overrides**, which extend or replace an agent's instructions. Both live outside the files autoducks manages, so they survive `install.sh` updates.
+autoducks ships three supported customization surfaces: **hooks**, which run your own steps around each agent; **prompt overrides**, which extend or replace an agent's instructions; and **Claude settings**, the base permissions/env/MCP configuration every agent run starts from. All three live outside the files autoducks manages, so they survive `install.sh` updates.
+
+These three surfaces are also the primitives a [plugin](/guides/plugins) packages up: a plugin is the same hooks, prompt fragments, and settings described on this page, bundled with a manifest so they can be versioned and shared across repositories instead of hand-authored locally in one. Read this page first for how each surface works standalone; reach for [Plugins](/guides/plugins) when you want to distribute one.
 
 ## Why you can't edit the shipped files directly
 
@@ -153,7 +155,7 @@ Prompt overrides live under `.autoducks/custom/`, a directory `install.sh` prese
         └── prompt.md            # replaces this agent's shipped prompt entirely
 ```
 
-Only the 5 LLM-backed agents support prompt overrides: **architect**, **engineer**, **developer**, **reviewer**, and **fix**. Maestro, close, and revert are bash-only orchestration agents with no prompt to customize.
+Only the 9 LLM-backed agents support prompt overrides: **architect**, **engineer**, **developer**, **reviewer**, **fix**, **resolver**, **rework**, **defer**, and **product**. Maestro, close, and revert are bash-only orchestration agents with no prompt to customize.
 
 ### Append vs. replace
 
@@ -168,6 +170,14 @@ Both append files can be combined with a full replace: if `agents/<agent>/prompt
 
 This resolution happens in [`.autoducks/core/config/resolve-prompt.sh`](https://github.com/deepducks/autoducks/blob/main/.autoducks/core/config/resolve-prompt.sh), called once per LLM invocation by the claude provider action. With no `.autoducks/custom/` tree at all, its output is byte-for-byte identical to the shipped prompt.
 
+`resolve-prompt.sh` also appends any enabled [plugin](/guides/plugins)'s `prompts/instructions.md` and `prompts/agents/<agent>/instructions.md`, in declared `plugins[]` order, under a trailing `# Plugin instructions` heading — after your own overrides, so a repository's own instructions always take precedence in reading order.
+
+## Claude settings
+
+`.autoducks/providers/llm/claude/settings.json`, if present, is the base [Claude Code settings](https://docs.claude.com/en/docs/claude-code/settings) object every agent run starts from — permissions (`allow`/`deny`), `env`, and `mcpServers`. `install.sh` never writes this file and preserves it across updates, the same as `.autoducks/custom/`. With no such file, the claude provider action runs with no settings override at all.
+
+This is the surface a [plugin](/guides/plugins)'s `claude/mcp.json`, `claude/hooks.json`, and `claude/settings.patch.json` build on: [`apply-plugins.sh`](/guides/plugins#compiling-a-repositorys-plugins) layers every targeting plugin's contributions on top of this base file into a per-agent compiled settings file, without ever modifying the base file itself.
+
 ## The update-survival guarantee
 
 An `install.sh` update replaces the entire `.autoducks/` tree, then restores three things from a stash: `.autoducks/autoducks.json`, `.autoducks/providers/llm/claude/settings.json`, and the whole `.autoducks/custom/` tree. `.github/actions/` is never touched by `install.sh` at all. In short:
@@ -180,5 +190,6 @@ An `install.sh` update replaces the entire `.autoducks/` tree, then restores thr
 | `.autoducks/providers/llm/claude/settings.json` | Preserved |
 | `.autoducks/custom/` | Preserved |
 | `.github/actions/` (your hooks) | Preserved (never touched) |
+| `.autoducks/plugins/` and `.autoducks/providers/llm/claude/compiled/` | **Not** preserved — re-run `apply-plugins.sh` after updating; see [Plugins: update survival](/guides/plugins#update-survival) |
 
 See the [Updating](/getting-started/installation#updating) section of the installation guide for the update command itself.
