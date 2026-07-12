@@ -6,6 +6,8 @@ export interface GlobalOptions {
   repo?: string;
   version?: string;
   noInput: boolean;
+  /** `--no-setup`: on a fresh `install`, skip the automatic hand-off into `setup`. */
+  noSetup: boolean;
   yes: boolean;
   help: boolean;
 }

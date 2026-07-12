@@ -14,9 +14,15 @@ describe('parseArgv', () => {
       repo: 'owner/repo',
       version: 'v1.2.3',
       noInput: true,
+      noSetup: false,
       yes: true,
       help: false,
     });
+  });
+
+  it('parses --no-setup', () => {
+    const result = parseArgv(['install', '--no-setup']);
+    expect(result.options.noSetup).toBe(true);
   });
 
   it('treats -h as an alias for --help', () => {
