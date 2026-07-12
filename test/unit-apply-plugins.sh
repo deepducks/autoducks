@@ -107,7 +107,8 @@ else
 fi
 STEP_COUNT="$(grep -c "^    - name: 'plugin: " "$AGG")"
 [[ "$STEP_COUNT" -eq 2 ]] && pass "exactly one step per contributing plugin" || fail "expected 2 plugin steps, got $STEP_COUNT"
-for envvar in AUTODUCKS_AGENT AUTODUCKS_STAGE ISSUE_NUM REPO COMMENT_ID RUN_ID COMMENTER GH_TOKEN; do
+for envvar in AUTODUCKS_AGENT AUTODUCKS_STAGE ISSUE_NUM REPO COMMENT_ID RUN_ID COMMENTER GH_TOKEN \
+  BASE_BRANCH IS_PR AGENT_OUTCOME COMMENT_ISSUE_NUM DRY_RUN; do
   grep -q "$envvar: \${{ env.$envvar }}" "$AGG" && pass "hook contract forwards $envvar" || fail "hook contract missing $envvar"
 done
 
@@ -174,6 +175,53 @@ if run_compiler "$REPO" >/tmp/apply-plugins-conflictenv.log 2>&1; then
   fail "conflicting env.FOO did not fail"
 else
   grep -qi "conflicting env" /tmp/apply-plugins-conflictenv.log && pass "conflicting env.<KEY> hard-fails with an actionable message" || fail "wrong error for conflicting env"
+fi
+
+echo "── plugin env/mcpServers override a base value (layered, no hard-fail) ──"
+new_repo baseoverride
+mkdir -p "$REPO/.autoducks/providers/llm/claude"
+cat > "$REPO/.autoducks/providers/llm/claude/settings.json" <<'EOF'
+{"env":{"SOME_KEY":"base-value"},"mcpServers":{"shared":{"command":"base"}}}
+EOF
+set_plugins "$REPO" '[{"name":"alpha","source":".autoducks/plugins/alpha","config":{}}]'
+make_plugin "$REPO" alpha '[]' '[]'
+jq '.mcpServers = ["shared"]' "$REPO/.autoducks/plugins/alpha/plugin.json" > "$REPO/.autoducks/plugins/alpha/plugin.json.tmp" \
+  && mv "$REPO/.autoducks/plugins/alpha/plugin.json.tmp" "$REPO/.autoducks/plugins/alpha/plugin.json"
+mkdir -p "$REPO/.autoducks/plugins/alpha/claude"
+echo '{"mcpServers":{"shared":{"command":"plugin"}}}' > "$REPO/.autoducks/plugins/alpha/claude/mcp.json"
+echo '{"env":{"SOME_KEY":"plugin-value"}}' > "$REPO/.autoducks/plugins/alpha/claude/settings.patch.json"
+run_compiler "$REPO" >/tmp/apply-plugins-baseoverride.log 2>&1 || { fail "base-override run failed"; cat /tmp/apply-plugins-baseoverride.log; }
+COMPILED="$REPO/.autoducks/providers/llm/claude/compiled/developer.settings.json"
+if [[ -f "$COMPILED" ]] && jq -e '.env.SOME_KEY == "plugin-value"' "$COMPILED" >/dev/null 2>&1; then
+  pass "plugin env overrides a base-defined env value without hard-failing"
+else
+  fail "plugin env did not override base env value"
+fi
+if [[ -f "$COMPILED" ]] && jq -e '.mcpServers.shared.command == "plugin"' "$COMPILED" >/dev/null 2>&1; then
+  pass "plugin mcpServers entry overrides a base-defined mcpServers entry without hard-failing"
+else
+  fail "plugin mcpServers entry did not override base mcpServers entry"
+fi
+
+echo "── settings.patch.json mcpServers/hooks bypass is stripped (dedicated channels only) ──"
+new_repo patchbypass
+set_plugins "$REPO" '[{"name":"alpha","source":".autoducks/plugins/alpha","config":{}}]'
+make_plugin "$REPO" alpha '[]' '[]'
+mkdir -p "$REPO/.autoducks/plugins/alpha/claude"
+cat > "$REPO/.autoducks/plugins/alpha/claude/settings.patch.json" <<'EOF'
+{"mcpServers":{"sneaky":{"command":"x"}},"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"sneaky"}]}]}}
+EOF
+run_compiler "$REPO" >/tmp/apply-plugins-patchbypass.log 2>&1 || { fail "patch-bypass run failed"; cat /tmp/apply-plugins-patchbypass.log; }
+COMPILED="$REPO/.autoducks/providers/llm/claude/compiled/developer.settings.json"
+if [[ -f "$COMPILED" ]] && ! jq -e '.mcpServers.sneaky' "$COMPILED" >/dev/null 2>&1; then
+  pass "settings.patch.json mcpServers is ignored by the rest-merge"
+else
+  fail "settings.patch.json mcpServers leaked into compiled settings"
+fi
+if [[ -f "$COMPILED" ]] && ! jq -e '.hooks.PreToolUse' "$COMPILED" >/dev/null 2>&1; then
+  pass "settings.patch.json hooks is ignored by the rest-merge"
+else
+  fail "settings.patch.json hooks leaked into compiled settings"
 fi
 
 echo "── plugin 'model' patch hard-fails ──"

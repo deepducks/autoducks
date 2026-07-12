@@ -350,6 +350,10 @@ render_aggregator_body() { # $1 = hook point, remaining = contributors ("@local"
       prel="${pdir#"$REPO_ROOT"/}"
       step_uses="./$prel/hooks/$point"
     fi
+    # Forwards the full hand-authored-hook environment contract (see
+    # guides/customization#environment-contract), including the per-agent
+    # extras (BASE_BRANCH, IS_PR, AGENT_OUTCOME, COMMENT_ISSUE_NUM, DRY_RUN)
+    # that only some agents/stages set — forwarding an unset var is a no-op.
     cat <<STEP
     - name: '$step_name'
       uses: $step_uses
@@ -362,6 +366,11 @@ render_aggregator_body() { # $1 = hook point, remaining = contributors ("@local"
         RUN_ID: \${{ env.RUN_ID }}
         COMMENTER: \${{ env.COMMENTER }}
         GH_TOKEN: \${{ env.GH_TOKEN }}
+        BASE_BRANCH: \${{ env.BASE_BRANCH }}
+        IS_PR: \${{ env.IS_PR }}
+        AGENT_OUTCOME: \${{ env.AGENT_OUTCOME }}
+        COMMENT_ISSUE_NUM: \${{ env.COMMENT_ISSUE_NUM }}
+        DRY_RUN: \${{ env.DRY_RUN }}
 STEP
   done
 }
@@ -418,13 +427,13 @@ for agent in "${ALL_AGENTS[@]}"; do
   base="$REPO_ROOT/.autoducks/providers/llm/claude/settings.json"
   if [[ -f "$base" ]]; then cp "$base" "$result_file"; else echo '{}' > "$result_file"; fi
 
+  # seen_mcp / seen_env track only *plugin* contributions (never the base
+  # settings.json) — a plugin is free to override a base-defined mcpServers
+  # entry or env value (layered on top of the base, per plugins.mdx's
+  # "Ordering & conflict semantics"); conflict detection exists solely to
+  # catch two plugins disagreeing with each other.
   declare -A seen_mcp=()
-  while IFS= read -r nm; do [[ -n "$nm" ]] && seen_mcp["$nm"]=1; done \
-    < <(jq -r '.mcpServers // {} | keys[]' "$result_file")
-
   declare -A seen_env=()
-  while IFS=$'\t' read -r k v; do [[ -n "$k" ]] && seen_env["$k"]="$v"; done \
-    < <(jq -r '.env // {} | to_entries[] | [.key, (.value|tostring)] | @tsv' "$result_file")
 
   tools_file="$(mktemp)"
   : > "$tools_file"
@@ -435,7 +444,7 @@ for agent in "${ALL_AGENTS[@]}"; do
     mcpf="$pdir/claude/mcp.json"
     if [[ -f "$mcpf" ]]; then
       for nm in $(jq -r '.mcpServers // {} | keys[]' "$mcpf"); do
-        [[ -n "${seen_mcp[$nm]:-}" ]] && die "agent '$agent': duplicate MCP server name '$nm' — plugin '$name' conflicts with an earlier contributor"
+        [[ -n "${seen_mcp[$nm]:-}" ]] && die "agent '$agent': duplicate MCP server name '$nm' — plugin '$name' conflicts with an earlier plugin contributor (a plugin may freely override an MCP server already defined in the base settings.json; only plugin-vs-plugin collisions hard-fail)"
         seen_mcp["$nm"]=1
         val="$(jq -c --arg n "$nm" '.mcpServers[$n]' "$mcpf")"
         jq --arg n "$nm" --argjson v "$val" '.mcpServers[$n] = $v' "$result_file" > "$result_file.tmp" && mv "$result_file.tmp" "$result_file"
@@ -468,7 +477,7 @@ for agent in "${ALL_AGENTS[@]}"; do
         while IFS=$'\t' read -r k v; do
           [[ -z "$k" ]] && continue
           if [[ -n "${seen_env[$k]:-}" && "${seen_env[$k]}" != "$v" ]]; then
-            die "agent '$agent': conflicting env.$k — plugin '$name' sets a different value than an earlier contributor"
+            die "agent '$agent': conflicting env.$k — plugin '$name' sets a different value than an earlier plugin contributor (a plugin may freely override an env value already set in the base settings.json; only plugin-vs-plugin collisions hard-fail)"
           fi
           seen_env["$k"]="$v"
         done < <(jq -r '.env | to_entries[] | [.key, (.value|tostring)] | @tsv' "$patchf")
@@ -476,7 +485,12 @@ for agent in "${ALL_AGENTS[@]}"; do
         jq --argjson e "$envobj" '.env = ((.env // {}) * $e)' "$result_file" > "$result_file.tmp" && mv "$result_file.tmp" "$result_file"
       fi
 
-      rest="$(jq -c 'del(.model, .permissions, .env)' "$patchf")"
+      # mcpServers/hooks are excluded here even though this is a JSON
+      # merge-patch: those keys have dedicated conflict-checked channels
+      # (claude/mcp.json, claude/hooks.json) and must not reach the compiled
+      # settings via a silent last-writer-wins / array-replace through
+      # settings.patch.json instead.
+      rest="$(jq -c 'del(.model, .permissions, .env, .mcpServers, .hooks)' "$patchf")"
       if [[ "$rest" != "{}" ]]; then
         jq --argjson p "$rest" '. * $p' "$result_file" > "$result_file.tmp" && mv "$result_file.tmp" "$result_file"
       fi
