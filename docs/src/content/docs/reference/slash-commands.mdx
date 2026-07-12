@@ -89,7 +89,7 @@ Bare aliases also work positionally: `/execute opus`.
 
 ### `effort:`
 
-LLM effort level ("effort" follows the cross-provider convention — OpenAI `reasoning_effort`, Anthropic `output_config.effort`).
+LLM effort level, passed straight through to the provider's native reasoning-effort control — not injected into the prompt as a "think harder" instruction. For Claude, this is the CLI's `--effort` flag, forwarded via `claude_args` alongside `--model`/`--max-turns`/`--allowedTools` ("effort" follows the cross-provider convention — OpenAI `reasoning_effort`, Anthropic `output_config.effort`).
 
 | Value | Description |
 |-------|-------------|
@@ -98,6 +98,8 @@ LLM effort level ("effort" follows the cross-provider convention — OpenAI `rea
 | `medium` | Balanced |
 | `high` | Thorough (config default) |
 | `max` | Maximum reasoning depth |
+
+On adaptive-reasoning models, `off` degrades to the model's minimum reasoning effort rather than fully disabling thinking — the provider has no hard "no thinking" switch. `max` meaningfully increases per-run token spend, since the model reasons for longer before responding.
 
 ```
 /engineer effort:max

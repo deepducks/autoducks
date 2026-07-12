@@ -44,6 +44,8 @@ import { Aside } from '@astrojs/starlight/components';
 | `effort:` | `off`, `low`, `medium`, `high`, `max` | bare positional (`/execute max`) |
 | `turns:` | 1–1000 | `turns=`, `max-turns=`, `max_turns=` |
 
+`effort:` maps to the provider's native reasoning-effort control (for Claude, the CLI's `--effort` flag via `claude_args`) rather than a prompt instruction — see the [`effort:` reference](/reference/slash-commands#effort) for the `off`/`max` caveats.
+
 ### How far an override reaches
 
 | Path | Behavior |

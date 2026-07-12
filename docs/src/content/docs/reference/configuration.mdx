@@ -146,7 +146,7 @@ The Claude model ID for LLM agents. **Default:** `claude-sonnet-5`
 
 LLM effort level: `off`, `low`, `medium`, `high`, `max`. **Default:** `high`
 
-("effort" follows the cross-provider convention — OpenAI `reasoning_effort`, Anthropic `output_config.effort`.)
+Maps to the provider's native reasoning-effort control, not a prompt instruction — for Claude, the CLI's `--effort` flag, forwarded via `claude_args` ("effort" follows the cross-provider convention — OpenAI `reasoning_effort`, Anthropic `output_config.effort`). On adaptive-reasoning models, `off` degrades to the model's minimum reasoning effort rather than fully disabling thinking. `max` meaningfully increases per-run token spend.
 
 ### `defaults.max_turns`
 
