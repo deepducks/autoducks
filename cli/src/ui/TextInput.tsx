@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Text, useInput } from 'ink';
 import { theme } from './theme.js';
 
@@ -16,6 +16,10 @@ export interface TextInputProps {
 /** Free-text field. Under non-interactive mode it resolves to `initialValue` (or `''`) without blocking. */
 export function TextInput({ message, initialValue = '', placeholder, mask = false, isInteractive, onSubmit }: TextInputProps) {
   const [value, setValue] = useState(initialValue);
+  // `useInput`'s listener re-subscribes asynchronously, so a handler can still be
+  // running with a stale `value` closure; a ref is always current regardless of
+  // which render's closure receives the keypress.
+  const valueRef = useRef(initialValue);
 
   useEffect(() => {
     if (!isInteractive) {
@@ -28,11 +32,19 @@ export function TextInput({ message, initialValue = '', placeholder, mask = fals
   useInput(
     (input, key) => {
       if (key.return) {
-        onSubmit(value);
+        onSubmit(valueRef.current);
       } else if (key.backspace || key.delete) {
-        setValue((current) => current.slice(0, -1));
+        setValue((current) => {
+          const next = current.slice(0, -1);
+          valueRef.current = next;
+          return next;
+        });
       } else if (input && !key.ctrl && !key.meta) {
-        setValue((current) => current + input);
+        setValue((current) => {
+          const next = current + input;
+          valueRef.current = next;
+          return next;
+        });
       }
     },
     { isActive: isInteractive },
