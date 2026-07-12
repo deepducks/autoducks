@@ -25,11 +25,24 @@ const INITIAL_CONFIG = {
 
 let dir: string;
 
-const tick = () => new Promise((resolve) => setImmediate(resolve));
+// A real macrotask, not just `setImmediate`: Ink's `useInput` subscribes its listener in a
+// passive effect, which is flushed by React's scheduler on its own timer. Ticking via
+// `setImmediate` alone can race ahead of that flush right after a screen transition remounts
+// a component, silently dropping the next keypress. A short real timer reliably outlasts it.
+const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 async function waitUntil(predicate: () => boolean, attempts = 50): Promise<void> {
   for (let i = 0; i < attempts; i += 1) {
-    if (predicate()) return;
+    if (predicate()) {
+      // The frame can repaint before Ink's `useInput` finishes subscribing its listener in a
+      // passive effect (React flushes those on its own schedule, after commit) — give it a
+      // few more real ticks to settle before the caller fires the next keypress, or that
+      // keypress can land on the still-active previous screen and land nowhere at all.
+      await tick();
+      await tick();
+      await tick();
+      return;
+    }
     await tick();
   }
   throw new Error('waitUntil: condition never became true');
@@ -147,9 +160,14 @@ describe('config command (ConfigEditor)', () => {
     await waitUntil(() => (lastFrame() ?? '').includes('must be'));
     expect(lastFrame()).toContain('Max Review/Rework iterations');
 
-    // Correct it: clear "993" -> wait, buffer already has "99" typed; erase and retype.
-    stdin.write('\b\b\b');
-    await tick();
+    // Correct it: erase the rejected "399" (initial "3" + typed "99") and retype.
+    // Backspaces must be written one at a time — Ink's input parser only splits a
+    // multi-character chunk on ESC bytes, so a batched '\b\b\b' would be parsed as one
+    // literal (non-escape) run and appended verbatim instead of triggering 3 deletes.
+    for (let i = 0; i < 3; i += 1) {
+      stdin.write('\b');
+      await tick();
+    }
     stdin.write('5');
     await tick();
     stdin.write('\r');
