@@ -9,6 +9,7 @@ source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/dispatch-chain.sh"
+source "$AUTODUCKS_ROOT/core/orchestration/review-loop.sh"
 
 # The reviewer mirrors progress feedback to both the feature issue and its PR
 # when they differ; falls back to the single canonical issue for older
@@ -114,6 +115,28 @@ for _t in "${REVIEW_TARGETS[@]}"; do
   progress_labels::finish "$_t" "Review:reviewing" "$done_label"
 done
 
+# Bounded self-continuing loop: on request-changes, auto-dispatch a rework
+# round instead of waiting on a human /rework, up to review.max_iterations.
+# auto_rework:false cleanly restores the human-gated flow below.
+AUTO_REWORK_FOOTER=""
+if [[ "$VERDICT" == "request-changes" && "$AUTODUCKS_REVIEW_AUTO_REWORK" == "true" ]]; then
+  review_loop_iteration=$(review_loop::iteration "$FEATURE_NUM" "$PR_NUM")
+  case "$(review_loop::decide "$VERDICT" "$review_loop_iteration" "$AUTODUCKS_REVIEW_MAX_ITERATIONS")" in
+    continue)
+      review_loop::record "$FEATURE_NUM" "$PR_NUM" "$((review_loop_iteration + 1))"
+      # Headless rework dispatch — actor carried forward for the D15 assignee.
+      git::dispatch_workflow autoducks-rework.yml \
+        -f pr_number="$PR_NUM" \
+        -f actor="${COMMENTER:-}" \
+        ${OVERRIDE_MODEL:+-f model="$OVERRIDE_MODEL"} ${OVERRIDE_EFFORT:+-f effort="$OVERRIDE_EFFORT"}
+      AUTO_REWORK_FOOTER="🔁 Auto-rework round $((review_loop_iteration + 1))/${AUTODUCKS_REVIEW_MAX_ITERATIONS} dispatched."
+      ;;
+    stop-blocked-max)
+      AUTO_REWORK_FOOTER="⚠️ Reached max review iterations (${AUTODUCKS_REVIEW_MAX_ITERATIONS}) — stopping automatic rework."
+      ;;
+  esac
+fi
+
 react_to_comment "${COMMENT_ID:-}" "+1"
 
 PR_URL="https://github.com/${REPO}/pull/${PR_NUM}"
@@ -124,8 +147,15 @@ case "$VERDICT" in
     ;;
   request-changes)
     HEADLINE="🔴 **Review: request changes**"
-    NEXT="**Next:** run \`$(autoducks_command_for rework)\` to address the findings on this PR now,
+    if [[ "$AUTO_REWORK_FOOTER" == "🔁"* ]]; then
+      NEXT="**Next:** $AUTO_REWORK_FOOTER"
+    else
+      NEXT="**Next:** run \`$(autoducks_command_for rework)\` to address the findings on this PR now,
 or \`$(autoducks_command_for defer)\` to save them as a follow-up issue and merge as-is."
+      [[ -n "$AUTO_REWORK_FOOTER" ]] && NEXT="$NEXT
+
+$AUTO_REWORK_FOOTER"
+    fi
     ;;
   *)
     HEADLINE="💬 **Review: comment**"
