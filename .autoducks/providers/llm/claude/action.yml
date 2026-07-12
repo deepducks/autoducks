@@ -68,10 +68,39 @@ runs:
         MAX_TURNS: ${{ inputs.max_turns }}
         ALLOWED_TOOLS: ${{ inputs.allowed_tools }}
         EFFORT: ${{ inputs.effort }}
+        PROMPT_FILE: ${{ inputs.prompt_file }}
       run: |
         MT="${MAX_TURNS:-}"
         [[ -z "$MT" ]] && MT="50"
-        ARGS="--model $MODEL --max-turns $MT --allowedTools '$ALLOWED_TOOLS'"
+
+        AGENT="$(basename "$(dirname "$PROMPT_FILE")")"
+        ROOT="${AUTODUCKS_PINNED_ROOT:-.}"
+
+        DELTA_FILE="$ROOT/.autoducks/providers/llm/claude/compiled/$AGENT.allowed-tools"
+        if [[ -f "$DELTA_FILE" ]]; then
+          declare -A SEEN
+          UNION=()
+          IFS=',' read -ra INPUT_TOOLS <<< "$ALLOWED_TOOLS"
+          for t in "${INPUT_TOOLS[@]}"; do
+            [[ -z "$t" ]] && continue
+            if [[ -z "${SEEN[$t]:-}" ]]; then
+              SEEN[$t]=1
+              UNION+=("$t")
+            fi
+          done
+          while IFS= read -r t; do
+            [[ -z "$t" ]] && continue
+            if [[ -z "${SEEN[$t]:-}" ]]; then
+              SEEN[$t]=1
+              UNION+=("$t")
+            fi
+          done < <(sort "$DELTA_FILE")
+          EFFECTIVE_TOOLS="$(IFS=,; echo "${UNION[*]}")"
+        else
+          EFFECTIVE_TOOLS="$ALLOWED_TOOLS"
+        fi
+
+        ARGS="--model $MODEL --max-turns $MT --allowedTools '$EFFECTIVE_TOOLS'"
 
         case "$EFFORT" in
           low|medium|high|max) ARGS="$ARGS --effort $EFFORT" ;;
@@ -80,8 +109,16 @@ runs:
         esac
         echo "claude_args=$ARGS" >> "$GITHUB_OUTPUT"
         echo "max_thinking_tokens=${THINKING_DISABLED:+0}" >> "$GITHUB_OUTPUT"
-        SETTINGS="${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/providers/llm/claude/settings.json"
-        [[ -f "$SETTINGS" ]] && echo "settings=$SETTINGS" >> "$GITHUB_OUTPUT" || echo "settings=" >> "$GITHUB_OUTPUT"
+
+        COMPILED_SETTINGS="$ROOT/.autoducks/providers/llm/claude/compiled/$AGENT.settings.json"
+        BASE_SETTINGS="$ROOT/.autoducks/providers/llm/claude/settings.json"
+        if [[ -f "$COMPILED_SETTINGS" ]]; then
+          echo "settings=$COMPILED_SETTINGS" >> "$GITHUB_OUTPUT"
+        elif [[ -f "$BASE_SETTINGS" ]]; then
+          echo "settings=$BASE_SETTINGS" >> "$GITHUB_OUTPUT"
+        else
+          echo "settings=" >> "$GITHUB_OUTPUT"
+        fi
     - name: Run Claude agent
       id: claude
       uses: anthropics/claude-code-action@v1
