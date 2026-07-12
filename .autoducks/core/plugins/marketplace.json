@@ -1,0 +1,58 @@
+{
+  "plugins": [
+    {
+      "name": "gitlab",
+      "description": "GitLab issue tracking provider (its::) — issues, PRs, labels, comments via the GitLab API.",
+      "type": "its",
+      "source": "deepducks/autoducks-plugin-gitlab",
+      "version": "v1.0.0"
+    },
+    {
+      "name": "gitea",
+      "description": "Gitea git provider (git::) — branches, commits, and repository operations via the Gitea API.",
+      "type": "git",
+      "source": "deepducks/autoducks-plugin-gitea",
+      "version": "v1.0.0"
+    },
+    {
+      "name": "bedrock",
+      "description": "Amazon Bedrock LLM provider (llm::) — runs agents against Claude via Bedrock instead of Claude Code.",
+      "type": "llm",
+      "source": "deepducks/autoducks-plugin-bedrock",
+      "version": "v1.0.0"
+    },
+    {
+      "name": "security-baseline",
+      "description": "Adds an OWASP-baseline review checklist agent that runs alongside the Reviewer.",
+      "type": "agent",
+      "source": "deepducks/autoducks-plugin-security-baseline",
+      "version": "v1.0.0",
+      "recommended": true
+    },
+    {
+      "name": "node-audit",
+      "description": "Adds an `npm audit` check to the Developer's verification loop for Node.js repos.",
+      "type": "agent",
+      "source": "deepducks/autoducks-plugin-node-audit",
+      "version": "v1.0.0",
+      "recommended": true,
+      "repos": "node"
+    },
+    {
+      "name": "python-lint-fix",
+      "description": "Adds a ruff/black lint-fix pass to the Developer's verification loop for Python repos.",
+      "type": "agent",
+      "source": "deepducks/autoducks-plugin-python-lint-fix",
+      "version": "v1.0.0",
+      "recommended": true,
+      "repos": "python"
+    },
+    {
+      "name": "gitlab-ci",
+      "description": "Mirrors the GitHub Actions runtime workflows as GitLab CI pipeline templates.",
+      "type": "runtime",
+      "source": "deepducks/autoducks-plugin-gitlab-ci",
+      "version": "v1.0.0"
+    }
+  ]
+}
