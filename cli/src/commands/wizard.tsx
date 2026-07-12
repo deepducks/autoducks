@@ -178,13 +178,17 @@ export const run: CommandModule['run'] = async (ctx) => {
   const initialSelection = AUTOS.filter((auto) => isAutoEnabled(existing, auto)).map((auto) => auto.id);
 
   const selectedIds = await new Promise<AutoId[]>((resolve) => {
-    const instance = render(
+    // `render` can invoke `onSubmit` synchronously (non-interactive auto-resolution
+    // fires from a passive effect flushed before `render` returns), so `instance`
+    // must not be read inside the callback until the current call stack unwinds.
+    let instance: ReturnType<typeof render>;
+    instance = render(
       <AutosStep
         initialValues={initialSelection}
         isInteractive={promptable}
         onSubmit={(values) => {
-          instance.unmount();
           resolve(values);
+          queueMicrotask(() => instance.unmount());
         }}
       />,
       { patchConsole: false },
@@ -192,12 +196,13 @@ export const run: CommandModule['run'] = async (ctx) => {
   });
 
   const settingsChoice = await new Promise<SettingsChoice>((resolve) => {
-    const instance = render(
+    let instance: ReturnType<typeof render>;
+    instance = render(
       <SettingsStep
         isInteractive={promptable}
         onSubmit={(value) => {
-          instance.unmount();
           resolve(value);
+          queueMicrotask(() => instance.unmount());
         }}
       />,
       { patchConsole: false },
