@@ -1,0 +1,13 @@
+{
+  "PreToolUse": [
+    {
+      "matcher": "mcp__playwright__.*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "jq -r '\"[playwright-browser] PreToolUse: \" + (.tool_name // \"unknown\")' >&2"
+        }
+      ]
+    }
+  ]
+}
