@@ -1,6 +1,6 @@
 <script lang="ts">
   import Donut from './Donut.svelte';
-  import { domainLabels, typeChip } from '../../lib/dashboard/classify';
+  import { domainLabels, priorityGlyph, typeChip } from '../../lib/dashboard/classify';
   import { runColor, runLabel } from '../../lib/dashboard/runs';
   import type { BoardIssue, PanelId, PullRequestState } from '../../lib/dashboard/types';
 
@@ -69,12 +69,40 @@
       {issue.title}
     </a>
     {#if issue.priority}
-      <span
+      {@const glyph = priorityGlyph(issue.priority.value)}
+      <svg
         class="card__priority"
+        viewBox="0 0 16 16"
         style={`--pri:#${issue.priority.color}`}
         title={`Priority: ${issue.priority.value}`}
         aria-label={`Priority ${issue.priority.value}`}
-      ></span>
+      >
+        {#if glyph === 'critical'}
+          <path fill="currentColor" d="M8 2.6 L12.6 6.2 L12.6 4.7 L8 4.1 L3.4 4.7 L3.4 6.2 Z" />
+          <path fill="currentColor" d="M8 6 L12.6 9.6 L12.6 8.1 L8 7.5 L3.4 8.1 L3.4 9.6 Z" />
+          <path fill="currentColor" d="M8 9.4 L12.6 13 L12.6 11.5 L8 10.9 L3.4 11.5 L3.4 13 Z" />
+        {:else if glyph === 'high'}
+          <path fill="currentColor" d="M8 4 L12.6 7.6 L12.6 6.1 L8 5.5 L3.4 6.1 L3.4 7.6 Z" />
+          <path fill="currentColor" d="M8 7.4 L12.6 11 L12.6 9.5 L8 8.9 L3.4 9.5 L3.4 11 Z" />
+        {:else if glyph === 'medium'}
+          <path fill="currentColor" d="M8 6.2 L12.6 9.8 L12.6 8.3 L8 7.7 L3.4 8.3 L3.4 9.8 Z" />
+        {:else if glyph === 'low'}
+          <path fill="currentColor" d="M8 9.8 L12.6 6.2 L12.6 7.7 L8 8.3 L3.4 7.7 L3.4 6.2 Z" />
+        {:else}
+          <path
+            fill="currentColor"
+            d="M4.2 7.2H11.8A0.8 0.8 0 0 1 11.8 8.8H4.2A0.8 0.8 0 0 1 4.2 7.2Z"
+          />
+        {/if}
+      </svg>
+    {/if}
+
+    {#if issue.maxTurnsWarning}
+      <span
+        class="card__warn"
+        title="Agent hit its turn limit — re-run with a larger turns=<n> budget"
+        aria-label="Turn-limit stall"
+      >⚠️</span>
     {/if}
 
     {#if showMenu}
@@ -311,12 +339,17 @@
   }
   .card__priority {
     flex: none;
-    width: 0.62rem;
-    height: 0.62rem;
-    border-radius: 50%;
-    background: var(--pri);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--pri) 25%, transparent);
+    width: 0.75rem;
+    height: 0.75rem;
+    color: var(--pri);
     cursor: help;
+  }
+  .card__warn {
+    flex: none;
+    cursor: help;
+    color: var(--sl-color-orange, #d18616);
+    font-size: 0.75rem;
+    line-height: 1;
   }
 
   .card__type {
