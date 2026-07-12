@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ── Resolve the assembled agent prompt ──────────────────────────────
 # Provider-agnostic: emits the final prompt to stdout for the calling
-# provider action to substitute {{THINK_PHRASE}} into.
+# provider action to consume.
 #
 # Input:  PROMPT_FILE     — shipped prompt path, e.g. .autoducks/agents/engineer/prompt.md
 #         AUTODUCKS_AGENT — agent name (optional; derived from PROMPT_FILE's
@@ -18,7 +18,6 @@ set -euo pipefail
 #   3. + per-agent    — .autoducks/custom/agents/<agent>/instructions.md,
 #                       appended under "# Repository-specific instructions (<agent>)"
 #
-# {{THINK_PHRASE}} is left untouched; the caller substitutes it after assembly.
 # With no .autoducks/custom/ present, output is byte-for-byte `cat "$PROMPT_FILE"`.
 
 : "${PROMPT_FILE:?PROMPT_FILE env var required}"
