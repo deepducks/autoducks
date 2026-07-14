@@ -35,10 +35,24 @@ deliver_children() {
     while IFS= read -r m; do [[ -n "$m" ]] && child_set["$m"]=1; done \
       < <(metarepo::modules_from_body "$body")
   done
+  # Deliver each child; collect gitlinks that a squash/rebase rewrote so we can
+  # re-pin the parent to the SHA now on the child's default branch.
+  local -a repin_pairs=()
+  local out pin needs
   for m in "${!child_set[@]}"; do
     log "metarepo delivery: child '$m' → advance from $feature_branch"
-    git::submodule_deliver "$m" "$feature_branch" || log "WARN: submodule_deliver failed for '$m' (continuing)"
+    out="$(git::submodule_deliver "$m" "$feature_branch")" || log "WARN: submodule_deliver failed for '$m' (continuing)"
+    read -r pin needs <<< "${out:-}"
+    if [[ "${needs:-0}" == "1" && -n "${pin:-}" ]]; then
+      repin_pairs+=("$m=$pin")
+    fi
   done
+  # Squash/rebase rewrote some child SHAs → re-pin the parent gitlinks (and delete
+  # the retained child branches) before the parent's final PR is created.
+  if [[ "${#repin_pairs[@]}" -gt 0 ]]; then
+    log "metarepo delivery: re-pinning ${#repin_pairs[@]} gitlink(s) after squash/rebase"
+    metarepo::repin_gitlinks "$feature_branch" "${repin_pairs[@]}" || log "WARN: gitlink re-pin failed (continuing)"
+  fi
 }
 
 trap 'progress_labels::abort "$FEATURE" "Work:orchestrating" 2>/dev/null || true; \

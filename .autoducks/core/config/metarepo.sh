@@ -127,6 +127,47 @@ metarepo::commit_task() {
   git::commit_push_recursive "$child_branch" "$msg"
 }
 
+# metarepo::repin_gitlinks(feature_branch, path=sha ...) — re-point parent
+# gitlinks to the given (post-delivery) child SHAs on the feature branch, then
+# push. Used after a squash/rebase child delivery, where the child's default
+# branch was rewritten to a new SHA that the parent must now pin instead of the
+# abandoned pre-merge SHA. On a successful push, deletes the (now unreferenced)
+# retained child feature branches. Uses `git update-index --cacheinfo`, so no
+# submodule working tree needs to be initialized.
+metarepo::repin_gitlinks() {
+  local feature_branch="$1"; shift
+  local token; token="$(git::resolve_token "${REPO:-}")"
+
+  git::configure_identity 2>/dev/null || true
+  [[ -n "$token" ]] && git remote set-url origin "https://x-access-token:${token}@github.com/${REPO}.git"
+  git fetch -q origin "$feature_branch" 2>/dev/null || { echo "::warning::repin: cannot fetch $feature_branch" >&2; return 1; }
+  git checkout -q -B "$feature_branch" "origin/$feature_branch" 2>/dev/null || { echo "::warning::repin: cannot checkout $feature_branch" >&2; return 1; }
+
+  local pair path sha changed=0
+  for pair in "$@"; do
+    path="${pair%%=*}"; sha="${pair#*=}"
+    [[ -z "$path" || -z "$sha" ]] && continue
+    git update-index --cacheinfo "160000,${sha},${path}" 2>/dev/null && changed=1
+  done
+  [[ "$changed" == 1 ]] || return 0
+
+  git commit -q -m "chore(metarepo): re-pin submodule gitlinks to delivered SHAs" 2>/dev/null || return 0
+  if git push -q origin "HEAD:refs/heads/${feature_branch}" 2>/dev/null; then
+    echo "::notice::repin: re-pinned submodule gitlink(s) on $feature_branch" >&2
+    # The pre-merge SHAs are now unreferenced — delete the retained child branches.
+    for pair in "$@"; do
+      path="${pair%%=*}"
+      local slug ctok; slug="$(metarepo::slug_for_path "$path" 2>/dev/null || true)"
+      [[ -n "$slug" ]] || continue
+      ctok="$(git::resolve_token "$slug")"
+      GH_TOKEN="$ctok" gh api "repos/$slug/git/refs/heads/${feature_branch}" -X DELETE --silent 2>/dev/null || true
+    done
+  else
+    echo "::warning::repin: failed to push re-pinned gitlinks to $feature_branch — child feature branches kept (pre-merge SHA still reachable)." >&2
+    return 1
+  fi
+}
+
 # metarepo::validate_modules MOD... → exit 0 if every arg is a known submodule
 # path, else print the offenders and exit 1.
 metarepo::validate_modules() {
