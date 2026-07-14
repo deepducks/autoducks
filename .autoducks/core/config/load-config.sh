@@ -98,6 +98,40 @@ case "$AUTODUCKS_ORCHESTRATOR_MODE" in
   *) AUTODUCKS_ORCHESTRATOR_MODE="waves" ;;   # tolerate garbage
 esac
 
+# ── Metarepo mode ────────────────────────────────────────────────────
+# When enabled, autoducks drives a private aggregating "metarepo" whose child
+# repos are git submodules. Everything gated on AUTODUCKS_METAREPO; when it is
+# false (the default) single-repo behaviour is byte-identical.
+export AUTODUCKS_METAREPO
+AUTODUCKS_METAREPO="$(jq -r 'if .metarepo.enabled == true then "true" else "false" end' "$_config")"
+
+export AUTODUCKS_METAREPO_STRATEGY
+AUTODUCKS_METAREPO_STRATEGY="$(jq -r '.metarepo.protected_submodule_strategy // "auto_merge"' "$_config")"
+case "$AUTODUCKS_METAREPO_STRATEGY" in
+  auto_merge|required_check) ;;
+  *) AUTODUCKS_METAREPO_STRATEGY="auto_merge" ;;
+esac
+
+export AUTODUCKS_METAREPO_AUTH_MODE
+AUTODUCKS_METAREPO_AUTH_MODE="$(jq -r '.metarepo.auth.mode // "single_pat"' "$_config")"
+case "$AUTODUCKS_METAREPO_AUTH_MODE" in
+  single_pat|per_owner_pat|github_app) ;;
+  *) AUTODUCKS_METAREPO_AUTH_MODE="single_pat" ;;
+esac
+
+# Body marker stamped on metarepo-managed child PRs so the child's own
+# reviewer / rework / commit-lint guards skip them (the child pipeline stays
+# dormant). General capability — ships to every install, honored by the child
+# workflow `if:` guards regardless of whether that child is itself a metarepo.
+export AUTODUCKS_METAREPO_MARKER="<!-- autoducks:metarepo-managed -->"
+
+# Modules depend on one another, so execution must be backpressured: a task
+# branches off the *merged* result of the previous one. Force sequential
+# orchestration whenever metarepo mode is on (config cannot contradict it).
+if [[ "$AUTODUCKS_METAREPO" == "true" ]]; then
+  AUTODUCKS_ORCHESTRATOR_MODE="sequential"
+fi
+
 # ── Coordination-marker paths ────────────────────────────────────────
 # Coordination markers live in the runner's private temp dir (never the agent's
 # /tmp working area) and are scoped per run, so agent Bash activity and the
@@ -149,6 +183,9 @@ source "$AUTODUCKS_ROOT/providers/git/interface.sh"
 
 # ── Command-string helper (must be available in every runtime) ──────
 source "$AUTODUCKS_ROOT/core/config/command-string.sh"
+
+# ── Metarepo (submodule) helpers (inert unless AUTODUCKS_METAREPO=true) ─
+source "$AUTODUCKS_ROOT/core/config/metarepo.sh"
 
 # Only source LLM interface outside GitHub Actions runtime
 if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then

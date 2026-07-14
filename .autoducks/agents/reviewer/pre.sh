@@ -122,6 +122,19 @@ for _t in "${REVIEW_TARGETS[@]}"; do
   progress_labels::start "$_t" "Review:reviewing" "Review:done" 2>/dev/null || true
 done
 
+# ── Metarepo: make submodule objects available for the expanded diff ────
+# git::get_pr_diff (used by resolve_context) runs `git diff --submodule=diff`
+# so the reviewer sees real per-file child code instead of `-Subproject commit`
+# gitlink lines. That needs each child's objects for BOTH the base and head
+# sides present locally, so fetch all child branches (best-effort).
+if metarepo::enabled; then
+  git fetch origin "$PR_BASE" "$PR_HEAD" 2>/dev/null || true
+  git submodule sync --recursive 2>/dev/null || true
+  git submodule update --init --recursive 2>/dev/null || true
+  git submodule foreach --recursive \
+    'git fetch origin "+refs/heads/*:refs/remotes/origin/*" 2>/dev/null || true' 2>/dev/null || true
+fi
+
 # ── Gather context for the LLM ──────────────────────────────────────────
 resolve_context "reviewer" "$PR_NUM" "$FEATURE_NUM"
 

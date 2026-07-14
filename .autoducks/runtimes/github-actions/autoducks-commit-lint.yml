@@ -14,6 +14,13 @@ jobs:
   commit-lint:
     name: commit-message lint
     runs-on: ubuntu-latest
+    # Skip PRs a parent metarepo opened on this child (marker in body / label):
+    # the metarepo already reviewed the aggregate change, and this child's own
+    # pipeline is meant to stay dormant for it. push:main still lints normally.
+    if: >-
+      github.event_name == 'push' ||
+      (!contains(github.event.pull_request.body, 'autoducks:metarepo-managed') &&
+       !contains(github.event.pull_request.labels.*.name, 'Autoducks:external'))
     steps:
       - uses: actions/checkout@v4
         with:

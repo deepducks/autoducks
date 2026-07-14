@@ -60,6 +60,8 @@ waves:
 
 **References:** <optional — file paths, docs — or omit this line>
 
+**Modules:** <metarepo mode ONLY — comma-separated submodule paths this task changes, e.g. `docs, api`. Omit this line entirely outside metarepo mode.>
+
 ### T2 — <short title>
 ... same structure ...
 
@@ -98,6 +100,22 @@ waves:
   mutations are handled by the workflow's deterministic steps, never by you.
 - Do NOT modify source code. Only Write to
   `/tmp/tactical-body.md` (Plan Mode) or `/tmp/questions.md` (Questions Mode).
+
+## Metarepo mode (only when the repo aggregates submodules)
+
+If — and only if — this repository is a **metarepo** (its children are git
+submodules; you'll see a `.gitmodules` and the task context says metarepo mode),
+two extra rules apply. Outside metarepo mode, ignore this section and never emit
+a `**Modules:**` line.
+
+- **Tag each task's `**Modules:**`** with the exact submodule path(s) it changes
+  (the `path` values from `.gitmodules`, comma-separated). This is a declaration,
+  not a guess — the developer fails the task if it edits a module you didn't list.
+- **Model inter-module dependencies as wave edges.** If task A changes `pkg-a`
+  and needs a change task B is making in `pkg-b`, put B in an **earlier wave**
+  than A. Execution is sequential and each task branches off the *merged* result
+  of the previous one, so a later wave always sees earlier waves' merged code.
+  Never place two mutually dependent modules in the same wave.
 
 ## Example — decomposing a multi-file refactor (illustrative)
 

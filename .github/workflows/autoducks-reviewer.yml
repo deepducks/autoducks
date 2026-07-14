@@ -62,7 +62,9 @@ jobs:
        (startsWith(github.event.pull_request.head.ref, 'feature/') ||
         startsWith(github.event.pull_request.head.ref, 'fix/')) &&
        !startsWith(github.event.pull_request.base.ref, 'feature/') &&
-       !startsWith(github.event.pull_request.base.ref, 'fix/')) ||
+       !startsWith(github.event.pull_request.base.ref, 'fix/') &&
+       !contains(github.event.pull_request.body, 'autoducks:metarepo-managed') &&
+       !contains(github.event.pull_request.labels.*.name, 'Autoducks:external')) ||
       (github.event_name == 'issue_comment' &&
        github.event.comment.author_association != 'MANNEQUIN' &&
        startsWith(github.event.comment.body, '/review'))
@@ -71,6 +73,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
           ref: >-
             ${{
               github.event_name == 'workflow_dispatch' && inputs.pr_number != '' && format('refs/pull/{0}/head', inputs.pr_number) ||

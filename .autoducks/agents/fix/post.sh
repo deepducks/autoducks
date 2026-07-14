@@ -16,6 +16,8 @@ source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 TASK_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 PR_BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_INTEGRATION_BRANCH}"
 BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
+# Metarepo child branches mirror the pipeline feature branch.
+CHILD_BRANCH="$PR_BASE_BRANCH"
 FEATURE_NUM=""
 if [[ "$TASK_BRANCH" =~ ^(feature|fix)/([0-9]+)-issue- ]]; then
   FEATURE_NUM="${BASH_REMATCH[2]}"
@@ -49,8 +51,12 @@ if [[ "${LLM_ERROR_SUBTYPE:-}" == "error_max_turns" ]]; then
   export AUTODUCKS_FAIL_CATEGORY="max_turns"
   export AUTODUCKS_FAIL_PHASE="llm"
 
-  git add -A
-  git commit -m "WIP: partial work before max_turns (issue #${ISSUE_NUM})" || true
+  if metarepo::enabled; then
+    metarepo::commit_task "$ISSUE_NUM" "$CHILD_BRANCH" "WIP: partial work before max_turns (issue #${ISSUE_NUM})" || true
+  else
+    git add -A
+    git commit -m "WIP: partial work before max_turns (issue #${ISSUE_NUM})" || true
+  fi
   git::push_branch "$TASK_BRANCH" || true
   export AUTODUCKS_FAIL_BRANCH="$TASK_BRANCH"
 
@@ -68,8 +74,11 @@ fi
 # Check for changes (allow existing commits on reused branch)
 assert_changes "$PR_BASE_BRANCH" || true
 
-# Commit and push (only if there are staged changes)
-if ! git diff --cached --quiet 2>/dev/null; then
+# Commit and push (only if there are staged changes). In metarepo mode, push
+# child submodules first (children before parent) via metarepo::commit_task.
+if metarepo::enabled; then
+  metarepo::commit_task "$ISSUE_NUM" "$CHILD_BRANCH" "Fix implementation for issue #${ISSUE_NUM}"
+elif ! git diff --cached --quiet 2>/dev/null; then
   git commit -m "Fix implementation for issue #${ISSUE_NUM}"
 fi
 git::push_branch "$TASK_BRANCH"

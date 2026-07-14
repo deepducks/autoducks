@@ -192,6 +192,35 @@ The Maestro's PR-merged re-trigger listens on both `feature/*` and `fix/*`. The 
 
 ---
 
+## Metarepo mode (submodule aggregation)
+
+Gated on `metarepo.enabled` (config) → `AUTODUCKS_METAREPO` (env). When off (the default), everything below is inert and single-repo behaviour is byte-identical. When on, autoducks drives a private **metarepo** whose child repos are git submodules, without waking the children's own pipelines.
+
+**Config** (`autoducks.json`):
+```json
+"metarepo": {
+  "enabled": true,
+  "protected_submodule_strategy": "auto_merge",   // or "required_check" (deferred)
+  "auth": { "mode": "single_pat" },                // single_pat | per_owner_pat | github_app
+  "submodules": {}
+}
+```
+Enabling metarepo mode **forces `orchestrator.mode = sequential`** (load-config). The child repo/url/path are read from `.gitmodules` — never duplicated in config.
+
+**Branch & execution model.** Child branches **mirror the parent pipeline branch** `feature/<N>-<slug>`, created lazily off the pinned SHA. Real code is committed **directly onto the child feature branch**; the parent task branch carries only **gitlink bumps**. Execution is **backpressured (max-in-flight = 1)**: each task branches off the *merged* result of the previous one, so the gitlink only ever moves forward (no write-race) and every task builds against the current state of its dependencies. The Engineer declares, per task, a `**Modules:**` list (submodule paths) and orders inter-module dependencies as **wave edges** (a task needing another module's change goes in a later wave).
+
+**`modules:` field.** `parse-plan.py` parses the optional `**Modules:**` section, validates each entry against `.gitmodules`, and embeds a structured marker `<!-- autoducks:modules: a,b -->` in the task issue body. The developer reads it for the **drift guard** (changed submodules ⊆ declared modules — an undeclared edit fails the task); Maestro reads it to compute the affected-children union at delivery.
+
+**Push order (HANDOFF).** `git::commit_push_recursive` pushes every changed child **first** (`HEAD:refs/heads/<feature>`), then commits the parent gitlinks — so a fresh clone always resolves. The parent branch push follows.
+
+**Delivery (children-first, parent last).** At feature completion Maestro runs `git::submodule_deliver` per affected child **before** the parent final PR: an **unprotected** child has its default branch fast-forwarded and its feature branch deleted (SHA now reachable on `main`); a **protected** child gets a PR carrying the skip-marker, auto-merged by default. The human merges the parent last.
+
+**Child skip-marker** (general capability, ships to all installs). Child PRs opened by a metarepo carry `<!-- autoducks:metarepo-managed -->` in the body (or the `Autoducks:external` label). The child's own **reviewer / rework / commit-lint** `if:` guards honour it and skip, keeping the child pipeline dormant.
+
+**Auth — per-owner resolution.** A fine-grained PAT is single-owner, so every cross-repo git/gh op goes through the `git::resolve_token(repo)` seam: `single_pat` (default) uses `AUTODUCKS_PAT`; `per_owner_pat` maps owner → `AUTODUCKS_PAT_<OWNER>`; `github_app` (rides on #1106's broker) mints an installation token per owner. An **access pre-flight gate** (`metarepo-access-gate.sh`) probes write access with the credential that will push — at installer-doctor time and at run start (developer/fix `pre.sh`) — and stops **before any branch is cut**, escalating to the user with the owner-specific fix.
+
+---
+
 ## Labels
 
 | Label | Meaning |

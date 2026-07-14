@@ -20,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
+          submodules: recursive
           token: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       # Pin the machinery to the pipeline's cut commit BEFORE the agent runs, so
       # an agent editing .autoducks on its own branch cannot corrupt the scripts

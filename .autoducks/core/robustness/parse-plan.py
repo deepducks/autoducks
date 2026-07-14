@@ -27,11 +27,62 @@ HEADING_RE = re.compile(
 )
 
 SECTION_RE = re.compile(
-    r"^\*\*(?P<name>Summary|Tasks|Acceptance Criteria|References):\*\*"
+    r"^\*\*(?P<name>Summary|Tasks|Acceptance Criteria|References|Modules):\*\*"
     r"\s*(?P<content>.*?)"
-    r"(?=^\*\*(?:Summary|Tasks|Acceptance Criteria|References):\*\*|\Z)",
+    r"(?=^\*\*(?:Summary|Tasks|Acceptance Criteria|References|Modules):\*\*|\Z)",
     re.DOTALL | re.MULTILINE,
 )
+
+# Metarepo mode: a task may declare which submodules it touches via an optional
+# `**Modules:**` section. Parsed as structured data (no fuzzy text parsing at
+# commit time) and validated against .gitmodules so a typo fails at plan time.
+_MODULE_TOKEN_RE = re.compile(r"[^\s,\[\]]+")
+
+
+def submodule_paths():
+    """Submodule paths declared in the nearest .gitmodules (empty list if none)."""
+    root = Path.cwd()
+    gm = None
+    for d in [root, *root.parents]:
+        cand = d / ".gitmodules"
+        if cand.exists():
+            gm = cand
+            break
+    if gm is None:
+        return []
+    paths = []
+    for line in gm.read_text().splitlines():
+        m = re.match(r"\s*path\s*=\s*(.+?)\s*$", line)
+        if m:
+            paths.append(m.group(1))
+    return paths
+
+
+def parse_modules(sections: dict, ref: str):
+    """Extract + validate the optional per-task module list."""
+    raw = sections.get("Modules", "")
+    if not raw:
+        return []
+    mods = []
+    seen = set()
+    for tok in _MODULE_TOKEN_RE.findall(raw):
+        tok = tok.strip("-`*")
+        if tok and tok not in seen:
+            seen.add(tok)
+            mods.append(tok)
+    if os.environ.get("AUTODUCKS_METAREPO") == "true":
+        known = set(submodule_paths())
+        unknown = [m for m in mods if m not in known]
+        if unknown:
+            fail(
+                f"Task `{ref}` declares unknown module(s): {', '.join(unknown)}.",
+                hint=(
+                    "`**Modules:**` entries must be submodule paths from .gitmodules: "
+                    + (", ".join(sorted(known)) if known else "(no submodules found)")
+                ),
+                excerpt=raw,
+            )
+    return mods
 
 TEMPLATE_HINT = (
     "Required structure inside `## Tasks`:\n\n"
@@ -174,7 +225,7 @@ def parse_task_body(body: str, body_masked: str, ref: str) -> dict:
     return sections
 
 
-def build_issue_body(sections: dict) -> str:
+def build_issue_body(sections: dict, modules=None) -> str:
     parts = [
         "## Summary", "", sections["Summary"], "",
         "## Tasks", "", sections["Tasks"], "",
@@ -182,6 +233,11 @@ def build_issue_body(sections: dict) -> str:
     ]
     if sections.get("References"):
         parts += ["", "## References", "", sections["References"]]
+    if modules:
+        # Human-readable section + a machine marker the developer (drift guard)
+        # and Maestro (delivery union) read as structured data.
+        parts += ["", "## Modules", "", ", ".join(f"`{m}`" for m in modules)]
+        parts += ["", f"<!-- autoducks:modules: {','.join(modules)} -->"]
     return "\n".join(parts)
 
 
@@ -223,11 +279,13 @@ def main() -> None:
         ref_str = heading.group("ref")
         title = heading.group("title").strip()
         sections = parse_task_body(body, body_masked, ref_str)
+        modules = parse_modules(sections, ref_str)
         entries.append({
             "ref": coerce_ref(ref_str),
             "title": title,
-            "body": build_issue_body(sections),
+            "body": build_issue_body(sections, modules),
             "labels": ["Task"],
+            "modules": modules,
         })
 
     with open(out_path, "w") as f:

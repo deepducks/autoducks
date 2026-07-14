@@ -17,6 +17,30 @@ source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 log() { echo "[maestro] $*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
+# ── Metarepo delivery (children-first, before the parent final PR) ──────
+# Advance each affected child (union of the tasks' declared modules): unprotected
+# children fast-forward their default branch and drop the feature branch (SHA now
+# reachable on main); protected children get a marked, auto-merged PR. Runs
+# BEFORE create_final_pr so the parent (which the human merges last) always
+# points at child SHAs that will stay reachable after teardown. No-op outside
+# metarepo mode.
+deliver_children() {
+  metarepo::enabled || return 0
+  local feature_branch="$1"; shift
+  local -A child_set=()
+  local t body m
+  for t in "$@"; do
+    [[ -z "$t" ]] && continue
+    body="$(its::get_issue "$t" | jq -r '.body' 2>/dev/null || true)"
+    while IFS= read -r m; do [[ -n "$m" ]] && child_set["$m"]=1; done \
+      < <(metarepo::modules_from_body "$body")
+  done
+  for m in "${!child_set[@]}"; do
+    log "metarepo delivery: child '$m' → advance from $feature_branch"
+    git::submodule_deliver "$m" "$feature_branch" || log "WARN: submodule_deliver failed for '$m' (continuing)"
+  done
+}
+
 trap 'progress_labels::abort "$FEATURE" "Work:orchestrating" 2>/dev/null || true; \
      notify_failure "$FEATURE" "$RUN_ID" 2>/dev/null || true; \
      status_comment::fail "$FEATURE" 2>/dev/null || true; \
@@ -143,6 +167,7 @@ if [[ "$IS_SINGLE" == "true" ]]; then
       report "**Single-task plan** — the Developer is already on it (task PR still open). No new dispatch needed; the orchestrator finishes up when its PR merges."
     fi
   else
+    deliver_children "$FEATURE_BRANCH" "$FEATURE"
     create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "$FEATURE"
     progress_labels::finish "$FEATURE" "Work:orchestrating" "Work:done"
     its::assign_issue "$FEATURE" "${COMMENTER:-}" 2>/dev/null || true
@@ -265,6 +290,7 @@ if [[ $NEXT_WAVE -eq -1 ]]; then
         ALL_TASK_NUMS+=("$t")
       done
     done
+    deliver_children "$FEATURE_BRANCH" "${ALL_TASK_NUMS[@]}"
     FINAL_PR_NUM=$(create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "${ALL_TASK_NUMS[@]}")
 
     # Collect implementation summaries from merged task PRs

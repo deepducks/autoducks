@@ -22,6 +22,14 @@
   "orchestrator": {
     "mode": "waves"
   },
+  "metarepo": {
+    "enabled": false,
+    "protected_submodule_strategy": "auto_merge",
+    "auth": {
+      "mode": "single_pat"
+    },
+    "submodules": {}
+  },
   "product": {
     "enabled": true,
     "schedule": "0 9 * * *",

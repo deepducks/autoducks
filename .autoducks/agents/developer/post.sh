@@ -86,6 +86,16 @@ PR_BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_INTEGRATION_BRANCH}"
 BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
 FEATURE_NUM=$(pipeline_branch_number "$BASE_BRANCH")
 
+# ── Metarepo recursive commit (children-first) ─────────────────────────
+# In metarepo mode the real code lives in child submodules on the mirrored
+# feature branch; the parent task branch carries only gitlink bumps. This helper
+# enforces the drift guard (changed submodules ⊆ the task's declared modules),
+# then commits/pushes each changed child *before* staging the parent gitlinks —
+# preserving the HANDOFF push order so a fresh clone always resolves.
+# Child branches mirror the pipeline feature branch (PR_BASE_BRANCH). The commit
+# logic (drift guard + children-first push) lives in metarepo::commit_task.
+CHILD_BRANCH="$PR_BASE_BRANCH"
+
 # Catch-all: any uncaught non-zero exit below here posts a categorized
 # failure comment on the task issue (and the parent feature, if any),
 # reacts confused, and aborts the progress label — never a silent red X.
@@ -106,8 +116,14 @@ fi
 
 if [[ "${LLM_ERROR_SUBTYPE:-}" == "error_max_turns" ]]; then
   export AUTODUCKS_FAIL_CATEGORY="max_turns" AUTODUCKS_FAIL_PHASE="llm"
-  git add -A
-  git commit -m "WIP: partial work from #${ISSUE_NUM} (max_turns cutoff)" || true
+  if metarepo::enabled; then
+    # Push partial child work first so the parent gitlink never points at
+    # un-pushed child commits (drift guard failure here just skips the push).
+    metarepo::commit_task "$ISSUE_NUM" "$CHILD_BRANCH" "WIP: partial work from #${ISSUE_NUM} (max_turns cutoff)" || true
+  else
+    git add -A
+    git commit -m "WIP: partial work from #${ISSUE_NUM} (max_turns cutoff)" || true
+  fi
   git::push_branch "$TASK_BRANCH" || true          # branch now discoverable by fix/pre.sh
   export AUTODUCKS_FAIL_BRANCH="$TASK_BRANCH"
   # /tmp/work-summary.md may be absent on a max_turns cut — fall back to a
@@ -123,8 +139,14 @@ fi
 # Commit unconditionally so `git::commits_ahead` (below) reflects any diff
 # the agent produced — the diff is ground truth, checked before deciding
 # whether this run is a normal PR, a legitimate no-op, or a genuine failure.
-git add -A
-git commit -m "Implement issue #${ISSUE_NUM}" || true
+# In metarepo mode, real code is pushed to child submodules first (children
+# before parent) and the parent commit records only the gitlink bumps.
+if metarepo::enabled; then
+  metarepo::commit_task "$ISSUE_NUM" "$CHILD_BRANCH" "Implement issue #${ISSUE_NUM}"
+else
+  git add -A
+  git commit -m "Implement issue #${ISSUE_NUM}" || true
+fi
 
 # Verify-loop footer note (T2-T4); set on a passing check run below. Defined
 # at top level so the footer can read it under `set -u` on every code path.

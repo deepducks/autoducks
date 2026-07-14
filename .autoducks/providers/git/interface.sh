@@ -50,6 +50,15 @@ done
 #   git::start_check_run(name, head_sha)              → check_run_id (status=in_progress)
 #   git::conclude_check_run(check_run_id, conclusion, title, summary)
 #   git::commits_ahead(base_branch)                   → integer
+#
+#   ── Metarepo mode (inert unless AUTODUCKS_METAREPO=true) ──
+#   git::resolve_token(owner_or_slug)                 → push credential for a child
+#   git::submodule_list_changed()                     → changed submodule paths, one per line
+#   git::submodule_remote(path)                        → set per-child tokenized push remote
+#   git::commit_push_recursive(child_branch, msg)     → children-first commit/push, then parent
+#   git::submodule_deliver(path, child_branch)        → merge-time delivery for one child
+#   git::verify_write_access(slug)                    → exit 0 if the child credential can push
+#   git::submodule_protection(slug)                   → "true"/"false" default-branch protection
 
 REQUIRED_FUNCTIONS=(
   "git::create_branch"
@@ -76,6 +85,13 @@ REQUIRED_FUNCTIONS=(
   "git::start_check_run"
   "git::conclude_check_run"
   "git::commits_ahead"
+  "git::resolve_token"
+  "git::submodule_list_changed"
+  "git::submodule_remote"
+  "git::commit_push_recursive"
+  "git::submodule_deliver"
+  "git::verify_write_access"
+  "git::submodule_protection"
 )
 
 missing=0

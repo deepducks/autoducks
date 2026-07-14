@@ -43,6 +43,31 @@ else
   git checkout -b "$TASK_BRANCH"
 fi
 
+# ── Metarepo: access pre-flight gate + child submodule checkout ─────────
+# Mirrors developer/pre.sh: probe write access to the task's declared children
+# with the credential that will push, escalate + bail on failure, then check out
+# each declared child onto the mirrored feature branch so fix/post.sh can commit.
+if metarepo::enabled; then
+  source "$AUTODUCKS_ROOT/core/security/metarepo-access-gate.sh"
+  CHILD_BRANCH="$PR_BASE_BRANCH"
+  DECLARED_MODULES=()
+  while IFS= read -r _m; do [[ -n "$_m" ]] && DECLARED_MODULES+=("$_m"); done \
+    < <(metarepo::modules_from_body "$(its::get_issue "$ISSUE_NUM" | jq -r '.body' 2>/dev/null || true)")
+  if ! metarepo::access_gate "${DECLARED_MODULES[@]}"; then
+    status_comment::delegate "$ISSUE_NUM" "$(metarepo::gate_escalation_message)"
+    touch "$AUTODUCKS_PRE_FAILED_MARKER"   # fix/post.sh bails quietly on this marker
+    exit 0
+  fi
+  git submodule sync --recursive 2>/dev/null || true
+  git submodule update --init --recursive 2>/dev/null || true
+  for _m in "${DECLARED_MODULES[@]:-}"; do
+    [[ -n "$_m" && -d "$_m" ]] || continue
+    git::submodule_remote "$_m"
+    git -C "$_m" fetch origin "$CHILD_BRANCH" 2>/dev/null || true
+    git -C "$_m" checkout -B "$CHILD_BRANCH" 2>/dev/null || git -C "$_m" checkout -B "$CHILD_BRANCH" HEAD
+  done
+fi
+
 # Prepare task spec
 its::get_issue "$ISSUE_NUM" | jq -r '"# " + .title + "\n\n" + .body' > /tmp/task-spec.md
 

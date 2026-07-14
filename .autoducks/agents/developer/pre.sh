@@ -131,6 +131,40 @@ else
   git checkout -b "$TASK_BRANCH"
 fi
 
+# ── Metarepo: access pre-flight gate + child submodule checkout ─────────
+# Runs only in metarepo mode. Probes write access to the task's declared child
+# repos with the *same* credential that will push, and — on failure — stops
+# before any child branch is cut, escalating to the user (reusing the DoR
+# delegate path). Then checks out each declared child onto the mirrored feature
+# branch (off the pinned SHA), per HANDOFF, so post.sh can commit onto it.
+if metarepo::enabled; then
+  source "$AUTODUCKS_ROOT/core/security/metarepo-access-gate.sh"
+  CHILD_BRANCH="$PR_BASE_BRANCH"
+
+  ISSUE_BODY_FOR_MODULES="$(its::get_issue "$ISSUE_NUM" | jq -r '.body' 2>/dev/null || true)"
+  DECLARED_MODULES=()
+  while IFS= read -r _m; do [[ -n "$_m" ]] && DECLARED_MODULES+=("$_m"); done \
+    < <(metarepo::modules_from_body "$ISSUE_BODY_FOR_MODULES")
+
+  if ! metarepo::access_gate "${DECLARED_MODULES[@]}"; then
+    status_comment::delegate "$ISSUE_NUM" "$(metarepo::gate_escalation_message)"
+    touch "$AUTODUCKS_DOR_DELEGATED_MARKER"
+    [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "dor_skip=true" >> "$GITHUB_OUTPUT"
+    exit 0
+  fi
+
+  git submodule sync --recursive 2>/dev/null || true
+  git submodule update --init --recursive 2>/dev/null || true
+  for _m in "${DECLARED_MODULES[@]:-}"; do
+    [[ -n "$_m" && -d "$_m" ]] || continue
+    git::submodule_remote "$_m"
+    git -C "$_m" fetch origin "$CHILD_BRANCH" 2>/dev/null || true
+    # Branch off the current pinned SHA (== child feature head in sequential mode).
+    git -C "$_m" checkout -B "$CHILD_BRANCH" 2>/dev/null \
+      || git -C "$_m" checkout -B "$CHILD_BRANCH" HEAD
+  done
+fi
+
 # Prepare task spec for the LLM. resolve_context reads .context.developer.parts
 # from autoducks.json (default manifest: issue_title, issue_description,
 # prior_feedback) and writes /tmp/task-spec.md, including the marker-anchored

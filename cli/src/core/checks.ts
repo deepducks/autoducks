@@ -37,6 +37,7 @@ interface AutoducksJsonConfig {
   reviewer?: { required_check?: boolean; check_name?: string };
   defaults?: { integration_branch?: string; base_branch?: string };
   security?: unknown;
+  metarepo?: { enabled?: boolean };
 }
 
 function resolveCwd(ctx: CheckContext): string {
@@ -551,6 +552,98 @@ export async function checkReviewerRuleset(ctx: CheckContext = {}): Promise<Chec
  * Every check in order. Open-ended: append future setup checks here and
  * they're automatically picked up by `runAll()`.
  */
+/** Parse a GitHub `OWNER/REPO` slug from a submodule url; undefined for offline/relative remotes. */
+export function githubSlugFromUrl(url: string): string | undefined {
+  const u = url.trim();
+  const patterns = [
+    /^git@github\.com:(.+)$/,
+    /^ssh:\/\/git@github\.com\/(.+)$/,
+    /^https?:\/\/github\.com\/(.+)$/,
+    /^https:\/\/[^@]+@github\.com\/(.+)$/,
+  ];
+  for (const re of patterns) {
+    const m = u.match(re);
+    if (m) return m[1].replace(/\.git$/, '').replace(/\/$/, '');
+  }
+  return undefined;
+}
+
+/** Parse `.gitmodules` into { path, slug } pairs, keeping only GitHub remotes. */
+export function parseGitmodulesSlugs(content: string): Array<{ path: string; slug: string }> {
+  const blocks = content.split(/\[submodule[^\]]*\]/).slice(1);
+  const out: Array<{ path: string; slug: string }> = [];
+  for (const b of blocks) {
+    const path = b.match(/^\s*path\s*=\s*(.+?)\s*$/m)?.[1];
+    const url = b.match(/^\s*url\s*=\s*(.+?)\s*$/m)?.[1];
+    if (!path || !url) continue;
+    const slug = githubSlugFromUrl(url);
+    if (slug) out.push({ path, slug });
+  }
+  return out;
+}
+
+/**
+ * Check 12: metarepo child access. When `metarepo.enabled`, every child
+ * submodule in `.gitmodules` must resolve to a GitHub repo the current
+ * credential can push to — the doctor-time twin of the run-start pre-flight gate
+ * (developer/pre.sh), so an owner the token can't reach is caught before the
+ * first run. No-op (pass) when metarepo mode is off. Uses the ambient `gh`
+ * credential, which approximates (but is not necessarily identical to) the CI
+ * `AUTODUCKS_PAT`.
+ */
+export async function checkMetarepoAccess(ctx: CheckContext = {}): Promise<CheckResult> {
+  const id = 'metarepo-access';
+  const title = 'Metarepo child access';
+  const cwd = resolveCwd(ctx);
+  const config = await readAutoducksConfig(ctx);
+  if (!config?.metarepo?.enabled) {
+    return { id, title, status: 'pass', message: 'Metarepo mode is disabled — check skipped.' };
+  }
+
+  let gitmodules: string;
+  try {
+    gitmodules = await readFile(join(cwd, '.gitmodules'), 'utf8');
+  } catch {
+    return {
+      id, title, status: 'fail',
+      message: 'metarepo.enabled=true but no .gitmodules was found.',
+      remediation: 'Add the child repos as git submodules, or set metarepo.enabled=false.',
+    };
+  }
+
+  const children = parseGitmodulesSlugs(gitmodules);
+  if (children.length === 0) {
+    return {
+      id, title, status: 'manual',
+      message: 'No GitHub submodules detected in .gitmodules (offline/relative remotes are not probed).',
+    };
+  }
+
+  const rows: string[] = [];
+  const failures: string[] = [];
+  for (const { path: p, slug } of children) {
+    const res = await gh(['api', `repos/${slug}`, '--jq', '.permissions.push'], { cwd });
+    const writable = res.code === 0 && res.stdout.trim() === 'true';
+    const state = writable ? 'writable' : res.code === 0 ? 'read-only' : 'unreachable';
+    rows.push(`${slug} (${p}): ${state}`);
+    if (!writable) failures.push(slug);
+  }
+
+  if (failures.length > 0) {
+    return {
+      id, title, status: 'fail',
+      message: `Cannot write to ${failures.length} child repo(s):\n  ${rows.join('\n  ')}`,
+      remediation:
+        `Grant the push credential write access to: ${failures.join(', ')}. ` +
+        'A fine-grained PAT is single-owner — cross-org children need metarepo.auth.mode=per_owner_pat (an AUTODUCKS_PAT_<OWNER> secret) or a GitHub App.',
+    };
+  }
+  return {
+    id, title, status: 'pass',
+    message: `All ${children.length} child repo(s) reachable and writable:\n  ${rows.join('\n  ')}`,
+  };
+}
+
 export const ALL_CHECKS: Array<(ctx: CheckContext) => Promise<CheckResult>> = [
   checkGhAuth,
   checkLabels,
@@ -562,6 +655,7 @@ export const ALL_CHECKS: Array<(ctx: CheckContext) => Promise<CheckResult>> = [
   checkPublicRepoSecurity,
   checkRuntimeSync,
   checkReviewerRuleset,
+  checkMetarepoAccess,
 ];
 
 /** Runs every check in order; a `fail` on check 1 (gh auth) short-circuits the rest. */
