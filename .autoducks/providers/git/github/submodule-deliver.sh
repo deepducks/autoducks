@@ -61,10 +61,23 @@ ${AUTODUCKS_METAREPO_MARKER:-<!-- autoducks:metarepo-managed -->}"
 
   if [[ "${AUTODUCKS_METAREPO_STRATEGY:-auto_merge}" == "auto_merge" ]]; then
     # Metarepo feature review already passed; merge the child PR directly.
-    GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --squash --delete-branch 2>/dev/null \
-      || GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --merge --delete-branch 2>/dev/null \
-      || { echo "::warning::submodule_deliver: opened child PR #$pr_num on $slug but auto-merge failed." >&2; return 1; }
-    echo "::notice::submodule_deliver: merged protected child PR #$pr_num on $slug." >&2
+    #
+    # Prefer a MERGE COMMIT: the parent's gitlink pins the *feature-branch* SHA,
+    # so the merge method must keep that commit reachable from the child's
+    # default branch. A merge commit makes it an ancestor of main (safe to then
+    # delete the feature branch). A squash/rebase REWRITES the SHA — the pinned
+    # commit would only survive on the feature branch and orphan the moment it's
+    # deleted (HANDOFF gotcha #7: `not our ref`). So squash is a last-resort
+    # fallback (child disallows merge commits) and must NOT delete the branch,
+    # keeping the pinned SHA alive; a gitlink bump would be needed to fully heal.
+    if GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --merge --delete-branch 2>/dev/null; then
+      echo "::notice::submodule_deliver: merged protected child PR #$pr_num on $slug via merge commit (pinned SHA reachable on $default_branch)." >&2
+    elif GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --squash 2>/dev/null; then
+      echo "::warning::submodule_deliver: $slug disallows merge commits — squash-merged PR #$pr_num and KEPT branch $child_branch to preserve the pinned gitlink SHA (retention risk: the pinned commit is not on $default_branch). Consider enabling merge commits on this child, or bump the parent gitlink to the squashed SHA." >&2
+    else
+      echo "::warning::submodule_deliver: opened child PR #$pr_num on $slug but auto-merge failed." >&2
+      return 1
+    fi
   else
     echo "::notice::submodule_deliver: opened child PR #$pr_num on $slug (strategy=required_check — left for the bridge)." >&2
   fi
