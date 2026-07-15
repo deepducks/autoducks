@@ -24,6 +24,10 @@ die() { log "ERROR: $*"; exit 1; }
 # BEFORE create_final_pr so the parent (which the human merges last) always
 # points at child SHAs that will stay reachable after teardown. No-op outside
 # metarepo mode.
+#
+# STDOUT contract (single line): the delivered child_set, comma-joined and
+# sorted — callers pass this straight to create_final_pr, which stamps it as
+# the `<!-- autoducks:delivered-children: ... -->` marker the poller reads.
 deliver_children() {
   metarepo::enabled || return 0
   local feature_branch="$1"; shift
@@ -53,6 +57,7 @@ deliver_children() {
     log "metarepo delivery: re-pinning ${#repin_pairs[@]} gitlink(s) after squash/rebase"
     metarepo::repin_gitlinks "$feature_branch" "${repin_pairs[@]}" || log "WARN: gitlink re-pin failed (continuing)"
   fi
+  printf '%s\n' "${!child_set[@]}" | sort | paste -sd, -
 }
 
 trap 'progress_labels::abort "$FEATURE" "Work:orchestrating" 2>/dev/null || true; \
@@ -181,8 +186,8 @@ if [[ "$IS_SINGLE" == "true" ]]; then
       report "**Single-task plan** — the Developer is already on it (task PR still open). No new dispatch needed; the orchestrator finishes up when its PR merges."
     fi
   else
-    deliver_children "$FEATURE_BRANCH" "$FEATURE"
-    create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "$FEATURE"
+    DELIVERED_CHILDREN="$(deliver_children "$FEATURE_BRANCH" "$FEATURE")"
+    create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "$DELIVERED_CHILDREN" "$FEATURE"
     progress_labels::finish "$FEATURE" "Work:orchestrating" "Work:done"
     its::assign_issue "$FEATURE" "${COMMENTER:-}" 2>/dev/null || true
     report "🎉 **Single-task plan complete!** The PR is ready for review."
@@ -304,8 +309,8 @@ if [[ $NEXT_WAVE -eq -1 ]]; then
         ALL_TASK_NUMS+=("$t")
       done
     done
-    deliver_children "$FEATURE_BRANCH" "${ALL_TASK_NUMS[@]}"
-    FINAL_PR_NUM=$(create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "${ALL_TASK_NUMS[@]}")
+    DELIVERED_CHILDREN="$(deliver_children "$FEATURE_BRANCH" "${ALL_TASK_NUMS[@]}")"
+    FINAL_PR_NUM=$(create_final_pr "$FEATURE" "$FEATURE_BRANCH" "$AUTODUCKS_INTEGRATION_BRANCH" "$ISSUE_TITLE" "$DELIVERED_CHILDREN" "${ALL_TASK_NUMS[@]}")
 
     # Collect implementation summaries from merged task PRs
     WORKLOG=""
@@ -339,6 +344,11 @@ if [[ $NEXT_WAVE -eq -1 ]]; then
       CLOSES_BODY+="Closes #$t\n"
     done
     CLOSES_BODY+="Closes #$FEATURE"
+
+    DELIVERED_CHILDREN_MARKER="$(metarepo::delivered_children_marker "$DELIVERED_CHILDREN")"
+    if [[ -n "$DELIVERED_CHILDREN_MARKER" ]]; then
+      CLOSES_BODY+="\n\n$DELIVERED_CHILDREN_MARKER"
+    fi
 
     FULL_PR_BODY="$(echo -e "$CLOSES_BODY")"
     if [[ -n "$WORKLOG" ]]; then

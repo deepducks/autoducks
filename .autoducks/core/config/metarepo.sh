@@ -119,6 +119,19 @@ metarepo::delivered_children_from_body() {
   done
 }
 
+# metarepo::delivered_children_marker CHILDREN → the structured
+# `<!-- autoducks:delivered-children: a,b -->` marker line for CHILDREN (a
+# comma- or space-separated list of module paths), or empty when CHILDREN is
+# empty. Companion writer to metarepo::delivered_children_from_body (the
+# reader); Maestro stamps this onto the final PR body at delivery time so the
+# poller never recomputes the affected set from task issues.
+metarepo::delivered_children_marker() {
+  local children="$1" csv
+  csv="$(printf '%s' "$children" | tr -s ' ,\t\n' ',' | sed -e 's/^,//' -e 's/,$//')"
+  [[ -n "$csv" ]] || return 0
+  printf '<!-- autoducks:delivered-children: %s -->\n' "$csv"
+}
+
 # metarepo::commit_task(issue_num, child_branch, msg) — the metarepo commit path
 # shared by developer/post.sh and fix/post.sh. Enforces the drift guard (changed
 # submodules ⊆ the task's declared `**Modules:**`), then commits/pushes each
