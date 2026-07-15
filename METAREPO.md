@@ -131,12 +131,39 @@ Every cross-repo op goes through `git::resolve_token(repo)`:
 
 **Branch & execution.** Child branches mirror the parent pipeline branch
 `feature/<N>-<slug>`. Real code is committed **inside the child submodule**; the
-parent task branch carries only **gitlink bumps**. Execution is **backpressured
-(sequential, max-in-flight = 1)**: each task branches off the *merged* result of the
-previous one, so the gitlink only moves forward (no write-race). The **Engineer** tags
-each task's `**Modules:**` with the submodule path(s) it changes and orders
-inter-module dependencies as wave edges; the **Developer** edits only inside the
-declared submodule directories (never the metarepo's own `.autoducks/`).
+parent task branch carries only **gitlink bumps**. The **Engineer** tags each task's
+`**Modules:**` with the submodule path(s) it changes and orders inter-module
+dependencies as wave edges; the **Developer** edits only inside the declared submodule
+directories (never the metarepo's own `.autoducks/`).
+
+### Backpressured (sequential) execution — mandatory in metarepo mode
+
+In a metarepo, each submodule is a **single opaque gitlink** (one line) in the parent
+tree. Two tasks changing the same child concurrently collide on that pointer — even
+when the underlying files don't overlap — and resolving the collision wrong silently
+drops a task's work. Modules can also depend on each other (a change in `pkg-a` may
+need a change in `pkg-b`).
+
+So execution is **backpressured (sequential), max-in-flight = 1**: the Maestro
+dispatches **one task at a time**, and the next task is dispatched only **after the
+previous task's PR merged** into the pipeline branch. Each task therefore branches off
+the *merged* result of the previous one — the gitlink only ever moves forward (no
+write-race) and every task builds/tests against the current state of its dependencies.
+
+This is controlled by `orchestrator.mode`:
+
+- `orchestrator.mode: "sequential"` → backpressured (max-in-flight = 1).
+- `orchestrator.mode: "waves"` → parallel waves (the single-repo default).
+
+**Enabling `metarepo.enabled` forces `sequential` at runtime regardless of what the
+config says** — `load-config.sh` sets `AUTODUCKS_ORCHESTRATOR_MODE="sequential"` when
+metarepo mode is on, so the config cannot accidentally run children in parallel.
+DAG-ordered parallelism across *declared-independent* modules (unlocked by the
+`**Modules:**` declaration) is a documented future optimization, not the default.
+
+To confirm it's active: `orchestrator.mode` is `"sequential"` in `autoducks.json`, and
+any agent run logs/env shows `AUTODUCKS_ORCHESTRATOR_MODE=sequential` once
+`AUTODUCKS_METAREPO=true`.
 
 **Delivery (children-first, parent-last).** At feature completion, before the parent
 final PR:
