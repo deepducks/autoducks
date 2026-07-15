@@ -57,6 +57,33 @@ deliver_children() {
     log "metarepo delivery: re-pinning ${#repin_pairs[@]} gitlink(s) after squash/rebase"
     metarepo::repin_gitlinks "$feature_branch" "${repin_pairs[@]}" || log "WARN: gitlink re-pin failed (continuing)"
   fi
+  # Deferred-delivery feedback: a protected child is delivered via GitHub
+  # auto-merge (merges only when its required checks pass), which is async and
+  # invisible in the metarepo. Surface any still-open child delivery PR on the
+  # feature issue so a stuck/failing check is noticed instead of babysat.
+  local -a deferred=()
+  local slug tok pr
+  for m in "${!child_set[@]}"; do
+    slug="$(metarepo::slug_for_path "$m" 2>/dev/null || true)"
+    [[ -n "$slug" ]] || continue
+    [[ "$(git::submodule_protection "$slug")" == "true" ]] || continue
+    tok="$(git::resolve_token "$slug")"
+    pr="$(GH_TOKEN="$tok" gh pr list --repo "$slug" --head "$feature_branch" --state open --json number,url --jq '.[0].url // empty' 2>/dev/null || true)"
+    [[ -n "$pr" ]] && deferred+=("\`$slug\` → $pr")
+  done
+  if [[ "${#deferred[@]}" -gt 0 ]]; then
+    local list; printf -v list -- '- %s (auto-merges when checks pass)\n' "${deferred[@]}"
+    # stdout is suppressed (gh prints the comment URL) so it never pollutes the
+    # single-line STDOUT contract below.
+    its::comment_issue "$FEATURE" "🕒 **Deferred child deliveries — auto-merge pending.**
+
+These protected children have a delivery PR set to **auto-merge when their required checks pass**; they are not merged yet, and if a check goes red the PR stays open and needs manual attention:
+
+${list}
+The metarepo feature can merge now (the pinned SHAs stay reachable). But **watch these child PRs** — if one fails its checks, merge or fix it there. Automatic cross-repo reporting of the final outcome is future work (see #1106)." >/dev/null 2>&1 || log "WARN: could not post deferred-delivery comment"
+  fi
+
+  # STDOUT contract: emit the delivered child_set, comma-joined and sorted.
   printf '%s\n' "${!child_set[@]}" | sort | paste -sd, -
 }
 
