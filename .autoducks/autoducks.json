@@ -9,7 +9,8 @@
     "model": "claude-sonnet-5",
     "effort": "high",
     "base_branch": "main",
-    "merge_method": "auto"
+    "merge_method": "auto",
+    "tools": ["WebFetch", "WebSearch"]
   },
   "reviewer": {
     "required_check": false,
