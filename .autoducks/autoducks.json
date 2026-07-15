@@ -26,6 +26,11 @@
   "metarepo": {
     "enabled": false,
     "protected_submodule_strategy": "auto_merge",
+    "delivery_check": {
+      "check_name": "Autoducks: Children delivered",
+      "timeout_minutes": 45,
+      "poll_interval_seconds": 30
+    },
     "auth": {
       "mode": "single_pat"
     },
