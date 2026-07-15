@@ -24,7 +24,10 @@
 #   9. Runtime workflow sync — verifies .autoducks/runtimes match .github/workflows
 #  10. Reviewer required-check ruleset — when reviewer.required_check=true, requires
 #      the reviewer Check on the integration/base branch (needs repo admin)
-#  11. Plugin compilation sync — recomputes apply-plugins.sh's output and diffs it
+#  11. Delivery required-check ruleset — when metarepo.enabled=true and
+#      protected_submodule_strategy=required_check, requires the delivery Check
+#      on the metarepo default branch (needs repo admin)
+#  12. Plugin compilation sync — recomputes apply-plugins.sh's output and diffs it
 #      against the committed aggregators/compiled/* artifacts; validates each
 #      enabled plugin's manifest, config, and version gate; surfaces requiresSecrets
 # =============================================================================
@@ -36,7 +39,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) REPO="$2"; shift 2 ;;
     -h|--help)
-      sed -n '2,26p' "$0"
+      sed -n '2,33p' "$0"
       exit 0
       ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -67,7 +70,7 @@ echo "=== Setup check for $REPO ==="
 echo ""
 
 # --- Check 1: gh CLI auth ---
-echo "[1/11] GitHub CLI authentication"
+echo "[1/12] GitHub CLI authentication"
 if gh auth status &>/dev/null; then
   pass "gh CLI is authenticated"
 else
@@ -77,7 +80,7 @@ fi
 echo ""
 
 # --- Check 2: Labels ---
-echo "[2/11] Required labels"
+echo "[2/12] Required labels"
 LABELS=("Feature|6F42C1|Orchestration feature issue"
         "Bug|D73A4A|Autoducks bug pipeline"
         "Task|1D76DB|Autoducks task issue"
@@ -110,7 +113,7 @@ done
 echo ""
 
 # --- Check 3: Secret ---
-echo "[3/11] Required secrets"
+echo "[3/12] Required secrets"
 if gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null | grep -qx "ANTHROPIC_API_KEY"; then
   pass "Secret ANTHROPIC_API_KEY is configured"
 else
@@ -122,7 +125,7 @@ fi
 echo ""
 
 # --- Check 4: Actions permissions ---
-echo "[4/11] Actions workflow permissions"
+echo "[4/12] Actions workflow permissions"
 PERMS=$(gh api "repos/$REPO/actions/permissions/workflow" --jq '.default_workflow_permissions + "|" + (.can_approve_pull_request_reviews | tostring)' 2>/dev/null || echo "")
 
 if [[ -z "$PERMS" ]]; then
@@ -138,7 +141,7 @@ fi
 echo ""
 
 # --- Check 5: Claude Code GitHub App ---
-echo "[5/11] Claude Code GitHub App"
+echo "[5/12] Claude Code GitHub App"
 # There is no public API to list installations on a repo without proper auth.
 # Best we can do is check if the workflows can authenticate — which only happens at runtime.
 manual "Verify the Claude Code GitHub App is installed on this repository
@@ -148,7 +151,7 @@ manual "Verify the Claude Code GitHub App is installed on this repository
 echo ""
 
 # --- Check 6: Sub-issues API availability ---
-echo "[6/11] Sub-issues API availability"
+echo "[6/12] Sub-issues API availability"
 # Probe against an arbitrary issue in the repo. If the repo has zero issues,
 # the check is inconclusive — report a soft manual item.
 FIRST_ISSUE=$(gh issue list $REPO_ARG --state all --limit 1 --json number \
@@ -178,7 +181,7 @@ echo ""
 # Issue types are an org-level feature. Workflows degrade gracefully if
 # types aren't configured — the type parameter is silently ignored by the
 # API. But without them, typed feature/task relationships don't render.
-echo "[7/11] Issue types (Feature, Task)"
+echo "[7/12] Issue types (Feature, Task)"
 ORG=$(echo "$REPO" | cut -d/ -f1)
 TYPES_JSON=$(gh api "orgs/$ORG/issue-types" 2>/dev/null || echo "")
 if [[ -z "$TYPES_JSON" ]]; then
@@ -207,7 +210,7 @@ echo ""
 # --- Check 8: Public-repo security ---
 VISIBILITY=$(gh repo view "$REPO" --json visibility --jq '.visibility' 2>/dev/null || echo "")
 if [[ "$VISIBILITY" == "PUBLIC" ]]; then
-  echo "[8/11] Public-repo security posture"
+  echo "[8/12] Public-repo security posture"
   HAS_SEC=$(jq -r '.security != null' .autoducks/autoducks.json 2>/dev/null || echo "false")
   if [[ "$HAS_SEC" == "true" ]]; then
     pass "security block present in .autoducks/autoducks.json"
@@ -220,7 +223,7 @@ if [[ "$VISIBILITY" == "PUBLIC" ]]; then
 fi
 
 # --- Check 9: Runtime sync ---
-echo "[9/11] Runtime workflow sync"
+echo "[9/12] Runtime workflow sync"
 SYNC_OK=true
 for runtime in .autoducks/runtimes/github-actions/autoducks-*.yml; do
   bn=$(basename "$runtime")
@@ -242,7 +245,7 @@ echo ""
 # Opt-in (reviewer.required_check=true). Requires the reviewer's Check-run on
 # the integration/base branch so a request-changes verdict blocks the merge.
 # Uses the operator's own gh admin credentials (no stored PAT) and is idempotent.
-echo "[10/11] Reviewer required-check ruleset"
+echo "[10/12] Reviewer required-check ruleset"
 REQUIRED_CHECK=$(jq -r '.reviewer.required_check // false' .autoducks/autoducks.json 2>/dev/null || echo "false")
 if [[ "$REQUIRED_CHECK" != "true" ]]; then
   pass "Reviewer required-check disabled (reviewer.required_check=false) — nothing to enforce"
@@ -286,14 +289,65 @@ Require the '$CHECK_NAME' status check on '$GATE_BRANCH' via Settings → Rules,
 fi
 echo ""
 
-# --- Check 11: Plugin compilation sync ---
+# --- Check 11: Delivery required-check ruleset ---
+# Opt-in (metarepo.enabled=true && protected_submodule_strategy=required_check).
+# Requires the delivery poller's Check-run (AUTODUCKS_DELIVERY_CHECK_NAME) on the
+# metarepo default branch so a parent PR can't merge until every protected child
+# has delivered. Uses the operator's own gh admin credentials (no stored PAT) and
+# is idempotent — mirrors Check 10's ruleset upsert exactly.
+echo "[11/12] Delivery required-check ruleset"
+METAREPO_ENABLED=$(jq -r 'if .metarepo.enabled == true then "true" else "false" end' .autoducks/autoducks.json 2>/dev/null || echo "false")
+METAREPO_STRATEGY=$(jq -r '.metarepo.protected_submodule_strategy // "auto_merge"' .autoducks/autoducks.json 2>/dev/null || echo "auto_merge")
+if [[ "$METAREPO_ENABLED" != "true" || "$METAREPO_STRATEGY" != "required_check" ]]; then
+  pass "Delivery required-check not applicable (metarepo.enabled=$METAREPO_ENABLED, protected_submodule_strategy=$METAREPO_STRATEGY) — nothing to enforce"
+else
+  CHECK_NAME=$(jq -r '.metarepo.delivery_check.check_name // "Autoducks: Children delivered"' .autoducks/autoducks.json 2>/dev/null)
+  GATE_BRANCH=$(jq -r '.defaults.integration_branch // .defaults.base_branch // "main"' .autoducks/autoducks.json 2>/dev/null)
+  RULESET_NAME="autoducks-delivery-required"
+  PAYLOAD=$(jq -n \
+    --arg name "$RULESET_NAME" \
+    --arg ref "refs/heads/$GATE_BRANCH" \
+    --arg ctx "$CHECK_NAME" \
+    '{
+      name: $name,
+      target: "branch",
+      enforcement: "active",
+      conditions: { ref_name: { include: [$ref], exclude: [] } },
+      rules: [ {
+        type: "required_status_checks",
+        parameters: {
+          strict_required_status_checks_policy: false,
+          required_status_checks: [ { context: $ctx } ]
+        }
+      } ]
+    }')
+  EXISTING_ID=$(gh api "repos/$REPO/rulesets" --jq ".[] | select(.name==\"$RULESET_NAME\") | .id" 2>/dev/null | head -1 || echo "")
+  if [[ -n "$EXISTING_ID" ]]; then
+    if printf '%s' "$PAYLOAD" | gh api "repos/$REPO/rulesets/$EXISTING_ID" --method PUT --input - >/dev/null 2>&1; then
+      pass "Ruleset '$RULESET_NAME' updated — '$CHECK_NAME' required on '$GATE_BRANCH'"
+    else
+      manual "Could not update ruleset '$RULESET_NAME' (needs repo admin).
+Re-run setup.sh with an admin token, or set the '$CHECK_NAME' required check on '$GATE_BRANCH' via Settings → Rules."
+    fi
+  else
+    if printf '%s' "$PAYLOAD" | gh api "repos/$REPO/rulesets" --method POST --input - >/dev/null 2>&1; then
+      pass "Ruleset '$RULESET_NAME' created — '$CHECK_NAME' required on '$GATE_BRANCH'"
+    else
+      manual "Could not create the delivery ruleset (needs repo admin).
+Require the '$CHECK_NAME' status check on '$GATE_BRANCH' via Settings → Rules, or re-run setup.sh with an admin token."
+    fi
+  fi
+fi
+echo ""
+
+# --- Check 12: Plugin compilation sync ---
 # Mirrors check 9's diff-based drift detection, but for the plugin compiler:
 # recompute every artifact into a scratch dir via apply-plugins.sh's dry-run
 # interface (AUTODUCKS_APPLY_PLUGINS_OUTPUT_ROOT) and diff it against the
 # committed aggregators/compiled/* files. The compiler itself performs manifest,
 # configSchema, version-gate, and merge-conflict/collision validation and dies
 # with an actionable message on any of those — we just surface that failure.
-echo "[11/11] Plugin compilation sync"
+echo "[12/12] Plugin compilation sync"
 COMPILER=".autoducks/core/config/apply-plugins.sh"
 if [[ ! -f "$COMPILER" ]]; then
   manual "Plugin compiler not found at $COMPILER — skipping plugin compilation sync"
