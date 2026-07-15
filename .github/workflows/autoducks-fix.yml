@@ -83,7 +83,7 @@ jobs:
         uses: ./.autoducks/providers/llm/claude
         with:
           prompt_file: .autoducks/agents/fix/prompt.md
-          allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
+          allowed_tools: ${{ steps.agent.outputs.tools }}
           model: ${{ steps.directive.outputs.model || steps.agent.outputs.model }}
           effort: ${{ steps.directive.outputs.effort || steps.agent.outputs.effort }}
           max_turns: ${{ steps.directive.outputs.max_turns || steps.agent.outputs.max_turns }}

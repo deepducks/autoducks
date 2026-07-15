@@ -145,7 +145,7 @@ jobs:
         uses: ./.autoducks/providers/llm/claude
         with:
           prompt_file: .autoducks/agents/rework/prompt.md
-          allowed_tools: "Read,Grep,Glob,Write,Bash(read-only),Bash(git log:*),Bash(git show:*),Bash(git blame:*),Bash(git diff:*),Bash(git status:*),Bash(git branch --list:*),Bash(git rev-parse:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*)"
+          allowed_tools: ${{ steps.agent.outputs.tools }}
           model: ${{ steps.ctx.outputs.model || steps.agent.outputs.model }}
           effort: ${{ steps.ctx.outputs.effort || steps.agent.outputs.effort }}
           max_turns: ${{ steps.ctx.outputs.max_turns || steps.agent.outputs.max_turns }}
