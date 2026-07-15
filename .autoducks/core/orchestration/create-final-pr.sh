@@ -6,7 +6,8 @@ create_final_pr() {
   local feature_branch="$2"
   local base_branch="$3"
   local issue_title="$4"
-  shift 4
+  local delivered_children="$5"
+  shift 5
   local wave_tasks=("$@")
 
   local existing_pr
@@ -23,6 +24,12 @@ create_final_pr() {
     closes_body+="Closes #$t\n"
   done
   closes_body+="Closes #$feature_issue"
+
+  local delivered_marker
+  delivered_marker="$(metarepo::delivered_children_marker "$delivered_children")"
+  if [[ -n "$delivered_marker" ]]; then
+    closes_body+="\n\n$delivered_marker"
+  fi
 
   # git::create_pr already recovers its own "already exists"/read:org errors
   # by searching for an *open* PR (git::_find_open_pr_number); it only
