@@ -170,7 +170,7 @@ printf '%s' "$TACTICAL_CONTENT" > "$SCRATCH/a_tactical.md"
 assemble_body "$SCRATCH/a_design.md" "$SCRATCH/a_tactical.md" "$SCRATCH/a_body.md"
 
 jq -n --rawfile body "$SCRATCH/a_body.md" \
-  '{title: "Add search", body: $body, labels: ["Design:done", "Tactics:done"], author: "alice"}' \
+  '{title: "Add search", body: $body, labels: ["Design:done", "Tactics:done", "Tactics:crafting"], author: "alice"}' \
   > "$MOCK_ISSUE_DIR/$FEATURE_A.json"
 
 run_architect_round() {
