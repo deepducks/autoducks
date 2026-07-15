@@ -90,6 +90,22 @@ AUTODUCKS_MERGE_METHOD="$(echo "$_merged" | jq -r '.merge_method // "auto"')"
 export AUTODUCKS_REVIEW_CHECK_NAME
 AUTODUCKS_REVIEW_CHECK_NAME="$(jq -r '.reviewer.check_name // "Autoducks: Reviewer"' "$_config")"
 
+# ── Delivery-check name / timing ─────────────────────────────────────
+# Single source of truth shared by the delivery poller and the ruleset
+# registration, so the emitted Check-run name and the ruleset that
+# requires it can never drift apart.
+export AUTODUCKS_DELIVERY_CHECK_NAME
+AUTODUCKS_DELIVERY_CHECK_NAME="$(jq -r '.metarepo.delivery_check.check_name // "Autoducks: Children delivered"' "$_config")"
+
+export AUTODUCKS_DELIVERY_TIMEOUT_MINUTES
+AUTODUCKS_DELIVERY_TIMEOUT_MINUTES="$(jq -r '.metarepo.delivery_check.timeout_minutes // 45' "$_config")"
+[[ "$AUTODUCKS_DELIVERY_TIMEOUT_MINUTES" =~ ^[0-9]+$ ]] || AUTODUCKS_DELIVERY_TIMEOUT_MINUTES=45
+
+export AUTODUCKS_DELIVERY_POLL_INTERVAL_SECONDS
+AUTODUCKS_DELIVERY_POLL_INTERVAL_SECONDS="$(jq -r '.metarepo.delivery_check.poll_interval_seconds // 30' "$_config")"
+[[ "$AUTODUCKS_DELIVERY_POLL_INTERVAL_SECONDS" =~ ^[0-9]+$ ]] || AUTODUCKS_DELIVERY_POLL_INTERVAL_SECONDS=30
+(( AUTODUCKS_DELIVERY_POLL_INTERVAL_SECONDS < 30 )) && AUTODUCKS_DELIVERY_POLL_INTERVAL_SECONDS=30
+
 # ── Orchestrator mode ─────────────────────────────────────────────────
 export AUTODUCKS_ORCHESTRATOR_MODE
 AUTODUCKS_ORCHESTRATOR_MODE="$(jq -r '.orchestrator.mode // "waves"' "$_config")"

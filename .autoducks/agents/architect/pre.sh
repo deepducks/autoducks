@@ -66,7 +66,17 @@ fi
 # If the current body already has a tactical zone, strip it: the design is
 # changing, so the old plan (and its task issues) would go stale. post.sh
 # publishes a design-only body and tears the old plan down.
-rm -f /tmp/architect-strip-tactical.flag /tmp/architect-dropped-tasks.txt
+rm -f /tmp/architect-strip-tactical.flag /tmp/architect-dropped-tasks.txt /tmp/architect-clear-tactics.flag
+
+# Record any completed/in-progress tactics labels so post.sh can drop them once
+# a design-only body is republished — independent of whether the old body still
+# carries parseable tactical markers (a manual edit can desync the two).
+while IFS= read -r _lbl; do
+  case "$_lbl" in
+    "Tactics:done"|"Tactics:crafting") echo "$_lbl" >> /tmp/architect-clear-tactics.flag ;;
+  esac
+done <<< "$ISSUE_LABELS"
+
 if body_has_markers /tmp/issue-body-raw.md; then
   SPLIT_RC=0
   split_body /tmp/issue-body-raw.md /tmp/design-zone-discard.md /tmp/tactical-zone-discard.md || SPLIT_RC=$?

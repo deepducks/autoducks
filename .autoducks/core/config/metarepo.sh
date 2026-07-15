@@ -100,6 +100,38 @@ metarepo::modules_from_body() {
   done
 }
 
+# metarepo::delivered_children_from_body BODY → one delivered submodule path per
+# line, declared in a PR body via the `<!-- autoducks:delivered-children: a,b -->`
+# marker Maestro stamps. Structured read — never fuzzy text parsing. Empty when
+# the marker is absent.
+metarepo::delivered_children_from_body() {
+  local body="$1" line
+  line="$(printf '%s\n' "$body" | grep -oE '<!-- autoducks:delivered-children:[^>]*-->' | head -n1 || true)"
+  [[ -n "$line" ]] || return 0
+  line="${line#<!-- autoducks:delivered-children:}"
+  line="${line%-->}"
+  # Commas → spaces, then word-split (module paths never contain spaces). This
+  # trims surrounding whitespace and drops empties without the trailing-newline
+  # pitfall of `while read`.
+  local m
+  for m in ${line//,/ }; do
+    printf '%s\n' "$m"
+  done
+}
+
+# metarepo::delivered_children_marker CHILDREN → the structured
+# `<!-- autoducks:delivered-children: a,b -->` marker line for CHILDREN (a
+# comma- or space-separated list of module paths), or empty when CHILDREN is
+# empty. Companion writer to metarepo::delivered_children_from_body (the
+# reader); Maestro stamps this onto the final PR body at delivery time so the
+# poller never recomputes the affected set from task issues.
+metarepo::delivered_children_marker() {
+  local children="$1" csv
+  csv="$(printf '%s' "$children" | tr -s ' ,\t\n' ',' | sed -e 's/^,//' -e 's/,$//')"
+  [[ -n "$csv" ]] || return 0
+  printf '<!-- autoducks:delivered-children: %s -->\n' "$csv"
+}
+
 # metarepo::commit_task(issue_num, child_branch, msg) — the metarepo commit path
 # shared by developer/post.sh and fix/post.sh. Enforces the drift guard (changed
 # submodules ⊆ the task's declared `**Modules:**`), then commits/pushes each
@@ -168,6 +200,31 @@ metarepo::repin_gitlinks() {
   fi
 }
 
+# metarepo::agent_context_block → the runtime "you ARE in metarepo mode" signal
+# injected into the engineer/developer LLM inputs. Without this, an agent can't
+# tell it's a metarepo and edits the metarepo's OWN .autoducks/ machinery instead
+# of the target submodule (silent, since those paths collide).
+metarepo::agent_context_block() {
+  local p slug
+  echo "## ⚙️ Metarepo mode — RUNTIME SIGNAL (you ARE operating in a metarepo)"
+  echo
+  echo "This repository is a **metarepo**: its children are git submodules. Feature work"
+  echo "does **not** go in this repo's own files — each child lives under its submodule dir:"
+  echo
+  while IFS= read -r p; do
+    [[ -z "$p" ]] && continue
+    slug="$(metarepo::slug_for_path "$p" 2>/dev/null || true)"
+    echo "- \`$p/\` → ${slug:-$p}"
+  done < <(metarepo::submodule_paths)
+  echo
+  echo "**Mandatory rules:**"
+  echo "- All work for a child happens **inside its submodule directory** (e.g. \`autoducks/.autoducks/...\`), **never** the metarepo's own root \`.autoducks/\` or \`.github/\`."
+  echo "- The metarepo's OWN \`.autoducks/\`, \`.github/\`, and root files are the metarepo's machinery — **never edit them for a feature**."
+  echo "- A design that references a path like \`.autoducks/runtimes/...\` means that path **inside the target submodule** (\`<module>/.autoducks/runtimes/...\`)."
+  echo "- **Engineer:** tag every task's \`**Modules:**\` with the submodule path(s) it changes (e.g. \`autoducks\`). This is required, not optional."
+  echo "- **Developer:** only edit files under the task's declared module directories; if the task needs a file outside them, stop rather than editing the metarepo root."
+}
+
 # metarepo::validate_modules MOD... → exit 0 if every arg is a known submodule
 # path, else print the offenders and exit 1.
 metarepo::validate_modules() {
@@ -190,6 +247,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     slug)   metarepo::slug_for_path "${2:?path required}" ;;
     owner)  metarepo::owner_for_path "${2:?path required}" ;;
     modules) metarepo::modules_from_body "${2:-}" ;;
+    delivered) metarepo::delivered_children_from_body "${2:-}" ;;
     --help|*)
       echo "Usage: metarepo.sh {paths|slug PATH|owner PATH}"
       echo "  Config helpers mapping a submodule path -> child repo slug via .gitmodules" ;;

@@ -200,7 +200,12 @@ Gated on `metarepo.enabled` (config) → `AUTODUCKS_METAREPO` (env). When off (t
 ```json
 "metarepo": {
   "enabled": true,
-  "protected_submodule_strategy": "auto_merge",   // or "required_check" (deferred)
+  "protected_submodule_strategy": "auto_merge",   // or "required_check"
+  "delivery_check": {                              // only used by required_check
+    "check_name": "Autoducks: Children delivered",
+    "timeout_minutes": 45,
+    "poll_interval_seconds": 30
+  },
   "auth": { "mode": "single_pat" },                // single_pat | per_owner_pat | github_app
   "submodules": {}
 }
@@ -218,6 +223,15 @@ Enabling metarepo mode **forces `orchestrator.mode = sequential`** (load-config)
 - **Unprotected + `merge`** → fast-forward the default branch to `Y` (main becomes `Y`) and delete the feature branch. If the default branch has diverged (FF impossible), fall back to a **merge commit** via the merges API (keeps `Y` reachable as an ancestor) rather than force-pushing. Pin unchanged.
 - **Protected default branch** → open a marked child PR and enable GitHub **auto-merge with a merge commit** (`gh pr merge --merge --auto`). A protected branch usually gates on required checks that only pass *after* the PR opens, so GitHub merges when they go green; the merge commit keeps `Y` reachable, so **no re-pin** is needed. Protected delivery always uses a merge commit and ignores a squash/rebase `merge_method` (a squash would rewrite the SHA under an async merge, leaving nothing to re-pin synchronously). Falls back to an immediate merge commit when the repo disallows auto-merge and no checks are pending.
 - **Unprotected + `squash`/`rebase` policy** → open a marked child PR and merge it with the configured method. Squash/rebase **rewrites the SHA** to a new commit `S` on the default branch (no required checks to wait on, so this is synchronous): `Y` is abandoned, so Maestro **re-pins** the parent gitlink to `S` (via `metarepo::repin_gitlinks`, a `git update-index --cacheinfo` bump committed onto the feature branch) and only then deletes the retained child branch. This is how the autoducks squash policy is supported without orphaning the pin (HANDOFF gotcha #7).
+
+**Delivery-check strategy (`protected_submodule_strategy: required_check`).** An alternative to `auto_merge` for protected children, implemented entirely as **parent-side polling — there is no child→parent bridge**. The parent's final PR is gated on a required check, `Autoducks: Children delivered` (from `metarepo.delivery_check.check_name`), driven by the `Autoducks: Delivery Check` workflow (`.github/workflows/autoducks-delivery-check.yml`) on every `opened`/`synchronize`/`reopened`/`ready_for_review` event. It runs `poll-child-deliveries.sh`, which: derives the affected children from the `<!-- autoducks:modules: ... -->` marker on the final PR body, filters to protected children (unprotected ones were already delivered synchronously by `submodule_deliver`, same as under `auto_merge`), resolves each one's delivery PR, and polls `gh pr view --json state,mergedAt,statusCheckRollup` until every protected child has merged (check → `success`), one is closed unmerged or carries a failing/errored/timed-out check (check → `failure`), or `metarepo.delivery_check.timeout_minutes` elapses (check → `failure`). The poller is **read-only w.r.t. the children** (no merge, push, or comment) and keeps no workflow-local state, so its conclusion is a pure function of current child-PR state — a re-run simply re-derives it.
+
+**`metarepo.delivery_check` config** (only consulted under `required_check`):
+- `check_name` (default `"Autoducks: Children delivered"`) — the check-run name; also the status-check context `scripts/setup.sh` registers on the gate branch (ruleset `autoducks-delivery-required`), so the emitted check and the ruleset that requires it can never drift apart.
+- `timeout_minutes` (default `45`) — how long the poller waits for every protected child to merge before concluding `failure`; internally capped at 5h regardless of config, to stay well under GitHub's 6h job ceiling.
+- `poll_interval_seconds` (default `30`, floored at `30`) — sleep between polling rounds.
+- **Actions-minutes cost.** The poller holds a runner for the whole wait — up to `timeout_minutes`, one poll every `poll_interval_seconds` — so it bills real job wall-clock, not idle time (e.g. a 45-minute timeout at the 30s floor is up to ~90 rounds). Tune `timeout_minutes` down and/or `poll_interval_seconds` up on Actions-minutes-constrained repos.
+- **Manual failure recovery.** A `failure` conclusion (child PR closed unmerged, a failing/errored/timed-out child check, or a timeout) does not self-retry. Fix it via the child's own CI/PR — push a fix commit, satisfy the failing check, or reopen/re-merge — then either push any commit to the parent's final PR (its `synchronize` event re-triggers the workflow) or manually re-run the `Autoducks: Delivery Check` workflow from the Actions tab. Either path re-polls from current child-PR state; there is no stored history to reconcile.
 
 **Child skip-marker** (general capability, ships to all installs). Child PRs opened by a metarepo carry `<!-- autoducks:metarepo-managed -->` in the body (or the `Autoducks:external` label). The child's own **reviewer / rework / commit-lint** `if:` guards honour it and skip, keeping the child pipeline dormant.
 

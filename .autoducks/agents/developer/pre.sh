@@ -172,6 +172,7 @@ fi
 # feedback comment survives the fresh runner post.sh's push dispatched us onto.
 source "$AUTODUCKS_ROOT/core/context/resolve-context.sh"
 resolve_context "developer" "$ISSUE_NUM"
+if metarepo::enabled; then metarepo::agent_context_block >> /tmp/task-spec.md; fi
 
 # Export for post.sh
 export TASK_BRANCH BASE_BRANCH PR_BASE_BRANCH FEATURE_NUM
