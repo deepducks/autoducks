@@ -53,6 +53,50 @@ deliver_children() {
     log "metarepo delivery: re-pinning ${#repin_pairs[@]} gitlink(s) after squash/rebase"
     metarepo::repin_gitlinks "$feature_branch" "${repin_pairs[@]}" || log "WARN: gitlink re-pin failed (continuing)"
   fi
+
+  # Deferred-delivery feedback: a protected child is delivered via GitHub
+  # auto-merge (merges only when its required checks pass), which is async and
+  # invisible in the metarepo. Surface any still-open child delivery PR on the
+  # feature issue so a stuck/failing check is noticed instead of babysat. Split
+  # by whether auto-merge is actually armed (autoMergeRequest != null): a PR
+  # that reached submodule-deliver.sh's fallback (auto-merge could not be
+  # enabled, immediate merge also failed) has autoMergeRequest == null and is
+  # not merging on its own — surface it distinctly instead of folding it into
+  # the healthy "auto-merges when checks pass" framing.
+  local -a deferred=() stuck=()
+  local slug tok pr automerge
+  for m in "${!child_set[@]}"; do
+    slug="$(metarepo::slug_for_path "$m" 2>/dev/null || true)"
+    [[ -n "$slug" ]] || continue
+    [[ "$(git::submodule_protection "$slug")" == "true" ]] || continue
+    tok="$(git::resolve_token "$slug")"
+    pr="$(GH_TOKEN="$tok" gh pr list --repo "$slug" --head "$feature_branch" --state open --json number,url --jq '.[0].url // empty' 2>/dev/null || true)"
+    [[ -n "$pr" ]] || continue
+    automerge="$(GH_TOKEN="$tok" gh pr view "$pr" --repo "$slug" --json autoMergeRequest --jq '.autoMergeRequest' 2>/dev/null || true)"
+    if [[ -n "$automerge" && "$automerge" != "null" ]]; then
+      deferred+=("\`$slug\` → $pr")
+    else
+      stuck+=("\`$slug\` → $pr")
+    fi
+  done
+  if [[ "${#deferred[@]}" -gt 0 ]]; then
+    local list; printf -v list -- '- %s (auto-merges when checks pass)\n' "${deferred[@]}"
+    its::comment_issue "$FEATURE" "🕒 **Deferred child deliveries — auto-merge pending.**
+
+These protected children have a delivery PR set to **auto-merge when their required checks pass**; they are not merged yet, and if a check goes red the PR stays open and needs manual attention:
+
+${list}
+The metarepo feature can merge now (the pinned SHAs stay reachable). But **watch these child PRs** — if one fails its checks, merge or fix it there. Automatic cross-repo reporting of the final outcome is future work (see #1106)." 2>/dev/null || log "WARN: could not post deferred-delivery comment"
+  fi
+  if [[ "${#stuck[@]}" -gt 0 ]]; then
+    local slist; printf -v slist -- '- %s\n' "${stuck[@]}"
+    its::comment_issue "$FEATURE" "⚠️ **Stuck child delivery — needs attention.**
+
+These protected children have a delivery PR that is still open and could **not** be set to auto-merge (and an immediate merge also failed) — they will not merge on their own:
+
+${slist}
+Fix: on the child repo, allow merge commits and auto-merge under Settings → General → Pull Requests, then merge the PR above with a merge commit (\`gh pr merge --merge\`)." 2>/dev/null || log "WARN: could not post stuck-delivery comment"
+  fi
 }
 
 trap 'progress_labels::abort "$FEATURE" "Work:orchestrating" 2>/dev/null || true; \
