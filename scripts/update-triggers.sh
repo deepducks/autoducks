@@ -183,7 +183,9 @@ render_reviewer() {
        (startsWith(github.event.pull_request.head.ref, 'feature/') ||
         startsWith(github.event.pull_request.head.ref, 'fix/')) &&
        !startsWith(github.event.pull_request.base.ref, 'feature/') &&
-       !startsWith(github.event.pull_request.base.ref, 'fix/')) ||
+       !startsWith(github.event.pull_request.base.ref, 'fix/') &&
+       !contains(github.event.pull_request.body, 'autoducks:metarepo-managed') &&
+       !contains(github.event.pull_request.labels.*.name, 'Autoducks:external')) ||
       (github.event_name == 'issue_comment' &&
        github.event.comment.author_association != 'MANNEQUIN' &&
 EOF
@@ -229,6 +231,8 @@ render_rework() {
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' &&
        github.event.comment.author_association != 'MANNEQUIN' &&
+       !contains(github.event.issue.body, 'autoducks:metarepo-managed') &&
+       !contains(github.event.issue.labels.*.name, 'Autoducks:external') &&
 EOF
   if ((${#all[@]} == 1)); then
     printf "       startsWith(github.event.comment.body, '%s'))\n" "$(cmd_for rework)"
