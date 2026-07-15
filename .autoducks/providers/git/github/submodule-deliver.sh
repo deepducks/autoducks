@@ -105,7 +105,12 @@ git::submodule_deliver() {
   local pr_num; pr_num="$(git::_child_delivery_pr "$slug" "$default_branch" "$child_branch" "$token")"
   [[ -n "$pr_num" ]] || { echo "::warning::submodule_deliver: could not open a child PR on $slug for $child_branch." >&2; echo " 0"; return 1; }
 
-  if [[ "${AUTODUCKS_METAREPO_STRATEGY:-auto_merge}" != "auto_merge" ]]; then
+  # Under strategy=required_check, an UNPROTECTED child (squash/rebase policy)
+  # is left for the bridge — the poller stays read-only and does not merge on
+  # our behalf. A PROTECTED child still needs GitHub auto-merge enabled below
+  # so it merges once the required checks (including the delivery check) pass;
+  # skipping that would leave every protected child PR stuck open forever.
+  if [[ "${AUTODUCKS_METAREPO_STRATEGY:-auto_merge}" != "auto_merge" && "$protected" != "true" ]]; then
     echo "::notice::submodule_deliver: opened child PR #$pr_num on $slug (strategy=required_check — left for the bridge)." >&2
     echo "$feat_sha 0"; return 0
   fi
@@ -117,7 +122,9 @@ git::submodule_deliver() {
   # merge commit keeps the pinned feature SHA reachable — so no re-pin is needed.
   # This is why protected delivery always uses a merge commit and ignores a
   # squash/rebase merge_method (which would rewrite the SHA under an async merge,
-  # leaving nothing to re-pin synchronously).
+  # leaving nothing to re-pin synchronously). This applies for both auto_merge
+  # and required_check strategies, since the delivery check itself is what gates
+  # the merge under required_check.
   if [[ "$protected" == "true" ]]; then
     if GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --merge --auto --delete-branch 2>/dev/null; then
       echo "::notice::submodule_deliver: enabled auto-merge (merge commit) on protected child PR #$pr_num on $slug — merges when required checks pass; pinned SHA stays reachable." >&2
