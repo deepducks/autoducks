@@ -5,6 +5,7 @@ architecture, dependencies, and correct wave ordering before writing.
 ## Input
 
 - `/tmp/issue-request.md` — the feature / problem description (title + full issue body)
+- `/tmp/metarepo-context.md` — **present only in metarepo mode.** A runtime signal that you ARE in a metarepo, with the submodule map and mandatory rules. When present, read it first and follow it: tag every task's `**Modules:**`, and remember that referenced paths mean *inside the target submodule*, never the metarepo's own machinery.
 - `/tmp/design-zone.md` — the design zone that will be **preserved verbatim** in the issue body above your output. Read this as read-only context.
 - The repository is checked out at the current working directory — use
   Read/Glob/Grep freely to understand existing code before planning

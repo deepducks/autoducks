@@ -87,6 +87,7 @@ progress_labels::ensure
 progress_labels::start "$ISSUE_NUM" "Tactics:crafting" "Tactics:done"
 
 resolve_context "engineer" "$ISSUE_NUM"
+if metarepo::enabled; then metarepo::agent_context_block > /tmp/metarepo-context.md; fi
 
 # Revision mode: a completed tactical plan already exists (D6 — `Tactics:done`
 # is both the completion record and the routing signal).

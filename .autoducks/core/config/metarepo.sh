@@ -168,6 +168,31 @@ metarepo::repin_gitlinks() {
   fi
 }
 
+# metarepo::agent_context_block → the runtime "you ARE in metarepo mode" signal
+# injected into the engineer/developer LLM inputs. Without this, an agent can't
+# tell it's a metarepo and edits the metarepo's OWN .autoducks/ machinery instead
+# of the target submodule (silent, since those paths collide).
+metarepo::agent_context_block() {
+  local p slug
+  echo "## ⚙️ Metarepo mode — RUNTIME SIGNAL (you ARE operating in a metarepo)"
+  echo
+  echo "This repository is a **metarepo**: its children are git submodules. Feature work"
+  echo "does **not** go in this repo's own files — each child lives under its submodule dir:"
+  echo
+  while IFS= read -r p; do
+    [[ -z "$p" ]] && continue
+    slug="$(metarepo::slug_for_path "$p" 2>/dev/null || true)"
+    echo "- \`$p/\` → ${slug:-$p}"
+  done < <(metarepo::submodule_paths)
+  echo
+  echo "**Mandatory rules:**"
+  echo "- All work for a child happens **inside its submodule directory** (e.g. \`autoducks/.autoducks/...\`), **never** the metarepo's own root \`.autoducks/\` or \`.github/\`."
+  echo "- The metarepo's OWN \`.autoducks/\`, \`.github/\`, and root files are the metarepo's machinery — **never edit them for a feature**."
+  echo "- A design that references a path like \`.autoducks/runtimes/...\` means that path **inside the target submodule** (\`<module>/.autoducks/runtimes/...\`)."
+  echo "- **Engineer:** tag every task's \`**Modules:**\` with the submodule path(s) it changes (e.g. \`autoducks\`). This is required, not optional."
+  echo "- **Developer:** only edit files under the task's declared module directories; if the task needs a file outside them, stop rather than editing the metarepo root."
+}
+
 # metarepo::validate_modules MOD... → exit 0 if every arg is a known submodule
 # path, else print the offenders and exit 1.
 metarepo::validate_modules() {
