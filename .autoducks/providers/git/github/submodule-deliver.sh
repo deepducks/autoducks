@@ -110,9 +110,33 @@ git::submodule_deliver() {
     echo "$feat_sha 0"; return 0
   fi
 
+  # ── Protected child: merge commit + auto-merge-when-ready ──
+  # A protected default branch usually gates on required checks that only pass
+  # after the PR opens, so an immediate merge fails. Enable GitHub auto-merge
+  # (--auto) with a MERGE COMMIT: GitHub merges once the checks pass, and the
+  # merge commit keeps the pinned feature SHA reachable — so no re-pin is needed.
+  # This is why protected delivery always uses a merge commit and ignores a
+  # squash/rebase merge_method (which would rewrite the SHA under an async merge,
+  # leaving nothing to re-pin synchronously).
+  if [[ "$protected" == "true" ]]; then
+    if GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --merge --auto --delete-branch 2>/dev/null; then
+      echo "::notice::submodule_deliver: enabled auto-merge (merge commit) on protected child PR #$pr_num on $slug — merges when required checks pass; pinned SHA stays reachable." >&2
+      echo "$feat_sha 0"; return 0
+    fi
+    # Repo may disallow auto-merge — try an immediate merge commit (works when no
+    # required checks are pending).
+    if GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --merge --delete-branch 2>/dev/null; then
+      echo "::notice::submodule_deliver: merged protected child PR #$pr_num on $slug via merge commit." >&2
+      echo "$feat_sha 0"; return 0
+    fi
+    echo "::warning::submodule_deliver: opened protected child PR #$pr_num on $slug but could not enable auto-merge or merge it (required checks pending, or merge/auto-merge disabled). PR left open; the pinned SHA stays reachable via the retained branch." >&2
+    echo "$feat_sha 0"; return 0
+  fi
+
+  # ── Unprotected + squash/rebase policy: PR + method + re-pin ──
   case "$method" in
     merge)
-      # Merge commit keeps feat_sha reachable → no re-pin; safe to delete the branch.
+      # (Unprotected + merge was already handled by the FF/merges-API path above.)
       if GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --merge --delete-branch 2>/dev/null; then
         echo "::notice::submodule_deliver: merged child PR #$pr_num on $slug via merge commit (feat SHA reachable on $default_branch)." >&2
         echo "$feat_sha 0"; return 0
