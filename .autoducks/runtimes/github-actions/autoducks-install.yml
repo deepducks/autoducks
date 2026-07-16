@@ -53,12 +53,14 @@ jobs:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
         run: |
           set -euo pipefail
-          if git diff --quiet && git diff --cached --quiet; then
-            echo "no changes to commit"; exit 0
-          fi
           git config user.name "autoducks[bot]"
           git config user.email "autoducks[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git add -A
+          # Stage everything first — install.sh writes untracked files, which
+          # `git diff` alone does not see. Check the staged set for changes.
+          if git diff --cached --quiet; then
+            echo "no changes to commit"; exit 0
+          fi
           git commit -q -m "chore(autoducks): install machinery (app mode)"
           git push origin "HEAD:${GITHUB_REF_NAME}"
