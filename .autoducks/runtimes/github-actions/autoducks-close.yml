@@ -5,6 +5,7 @@ on:
     types: [created]
 
 permissions:
+  id-token: write
   contents: write
   issues: write
   pull-requests: write
@@ -17,6 +18,26 @@ jobs:
       startsWith(github.event.comment.body, '/close')
     runs-on: ubuntu-latest
     steps:
+      - name: Mint app token
+        id: apptoken
+        shell: bash
+        env:
+          AUTODUCKS_BROKER_URL: ${{ vars.AUTODUCKS_BROKER_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTODUCKS_BROKER_URL:-}" ]; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          OIDC=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=autoducks-broker" | jq -r .value)
+          TOKEN=$(curl -sf -X POST -H "Authorization: Bearer $OIDC" \
+            "$AUTODUCKS_BROKER_URL/token" | jq -r .token)
+          echo "::add-mask::$TOKEN"
+          {
+            echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
+            echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          }
       - uses: actions/checkout@v4
       - name: Authorize
         id: authz
@@ -43,7 +64,7 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ github.event.comment.user.login }}
-          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run close
         id: run
         if: steps.authz.outcome == 'success'
@@ -54,7 +75,7 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ github.event.comment.user.login }}
-          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: User post hook
         if: >-
           always() && steps.authz.outcome == 'success' &&
@@ -69,4 +90,4 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ github.event.comment.user.login }}
           AGENT_OUTCOME: ${{ steps.run.outcome }}
-          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
