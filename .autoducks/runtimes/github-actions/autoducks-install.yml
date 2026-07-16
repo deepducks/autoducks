@@ -22,8 +22,11 @@ permissions:
 
 jobs:
   install:
-    # Safety: only ever run on a setup branch, never on a default branch.
-    if: startsWith(github.ref_name, 'autoducks/setup')
+    # Only ever run on a setup branch, never a default branch; and never
+    # re-trigger on the machinery commit this workflow itself pushes.
+    if: >-
+      startsWith(github.ref_name, 'autoducks/setup') &&
+      !contains(github.event.head_commit.message, 'install machinery')
     runs-on: ubuntu-latest
     steps:
       # persist-credentials: false so the push below uses the app IAT in the
