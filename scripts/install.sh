@@ -17,15 +17,21 @@ set -euo pipefail
 
 SOURCE_REPO="deepducks/autoducks"
 BRANCH="main"
-BASE_URL="https://raw.githubusercontent.com/${SOURCE_REPO}/${BRANCH}"
 
 REPO=""
 NO_SETUP=false
+APP_MODE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) REPO="$2"; shift 2 ;;
     --no-setup) NO_SETUP=true; shift ;;
+    # Enable the autoducks GitHub App broker by default in the installed
+    # workflows (un-gates the mint step so no AUTODUCKS_APP variable is needed).
+    # Used by the cloud/installer-workflow setup where the app is installed.
+    --app-mode) APP_MODE=true; shift ;;
+    # Pin the machinery to a specific ref (commit SHA/tag) instead of main.
+    --ref) BRANCH="$2"; shift 2 ;;
     -h|--help)
       sed -n '2,14p' "$0"
       exit 0
@@ -146,6 +152,19 @@ if [[ -f ".autoducks/autoducks.json" ]] && [[ -f ".autoducks/core/config/apply-p
   echo ""
   echo "Applying plugins..."
   bash .autoducks/core/config/apply-plugins.sh
+fi
+
+# App mode: default the AUTODUCKS_APP flag to on in the installed workflows so
+# the broker mint step is active by presence (no repo variable needed). The
+# app is installed in cloud/installer-workflow setup, so minting always applies.
+# Idempotent: the rewritten form no longer ends in "vars.AUTODUCKS_APP }}".
+if [[ "$APP_MODE" == true ]]; then
+  echo ""
+  echo "Enabling autoducks app mode in workflows..."
+  for wf in .github/workflows/autoducks-*.yml; do
+    [[ -f "$wf" ]] || continue
+    perl -pi -e "s/vars\.AUTODUCKS_APP \}\}/vars.AUTODUCKS_APP || '1' }}/g" "$wf"
+  done
 fi
 
 echo ""
