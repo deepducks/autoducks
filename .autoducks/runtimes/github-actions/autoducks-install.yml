@@ -26,7 +26,12 @@ jobs:
     if: startsWith(github.ref_name, 'autoducks/setup')
     runs-on: ubuntu-latest
     steps:
+      # persist-credentials: false so the push below uses the app IAT in the
+      # remote URL, not the default GITHUB_TOKEN checkout persists in an
+      # http.extraheader (which takes precedence and lacks workflows:write).
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Mint app token
         id: apptoken
         shell: bash
