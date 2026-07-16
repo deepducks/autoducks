@@ -23,13 +23,18 @@ git::_owner_var_suffix() {
   printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_' | sed 's/_*$//'
 }
 
+# Central broker endpoint. Hardcoded (not config) so no repo variable or app
+# permission is needed to point at it; if it ever moves, sync autoducks.
+readonly _AUTODUCKS_BROKER_URL="https://autoducks-api.gustavospgondim.workers.dev"
+
 # Mint a broker installation token scoped to TARGET (owner/repo) for a
 # same-owner sibling. Requests a fresh OIDC token and exchanges it at the
 # broker; the broker refuses cross-owner targets and repos the app isn't
-# installed on. Prints the token, or nothing on any failure (caller falls back).
+# installed on. Only meaningful under metarepo.auth.mode=github_app (an explicit
+# opt-in). Prints the token, or nothing on any failure (caller falls back).
 git::_mint_app_token() {
   local target="$1"
-  [[ -n "${AUTODUCKS_BROKER_URL:-}" && -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]] || return 1
+  [[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]] || return 1
   local oidc
   oidc="$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
     "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=autoducks-broker" 2>/dev/null | jq -r .value)" || return 1
@@ -37,7 +42,7 @@ git::_mint_app_token() {
   local tok
   tok="$(curl -sf -X POST -H "Authorization: Bearer $oidc" \
     -H "Content-Type: application/json" -d "{\"repository\":\"$target\"}" \
-    "${AUTODUCKS_BROKER_URL}/token" 2>/dev/null | jq -r .token)" || return 1
+    "${_AUTODUCKS_BROKER_URL}/token" 2>/dev/null | jq -r .token)" || return 1
   [[ -n "$tok" && "$tok" != "null" ]] || return 1
   printf '%s' "$tok"
 }

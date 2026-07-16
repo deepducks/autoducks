@@ -89,23 +89,25 @@ jobs:
         id: apptoken
         shell: bash
         env:
-          AUTODUCKS_BROKER_URL: ${{ vars.AUTODUCKS_BROKER_URL }}
+          # Opt-in flag only (any non-empty value enables app mode). The broker
+          # URL is hardcoded below — if it ever moves, sync autoducks. Absent
+          # flag = skip before any network call, so PAT-only repos never reach
+          # the central broker.
+          AUTODUCKS_APP: ${{ vars.AUTODUCKS_APP }}
         run: |
           set -euo pipefail
-          if [ -z "${AUTODUCKS_BROKER_URL:-}" ]; then
+          if [ -z "${AUTODUCKS_APP:-}" ]; then
             echo "value=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          BROKER="https://autoducks-api.gustavospgondim.workers.dev"
           OIDC=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=autoducks-broker" | jq -r .value)
           TOKEN=$(curl -sf -X POST -H "Authorization: Bearer $OIDC" \
-            "$AUTODUCKS_BROKER_URL/token" | jq -r .token)
+            "$BROKER/token" | jq -r .token)
           echo "::add-mask::$TOKEN"
           echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
-          {
-            echo "AUTODUCKS_APP_TOKEN=$TOKEN"
-            echo "AUTODUCKS_BROKER_URL=$AUTODUCKS_BROKER_URL"
-          } >> "$GITHUB_ENV"
+          echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
       - name: Determine feature issue
         id: feature
         run: |
@@ -133,23 +135,25 @@ jobs:
         id: apptoken
         shell: bash
         env:
-          AUTODUCKS_BROKER_URL: ${{ vars.AUTODUCKS_BROKER_URL }}
+          # Opt-in flag only (any non-empty value enables app mode). The broker
+          # URL is hardcoded below — if it ever moves, sync autoducks. Absent
+          # flag = skip before any network call, so PAT-only repos never reach
+          # the central broker.
+          AUTODUCKS_APP: ${{ vars.AUTODUCKS_APP }}
         run: |
           set -euo pipefail
-          if [ -z "${AUTODUCKS_BROKER_URL:-}" ]; then
+          if [ -z "${AUTODUCKS_APP:-}" ]; then
             echo "value=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          BROKER="https://autoducks-api.gustavospgondim.workers.dev"
           OIDC=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=autoducks-broker" | jq -r .value)
           TOKEN=$(curl -sf -X POST -H "Authorization: Bearer $OIDC" \
-            "$AUTODUCKS_BROKER_URL/token" | jq -r .token)
+            "$BROKER/token" | jq -r .token)
           echo "::add-mask::$TOKEN"
           echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
-          {
-            echo "AUTODUCKS_APP_TOKEN=$TOKEN"
-            echo "AUTODUCKS_BROKER_URL=$AUTODUCKS_BROKER_URL"
-          } >> "$GITHUB_ENV"
+          echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - name: Authorize
         id: authz
