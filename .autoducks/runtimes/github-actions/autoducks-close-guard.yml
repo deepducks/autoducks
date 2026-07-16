@@ -30,10 +30,11 @@ jobs:
           TOKEN=$(curl -sf -X POST -H "Authorization: Bearer $OIDC" \
             "$AUTODUCKS_BROKER_URL/token" | jq -r .token)
           echo "::add-mask::$TOKEN"
+          echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
           {
-            echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
-            echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-          }
+            echo "AUTODUCKS_APP_TOKEN=$TOKEN"
+            echo "AUTODUCKS_BROKER_URL=$AUTODUCKS_BROKER_URL"
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - name: Authorize
         id: authz

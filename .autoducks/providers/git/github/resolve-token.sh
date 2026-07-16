@@ -23,6 +23,25 @@ git::_owner_var_suffix() {
   printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_' | sed 's/_*$//'
 }
 
+# Mint a broker installation token scoped to TARGET (owner/repo) for a
+# same-owner sibling. Requests a fresh OIDC token and exchanges it at the
+# broker; the broker refuses cross-owner targets and repos the app isn't
+# installed on. Prints the token, or nothing on any failure (caller falls back).
+git::_mint_app_token() {
+  local target="$1"
+  [[ -n "${AUTODUCKS_BROKER_URL:-}" && -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]] || return 1
+  local oidc
+  oidc="$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+    "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=autoducks-broker" 2>/dev/null | jq -r .value)" || return 1
+  [[ -n "$oidc" && "$oidc" != "null" ]] || return 1
+  local tok
+  tok="$(curl -sf -X POST -H "Authorization: Bearer $oidc" \
+    -H "Content-Type: application/json" -d "{\"repository\":\"$target\"}" \
+    "${AUTODUCKS_BROKER_URL}/token" 2>/dev/null | jq -r .token)" || return 1
+  [[ -n "$tok" && "$tok" != "null" ]] || return 1
+  printf '%s' "$tok"
+}
+
 git::resolve_token() {
   local repo="${1:-}"
   local owner="${repo%%/*}"
@@ -41,16 +60,20 @@ git::resolve_token() {
       git::_default_token
       ;;
     github_app)
-      # The autoducks GitHub App broker mints an installation token scoped to
-      # the *current* repo (from the workflow's OIDC claim); an early workflow
-      # step exports it as AUTODUCKS_APP_TOKEN. Use it for the current repo.
-      # A cross-repo request (metarepo child in another repo/owner) is not
-      # broker-scoped yet, so fall back to the PAT — same-owner metarepo child
-      # broker minting is the remaining Phase 2 step (see meta-autoducks#5).
+      # Current repo: reuse the token an early workflow step already minted and
+      # exported as AUTODUCKS_APP_TOKEN.
       local current="${GITHUB_REPOSITORY:-}"
       if [[ -n "${AUTODUCKS_APP_TOKEN:-}" && ( -z "$repo" || "$repo" == "$current" ) ]]; then
         printf '%s' "$AUTODUCKS_APP_TOKEN"
         return 0
+      fi
+      # Same-owner sibling (metarepo child): mint a target-scoped token via the
+      # broker. The broker enforces same-owner + app-installed; cross-owner and
+      # no-broker cases fall through to the PAT.
+      if [[ -n "$repo" ]]; then
+        local tok; tok="$(git::_mint_app_token "$repo")" && [[ -n "$tok" ]] && {
+          printf '%s' "$tok"; return 0
+        }
       fi
       git::_default_token
       ;;
