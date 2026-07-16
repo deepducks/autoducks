@@ -27,11 +27,34 @@ jobs:
       !contains(github.event.pull_request.body, 'autoducks:metarepo-managed')
     runs-on: ubuntu-latest
     steps:
+      - name: Mint app token
+        id: apptoken
+        shell: bash
+        env:
+          # Opt-in flag only (any non-empty value enables app mode). The broker
+          # URL is hardcoded below — if it ever moves, sync autoducks. Absent
+          # flag = skip before any network call, so PAT-only repos never reach
+          # the central broker.
+          AUTODUCKS_APP: ${{ vars.AUTODUCKS_APP }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTODUCKS_APP:-}" ]; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BROKER="https://autoducks-api.gustavospgondim.workers.dev"
+          OIDC=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=autoducks-broker" | jq -r .value)
+          TOKEN=$(curl -sf -X POST -H "Authorization: Bearer $OIDC" \
+            "$BROKER/token" | jq -r .token)
+          echo "::add-mask::$TOKEN"
+          echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
-          token: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
           ref: refs/pull/${{ github.event.pull_request.number }}/head
       # Pin the machinery to the pipeline's cut commit BEFORE polling, so an
       # agent editing .autoducks on its own branch cannot corrupt the scripts
@@ -47,7 +70,7 @@ jobs:
           PR_NUM: ${{ github.event.pull_request.number }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.ref }}
-          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
           # Checks API is GitHub-App-only — the PAT above cannot create/conclude
           # the required check-run; check-run.sh routes those calls through this.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

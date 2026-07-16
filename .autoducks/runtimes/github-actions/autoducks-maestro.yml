@@ -36,6 +36,7 @@ on:
     types: [created]
 
 permissions:
+  id-token: write
   contents: write
   issues: write
   pull-requests: write
@@ -84,6 +85,29 @@ jobs:
     outputs:
       feature_number: ${{ steps.feature.outputs.number }}
     steps:
+      - name: Mint app token
+        id: apptoken
+        shell: bash
+        env:
+          # Opt-in flag only (any non-empty value enables app mode). The broker
+          # URL is hardcoded below — if it ever moves, sync autoducks. Absent
+          # flag = skip before any network call, so PAT-only repos never reach
+          # the central broker.
+          AUTODUCKS_APP: ${{ vars.AUTODUCKS_APP }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTODUCKS_APP:-}" ]; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BROKER="https://autoducks-api.gustavospgondim.workers.dev"
+          OIDC=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=autoducks-broker" | jq -r .value)
+          TOKEN=$(curl -sf -X POST -H "Authorization: Bearer $OIDC" \
+            "$BROKER/token" | jq -r .token)
+          echo "::add-mask::$TOKEN"
+          echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
       - name: Determine feature issue
         id: feature
         run: |
@@ -107,6 +131,29 @@ jobs:
     # instantly with no runner — breaking `/execute`, `/run`, `/work` and
     # manual dispatch. See regression from "Serialize Maestro wave dispatch".
     steps:
+      - name: Mint app token
+        id: apptoken
+        shell: bash
+        env:
+          # Opt-in flag only (any non-empty value enables app mode). The broker
+          # URL is hardcoded below — if it ever moves, sync autoducks. Absent
+          # flag = skip before any network call, so PAT-only repos never reach
+          # the central broker.
+          AUTODUCKS_APP: ${{ vars.AUTODUCKS_APP }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTODUCKS_APP:-}" ]; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BROKER="https://autoducks-api.gustavospgondim.workers.dev"
+          OIDC=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=autoducks-broker" | jq -r .value)
+          TOKEN=$(curl -sf -X POST -H "Authorization: Bearer $OIDC" \
+            "$BROKER/token" | jq -r .token)
+          echo "::add-mask::$TOKEN"
+          echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - name: Authorize
         id: authz
@@ -139,7 +186,7 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ github.event.comment.user.login || inputs.actor || '' }}
-          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run orchestrator
         id: run
         if: steps.authz.outcome == 'success'
@@ -158,7 +205,7 @@ jobs:
           OVERRIDE_EFFORT: ${{ steps.directive.outputs.effort || inputs.effort || '' }}
           OVERRIDE_MAX_TURNS: ${{ steps.directive.outputs.max_turns || inputs.max_turns || '' }}
           OVERRIDE_MODE: ${{ steps.directive.outputs.mode || inputs.mode || '' }}
-          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: User post hook
         if: >-
           always() && steps.authz.outcome == 'success' &&
@@ -173,4 +220,4 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ github.event.comment.user.login || inputs.actor || '' }}
           AGENT_OUTCOME: ${{ steps.run.outcome }}
-          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}

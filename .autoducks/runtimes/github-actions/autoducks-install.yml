@@ -1,0 +1,82 @@
+name: 'Autoducks: Install'
+# Cloud-setup installer. The setup wizard (autoducks-api) commits this file plus
+# autoducks.json to an `autoducks/setup*` branch and opens a PR; the push fires
+# this workflow, which pulls the machinery (install.sh --app-mode) and commits it
+# to the same branch so the whole change is reviewable in the PR. Requires the
+# autoducks GitHub App installed (the broker mints the token used to push the
+# machinery — GITHUB_TOKEN cannot write .github/workflows/ files).
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Pin machinery to a commit SHA/tag (default: main)'
+        required: false
+        default: ''
+  push:
+    branches:
+      - 'autoducks/setup**'
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  install:
+    # Only ever run on a setup branch, never a default branch; and never
+    # re-trigger on the machinery commit this workflow itself pushes.
+    if: >-
+      startsWith(github.ref_name, 'autoducks/setup') &&
+      !contains(github.event.head_commit.message, 'install machinery')
+    runs-on: ubuntu-latest
+    steps:
+      # persist-credentials: false so the push below uses the app IAT in the
+      # remote URL, not the default GITHUB_TOKEN checkout persists in an
+      # http.extraheader (which takes precedence and lacks workflows:write).
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Mint app token
+        id: apptoken
+        shell: bash
+        run: |
+          set -euo pipefail
+          BROKER="https://autoducks-api.gustavospgondim.workers.dev"
+          OIDC=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=autoducks-broker" | jq -r .value)
+          TOKEN=$(curl -sf -X POST -H "Authorization: Bearer $OIDC" "$BROKER/token" | jq -r .token)
+          [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "app not installed / broker refused"; exit 1; }
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+      - name: Install machinery (app mode)
+        shell: bash
+        env:
+          REF: ${{ github.event.inputs.ref }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/deepducks/autoducks/main/scripts/install.sh -o /tmp/autoducks-install.sh
+          bash /tmp/autoducks-install.sh --app-mode --no-setup ${REF:+--ref "$REF"}
+      - name: Commit machinery to the setup branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "autoducks[bot]"
+          git config user.email "autoducks[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git add -A
+          # Stage everything first — install.sh writes untracked files, which
+          # `git diff` alone does not see. Check the staged set for changes.
+          if git diff --cached --quiet; then
+            echo "no changes to commit"; exit 0
+          fi
+          git commit -q -m "chore(autoducks): install machinery (app mode)"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+      - name: Setup (labels, rulesets, checks)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+        # Best-effort: labels (issues:write) always apply; admin-gated steps
+        # (Actions perms, reviewer ruleset) apply only if the minted token
+        # carries administration, otherwise they warn and are left to the user.
+        run: bash scripts/setup.sh --repo "$GITHUB_REPOSITORY" || true

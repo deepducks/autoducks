@@ -18,11 +18,34 @@ jobs:
       startsWith(github.event.comment.body, '/fix')
     runs-on: ubuntu-latest
     steps:
+      - name: Mint app token
+        id: apptoken
+        shell: bash
+        env:
+          # Opt-in flag only (any non-empty value enables app mode). The broker
+          # URL is hardcoded below — if it ever moves, sync autoducks. Absent
+          # flag = skip before any network call, so PAT-only repos never reach
+          # the central broker.
+          AUTODUCKS_APP: ${{ vars.AUTODUCKS_APP }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTODUCKS_APP:-}" ]; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BROKER="https://autoducks-api.gustavospgondim.workers.dev"
+          OIDC=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=autoducks-broker" | jq -r .value)
+          TOKEN=$(curl -sf -X POST -H "Authorization: Bearer $OIDC" \
+            "$BROKER/token" | jq -r .token)
+          echo "::add-mask::$TOKEN"
+          echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
-          token: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       # Pin the machinery to the pipeline's cut commit BEFORE the agent runs, so
       # an agent editing .autoducks on its own branch cannot corrupt the scripts
       # that run its build, and the machinery cannot drift across waves/reviews
@@ -62,7 +85,7 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ github.event.comment.user.login }}
-          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: User pre hook
         if: >-
           steps.authz.outcome == 'success' &&
@@ -76,7 +99,7 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ github.event.comment.user.login }}
-          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Run LLM agent
         id: llm
         if: steps.authz.outcome == 'success'
@@ -89,6 +112,7 @@ jobs:
           max_turns: ${{ steps.directive.outputs.max_turns || steps.agent.outputs.max_turns }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ steps.apptoken.outputs.value }}
       - name: User post hook
         if: >-
           always() && steps.authz.outcome == 'success' &&
@@ -103,7 +127,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ github.event.comment.user.login }}
           AGENT_OUTCOME: ${{ steps.llm.outcome }}
-          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: Post-execution
         id: post
         if: always() && steps.authz.outcome == 'success'
@@ -118,7 +142,7 @@ jobs:
           EFFORT: ${{ steps.directive.outputs.effort || steps.agent.outputs.effort }}
           MAX_TURNS: ${{ steps.directive.outputs.max_turns || steps.agent.outputs.max_turns }}
           JOB_STATUS: ${{ job.status }}
-          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
           LLM_ERROR_SUBTYPE: ${{ steps.llm.outputs.error_subtype }}
           LLM_SKIPPED: ${{ steps.llm.outputs.skipped }}
       # Last-resort backstop: if the LLM step failed or Post-execution did not
@@ -132,7 +156,7 @@ jobs:
           ISSUE_NUM: ${{ github.event.issue.number }}
           RUN_ID: ${{ github.run_id }}
           REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
         run: |
           gh issue comment "$ISSUE_NUM" --repo "$REPO" --body \
             "⚠️ **Agent run failed and its post-execution hook did not report cleanly.** \
