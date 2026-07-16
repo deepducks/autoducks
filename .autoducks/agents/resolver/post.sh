@@ -58,14 +58,26 @@ fi
 echo "Resolve conflicts on PR #$PR_NUM with base $PR_BASE (autoducks)" > .git/MERGE_MSG
 git add -A
 git commit --no-edit
-git::push_branch "$PR_HEAD"
 
-its::add_label "$PR_NUM" "auto-resolved"
+# A child-scoped run (CHILD_SLUG set) pushes/labels the child PR under the
+# child credential instead of $REPO — re-resolved here rather than carried
+# across the pre.sh/post.sh step boundary.
+CHILD_SLUG="${CHILD_SLUG:-}"
+if [[ -n "$CHILD_SLUG" ]]; then
+  CHILD_TOKEN="$(git::resolve_token "$CHILD_SLUG")"
+  REPO="$CHILD_SLUG" GH_TOKEN="$CHILD_TOKEN" git::push_branch "$PR_HEAD"
+  REPO="$CHILD_SLUG" GH_TOKEN="$CHILD_TOKEN" its::add_label "$PR_NUM" "auto-resolved"
+  PR_URL="https://github.com/${CHILD_SLUG}/pull/${PR_NUM}"
+else
+  git::push_branch "$PR_HEAD"
+  its::add_label "$PR_NUM" "auto-resolved"
+  PR_URL="https://github.com/${REPO}/pull/${PR_NUM}"
+fi
+
 its::comment_issue "$FEATURE_NUM" "$(cat /tmp/resolution-summary.md)"
 progress_labels::finish "$ISSUE_NUM" "Resolve:resolving" "Resolve:done"
 react_to_comment "${COMMENT_ID:-}" "+1"
 
-PR_URL="https://github.com/${REPO}/pull/${PR_NUM}"
 status_comment::finish "$ISSUE_NUM" "**Conflicts resolved on PR #$PR_NUM** — review the [pushed merge commit]($PR_URL); the PR is not auto-merged.
 
 _Ran with \`${MODEL:-unknown}\` at effort \`${EFFORT:-unknown}\`._"
