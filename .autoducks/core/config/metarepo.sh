@@ -14,6 +14,13 @@ metarepo::enabled() {
   [[ "${AUTODUCKS_METAREPO:-false}" == "true" ]]
 }
 
+# metarepo::serialize_per_module → exit 0 when metarepo.serialize_per_module is
+# true (strict per-child ordering), else 1 (default: concurrent + resolver-healed).
+metarepo::serialize_per_module() {
+  metarepo::enabled || return 1
+  [[ "$(jq -r '.metarepo.serialize_per_module // false' "$AUTODUCKS_ROOT/autoducks.json")" == "true" ]]
+}
+
 # metarepo::gitmodules_file → absolute path to the parent's .gitmodules (or 1).
 metarepo::gitmodules_file() {
   local root

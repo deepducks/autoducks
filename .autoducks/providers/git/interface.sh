@@ -59,6 +59,7 @@ done
 #   git::submodule_deliver(path, child_branch)        → merge-time delivery for one child
 #   git::verify_write_access(slug)                    → exit 0 if the child credential can push
 #   git::submodule_protection(slug)                   → "true"/"false" default-branch protection
+#   git::retrigger_child_check(pr_number, slug, token) → re-fire a child's required check via draft→ready toggle
 
 REQUIRED_FUNCTIONS=(
   "git::create_branch"
@@ -92,6 +93,7 @@ REQUIRED_FUNCTIONS=(
   "git::submodule_deliver"
   "git::verify_write_access"
   "git::submodule_protection"
+  "git::retrigger_child_check"
 )
 
 missing=0

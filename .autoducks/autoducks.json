@@ -25,6 +25,7 @@
   },
   "metarepo": {
     "enabled": false,
+    "serialize_per_module": false,
     "protected_submodule_strategy": "auto_merge",
     "delivery_check": {
       "check_name": "Autoducks: Children delivered",
