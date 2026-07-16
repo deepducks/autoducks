@@ -32,6 +32,10 @@ inputs:
     description: 'Claude Code OAuth token'
     required: false
     default: ''
+  github_token:
+    description: 'GitHub token claude-code-action uses for its own git/API ops (comments, commits). Pass the autoducks app IAT to author them as the app; empty falls back to the ambient GITHUB_TOKEN (github-actions[bot]).'
+    required: false
+    default: ''
 
 outputs:
   error_subtype:
@@ -128,6 +132,7 @@ runs:
         prompt: ${{ steps.prompt.outputs.content }}
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
+        github_token: ${{ inputs.github_token || github.token }}
         allowed_bots: '*'
         claude_args: ${{ steps.args.outputs.claude_args }}
         settings: ${{ steps.args.outputs.settings }}

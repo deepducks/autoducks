@@ -41,13 +41,16 @@ git::resolve_token() {
       git::_default_token
       ;;
     github_app)
-      # #1106's OIDC token broker is the natural home for minting an installation
-      # token per owner. Until it lands, fall back to the default PAT so
-      # single-owner setups still work; cross-org will fail the pre-flight gate
-      # with an actionable message rather than here.
-      if [[ -z "${_AUTODUCKS_GITHUB_APP_WARNED:-}" ]]; then
-        echo "::warning::metarepo.auth.mode=github_app is not wired yet (see #1106); falling back to AUTODUCKS_PAT." >&2
-        _AUTODUCKS_GITHUB_APP_WARNED=1
+      # The autoducks GitHub App broker mints an installation token scoped to
+      # the *current* repo (from the workflow's OIDC claim); an early workflow
+      # step exports it as AUTODUCKS_APP_TOKEN. Use it for the current repo.
+      # A cross-repo request (metarepo child in another repo/owner) is not
+      # broker-scoped yet, so fall back to the PAT — same-owner metarepo child
+      # broker minting is the remaining Phase 2 step (see meta-autoducks#5).
+      local current="${GITHUB_REPOSITORY:-}"
+      if [[ -n "${AUTODUCKS_APP_TOKEN:-}" && ( -z "$repo" || "$repo" == "$current" ) ]]; then
+        printf '%s' "$AUTODUCKS_APP_TOKEN"
+        return 0
       fi
       git::_default_token
       ;;
