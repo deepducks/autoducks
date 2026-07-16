@@ -72,3 +72,11 @@ jobs:
           fi
           git commit -q -m "chore(autoducks): install machinery (app mode)"
           git push origin "HEAD:${GITHUB_REF_NAME}"
+      - name: Setup (labels, rulesets, checks)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+        # Best-effort: labels (issues:write) always apply; admin-gated steps
+        # (Actions perms, reviewer ruleset) apply only if the minted token
+        # carries administration, otherwise they warn and are left to the user.
+        run: bash scripts/setup.sh --repo "$GITHUB_REPOSITORY" || true
