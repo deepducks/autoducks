@@ -28,6 +28,41 @@ die() { log "ERROR: $*"; exit 1; }
 # STDOUT contract (single line): the delivered child_set, comma-joined and
 # sorted — callers pass this straight to create_final_pr, which stamps it as
 # the `<!-- autoducks:delivered-children: ... -->` marker the poller reads.
+
+# deliver_children_other_delivery_in_flight SLUG FEATURE_BRANCH TOKEN — true
+# when another feature already has an open, metarepo-managed delivery PR on
+# this child (marked head != ours). Backs the serialize_per_module gate
+# (max one in-flight delivery per child, across features).
+deliver_children_other_delivery_in_flight() {
+  local slug="$1" feature_branch="$2" token="$3" count
+  count="$(GH_TOKEN="$token" gh pr list --repo "$slug" --state open --json headRefName,body 2>/dev/null \
+    | jq --arg cur "$feature_branch" --arg marker "$AUTODUCKS_METAREPO_MARKER" \
+        '[.[] | select(.headRefName != $cur) | select((.body // "") | contains($marker))] | length' 2>/dev/null || echo 0)"
+  [[ "${count:-0}" -gt 0 ]]
+}
+
+# deliver_children_wait_for_resolution SLUG PR_NUM PRE_SHA TOKEN — poll a
+# CONFLICTING child delivery PR (under the child token) until the resolver
+# pushes a new head commit (echoed on success) or the delivery timeout
+# elapses (exit 1). A new head commit is the unambiguous "resolved" signal —
+# resolver/post.sh never pushes without a full, clean reconciliation.
+deliver_children_wait_for_resolution() {
+  local slug="$1" pr_num="$2" pre_sha="$3" token="$4"
+  local start=$SECONDS deadline=$(( AUTODUCKS_DELIVERY_TIMEOUT_MINUTES * 60 ))
+  local json head state
+  while (( SECONDS - start < deadline )); do
+    json="$(GH_TOKEN="$token" gh pr view "$pr_num" --repo "$slug" --json state,headRefOid 2>/dev/null || echo '{}')"
+    head="$(jq -r '.headRefOid // empty' <<<"$json")"
+    if [[ -n "$head" && "$head" != "$pre_sha" ]]; then
+      echo "$head"; return 0
+    fi
+    state="$(jq -r '.state // empty' <<<"$json")"
+    [[ "$state" == "CLOSED" ]] && return 1
+    sleep "$AUTODUCKS_DELIVERY_POLL_INTERVAL_SECONDS"
+  done
+  return 1
+}
+
 deliver_children() {
   metarepo::enabled || return 0
   local feature_branch="$1"; shift
@@ -39,22 +74,71 @@ deliver_children() {
     while IFS= read -r m; do [[ -n "$m" ]] && child_set["$m"]=1; done \
       < <(metarepo::modules_from_body "$body")
   done
-  # Deliver each child; collect gitlinks that a squash/rebase rewrote so we can
-  # re-pin the parent to the SHA now on the child's default branch.
+  # Deliver each child; collect gitlinks that a squash/rebase rewrote (or a
+  # conflict resolution advanced) so we can re-pin the parent to the SHA now
+  # on the child's default branch (or resolved feature-branch head).
   local -a repin_pairs=()
-  local out pin needs
+  local -a stuck_resolutions=()
+  local -A unresolved_modules=()
+  local out pin needs needs_resolve child_pr slug tok
   for m in "${!child_set[@]}"; do
     log "metarepo delivery: child '$m' → advance from $feature_branch"
     out="$(git::submodule_deliver "$m" "$feature_branch")" || log "WARN: submodule_deliver failed for '$m' (continuing)"
-    read -r pin needs <<< "${out:-}"
+    read -r pin needs needs_resolve child_pr <<< "${out:-}"
+
+    if [[ "${needs_resolve:-0}" == "1" && -n "${child_pr:-}" ]]; then
+      slug="$(metarepo::slug_for_path "$m" 2>/dev/null || true)"
+      if [[ -z "$slug" ]]; then
+        log "WARN: no slug for '$m' — cannot dispatch resolver for PR #$child_pr"
+        continue
+      fi
+      tok="$(git::resolve_token "$slug")"
+
+      # Serialize-per-module gate (T1): strict mode caps in-flight delivery at
+      # one per child across features — a conflicting delivery is left as-is
+      # (no resolve) when another feature's delivery PR is already open here.
+      if metarepo::serialize_per_module && deliver_children_other_delivery_in_flight "$slug" "$feature_branch" "$tok"; then
+        log "metarepo delivery: '$slug' PR #$child_pr — another feature's delivery is in flight (serialize_per_module); skipping resolve this run"
+        continue
+      fi
+
+      local pre_sha default_branch resolved_sha
+      pre_sha="$(GH_TOKEN="$tok" gh pr view "$child_pr" --repo "$slug" --json headRefOid --jq '.headRefOid' 2>/dev/null || true)"
+      default_branch="$(GH_TOKEN="$tok" gh api "repos/$slug" --jq '.default_branch' 2>/dev/null || echo "main")"
+
+      log "metarepo delivery: '$slug' PR #$child_pr is CONFLICTING — dispatching the child-scoped resolver"
+      git::dispatch_workflow "autoducks-resolver.yml" \
+        -f "issue_number=$FEATURE" \
+        -f "child_slug=$slug" \
+        -f "child_pr_number=$child_pr" \
+        -f "child_branch=$feature_branch" \
+        -f "child_base=$default_branch" \
+        || log "WARN: could not dispatch resolver for '$slug' PR #$child_pr"
+
+      if resolved_sha="$(deliver_children_wait_for_resolution "$slug" "$child_pr" "${pre_sha:-}" "$tok")"; then
+        log "metarepo delivery: '$slug' PR #$child_pr resolved → $resolved_sha"
+        repin_pairs+=("$m=$resolved_sha")
+        git::retrigger_child_check "$child_pr" "$slug" "$tok" \
+          || log "WARN: could not re-trigger required check on '$slug' PR #$child_pr"
+        GH_TOKEN="$tok" gh pr merge "$child_pr" --repo "$slug" --merge --auto --delete-branch 2>/dev/null \
+          || log "WARN: could not re-arm auto-merge on '$slug' PR #$child_pr"
+      else
+        log "WARN: '$slug' PR #$child_pr could not be auto-resolved (failed or timed out) — leaving it open"
+        unresolved_modules["$m"]=1
+        stuck_resolutions+=("\`$slug\` → https://github.com/$slug/pull/$child_pr (automatic conflict resolution failed or timed out — resolve manually, or comment \`/resolve\` on the PR)")
+      fi
+      continue
+    fi
+
     if [[ "${needs:-0}" == "1" && -n "${pin:-}" ]]; then
       repin_pairs+=("$m=$pin")
     fi
   done
-  # Squash/rebase rewrote some child SHAs → re-pin the parent gitlinks (and delete
-  # the retained child branches) before the parent's final PR is created.
+  # Squash/rebase rewrote some child SHAs (or a conflict was resolved) → re-pin
+  # the parent gitlinks (and delete the retained child branches) before the
+  # parent's final PR is created.
   if [[ "${#repin_pairs[@]}" -gt 0 ]]; then
-    log "metarepo delivery: re-pinning ${#repin_pairs[@]} gitlink(s) after squash/rebase"
+    log "metarepo delivery: re-pinning ${#repin_pairs[@]} gitlink(s) after squash/rebase/resolve"
     metarepo::repin_gitlinks "$feature_branch" "${repin_pairs[@]}" || log "WARN: gitlink re-pin failed (continuing)"
   fi
   # Deferred-delivery feedback: a protected child is delivered via GitHub
@@ -65,10 +149,13 @@ deliver_children() {
   # that reached submodule-deliver.sh's fallback (auto-merge could not be
   # enabled, immediate merge also failed) has autoMergeRequest == null and is
   # not merging on its own — surface it distinctly instead of folding it into
-  # the healthy "auto-merges when checks pass" framing.
-  local -a deferred=() stuck=()
-  local slug tok pr automerge
+  # the healthy "auto-merges when checks pass" framing. Children whose resolve
+  # attempt above already failed are reported via stuck_resolutions (a more
+  # specific message) instead of being re-derived here.
+  local -a deferred=() stuck=("${stuck_resolutions[@]}")
+  local pr automerge
   for m in "${!child_set[@]}"; do
+    [[ -n "${unresolved_modules[$m]:-}" ]] && continue
     slug="$(metarepo::slug_for_path "$m" 2>/dev/null || true)"
     [[ -n "$slug" ]] || continue
     [[ "$(git::submodule_protection "$slug")" == "true" ]] || continue
