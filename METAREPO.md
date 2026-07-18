@@ -1,7 +1,7 @@
 # Metarepo (submodule aggregation)
 
 Run the full autoducks pipeline from a private **metarepo** that aggregates related
-repos as git submodules (e.g. `autoducks`, `autoducks-docs`, `autoducks-cli`,
+repos as git submodules (e.g. `autoducks`, `autoducks-docs`,
 `autoducks-api`), driving work across all of them from one place — **without waking
 the children's own pipelines**. Execution is backpressured (sequential) and delivery
 is children-first / parent-last so the parent→child gitlink is never orphaned.
