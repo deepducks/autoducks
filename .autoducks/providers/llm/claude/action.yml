@@ -32,6 +32,14 @@ inputs:
     description: 'Claude Code OAuth token'
     required: false
     default: ''
+  anthropic_base_url:
+    description: 'Anthropic-compatible endpoint to call instead of api.anthropic.com (gateway, proxy, self-hosted relay). Empty = the default Anthropic API.'
+    required: false
+    default: ''
+  anthropic_auth_token:
+    description: 'Bearer credential for the custom endpoint (sent as Authorization: Bearer). Only used when anthropic_base_url is set; gateways that authenticate with x-api-key can pass anthropic_api_key instead.'
+    required: false
+    default: ''
   github_token:
     description: 'GitHub token claude-code-action uses for its own git/API ops (comments, commits). Pass the autoducks app IAT to author them as the app; empty falls back to the ambient GITHUB_TOKEN (github-actions[bot]).'
     required: false
@@ -123,6 +131,15 @@ runs:
         else
           echo "settings=" >> "$GITHUB_OUTPUT"
         fi
+    - name: Resolve endpoint credentials
+      id: endpoint
+      shell: bash
+      env:
+        BASE_URL: ${{ inputs.anthropic_base_url }}
+        AUTH_TOKEN: ${{ inputs.anthropic_auth_token }}
+        API_KEY: ${{ inputs.anthropic_api_key }}
+        OAUTH_TOKEN: ${{ inputs.claude_code_oauth_token }}
+      run: bash "$GITHUB_ACTION_PATH/resolve-endpoint.sh"
     - name: Run Claude agent
       id: claude
       uses: anthropics/claude-code-action@v1
@@ -130,8 +147,8 @@ runs:
         MAX_THINKING_TOKENS: ${{ steps.args.outputs.max_thinking_tokens }}
       with:
         prompt: ${{ steps.prompt.outputs.content }}
-        anthropic_api_key: ${{ inputs.anthropic_api_key }}
-        claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
+        anthropic_api_key: ${{ steps.endpoint.outputs.api_key }}
+        claude_code_oauth_token: ${{ steps.endpoint.outputs.oauth_token }}
         github_token: ${{ inputs.github_token || github.token }}
         allowed_bots: '*'
         claude_args: ${{ steps.args.outputs.claude_args }}

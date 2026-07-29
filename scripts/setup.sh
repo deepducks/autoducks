@@ -114,13 +114,35 @@ echo ""
 
 # --- Check 3: Secret ---
 echo "[3/12] Required secrets"
-if gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null | grep -qx "ANTHROPIC_API_KEY"; then
+SECRET_NAMES=$(gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null || true)
+VAR_NAMES=$(gh variable list $REPO_ARG --json name --jq '.[].name' 2>/dev/null || true)
+has_secret() { grep -qx "$1" <<< "$SECRET_NAMES"; }
+has_var() { grep -qx "$1" <<< "$VAR_NAMES"; }
+
+# Any one of these authenticates the agents: the Anthropic API key, a Claude
+# Code subscription token, or a custom Anthropic-compatible endpoint with its
+# own credential (ANTHROPIC_BASE_URL may be a secret or a repo variable).
+if has_secret "ANTHROPIC_API_KEY"; then
   pass "Secret ANTHROPIC_API_KEY is configured"
+elif has_secret "CLAUDE_CODE_OAUTH_TOKEN"; then
+  pass "Secret CLAUDE_CODE_OAUTH_TOKEN is configured (subscription auth)"
+elif has_secret "ANTHROPIC_BASE_URL" || has_var "ANTHROPIC_BASE_URL"; then
+  if has_secret "ANTHROPIC_AUTH_TOKEN"; then
+    pass "Custom endpoint configured (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN)"
+  else
+    manual "ANTHROPIC_BASE_URL is set but no credential for it
+
+      Add the gateway's key: gh secret set ANTHROPIC_AUTH_TOKEN $REPO_ARG
+      (or gh secret set ANTHROPIC_API_KEY $REPO_ARG if it authenticates via x-api-key)"
+  fi
 else
-  manual "Secret ANTHROPIC_API_KEY is missing
+  manual "No LLM credential is configured
 
       Get your API key from: https://console.anthropic.com/
-      Then add it: gh secret set ANTHROPIC_API_KEY $REPO_ARG"
+      Then add it: gh secret set ANTHROPIC_API_KEY $REPO_ARG
+
+      Alternatives: CLAUDE_CODE_OAUTH_TOKEN for subscription auth, or
+      ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN for a custom endpoint."
 fi
 echo ""
 
