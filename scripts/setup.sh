@@ -10,11 +10,15 @@
 # install or org-level permissions are reported as manual checklist items.
 #
 # USAGE
-#   ./scripts/setup.sh [--repo OWNER/REPO]
+#   ./scripts/setup.sh [--repo OWNER/REPO] [--no-rename]
+#
+#   --no-rename   Don't auto-rename labels that collide case-insensitively
+#                 with a required name (see check 2); report them as a
+#                 manual item instead.
 #
 # CHECKS
 #   1. gh CLI authentication
-#   2. Required labels (feature, smoke-test, priority:P0-P3, progress) — CREATES if missing
+#   2. Required labels — CREATES if missing, RENAMES case collisions
 #   3. CLAUDE_CODE_OAUTH_TOKEN secret — reports if missing
 #   4. Repository Actions workflow permissions — reports if wrong
 #   5. Claude Code GitHub App installation — reports if missing
@@ -35,16 +39,24 @@
 set -euo pipefail
 
 REPO=""
+AUTORENAME=true
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) REPO="$2"; shift 2 ;;
+    --no-rename) AUTORENAME=false; shift ;;
     -h|--help)
-      sed -n '2,33p' "$0"
+      sed -n '2,37p' "$0"
       exit 0
       ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
+
+if [[ "$AUTORENAME" == true ]]; then
+  export AUTODUCKS_LABEL_AUTORENAME=1
+else
+  export AUTODUCKS_LABEL_AUTORENAME=0
+fi
 
 REPO_ARG=""
 if [[ -n "$REPO" ]]; then
@@ -98,15 +110,31 @@ source "$SCRIPT_DIR/../.autoducks/core/feedback/progress-labels.sh"
 LABELS+=("${AUTODUCKS_PROGRESS_LABELS[@]}")
 LABELS+=("${AUTODUCKS_MODE_LABELS[@]}")
 
+source "$SCRIPT_DIR/../.autoducks/core/config/label-utils.sh"
+label::load                      # exactly one `gh label list --limit 500`
+
 for entry in "${LABELS[@]}"; do
   IFS='|' read -r name color desc <<< "$entry"
-  if gh label list $REPO_ARG --json name --jq '.[].name' 2>/dev/null | grep -qx "$name"; then
+  existing="$(label::resolve "$name")"
+  if [[ "$existing" == "$name" ]]; then
     pass "Label '$name' exists"
+  elif [[ -n "$existing" ]]; then
+    if [[ "$AUTORENAME" == true ]]; then
+      if err=$(gh label edit "$existing" --repo "$REPO" --name "$name" 2>&1); then
+        pass "Label '$existing' renamed to '$name' (case collision with a GitHub default; issue associations preserved)"
+      else
+        fail "Could not rename label '$existing' → '$name': $err"
+      fi
+    else
+      manual "Label '$existing' collides case-insensitively with the required '$name'.
+      Routing compares label names, so autoducks will not see it. Fix with:
+        gh label edit '$existing' --repo $REPO --name '$name'"
+    fi
   else
-    if gh label create "$name" --color "$color" --description "$desc" $REPO_ARG &>/dev/null; then
+    if err=$(gh label create "$name" --color "$color" --description "$desc" --repo "$REPO" 2>&1); then
       pass "Label '$name' created"
     else
-      fail "Failed to create label '$name'"
+      fail "Failed to create label '$name': $err"
     fi
   fi
 done
@@ -216,15 +244,30 @@ if [[ -z "$TYPES_JSON" ]]; then
 else
   TYPES=$(echo "$TYPES_JSON" | jq -r '.[].name')
   MISSING=()
-  echo "$TYPES" | grep -qx "Feature" || MISSING+=("Feature")
-  echo "$TYPES" | grep -qx "Task"    || MISSING+=("Task")
-  if [[ ${#MISSING[@]} -eq 0 ]]; then
+  CASING_MISMATCHES=()
+  for want in Feature Task; do
+    if echo "$TYPES" | grep -qix "$want"; then
+      echo "$TYPES" | grep -qx "$want" && continue
+      actual="$(echo "$TYPES" | grep -ix "$want" | head -1)"
+      CASING_MISMATCHES+=("$want (found as '$actual')")
+    else
+      MISSING+=("$want")
+    fi
+  done
+  if [[ ${#MISSING[@]} -eq 0 && ${#CASING_MISMATCHES[@]} -eq 0 ]]; then
     pass "Issue types 'Feature' and 'Task' exist in org '$ORG'"
   else
-    manual "Missing issue types in org '$ORG': ${MISSING[*]}
+    if [[ ${#CASING_MISMATCHES[@]} -gt 0 ]]; then
+      manual "Issue type casing mismatch in org '$ORG': ${CASING_MISMATCHES[*]}
+      Routing is label-first and unaffected, but the native issue type won't
+      match by exact name. Rename at: https://github.com/organizations/$ORG/settings/issue-types"
+    fi
+    if [[ ${#MISSING[@]} -gt 0 ]]; then
+      manual "Missing issue types in org '$ORG': ${MISSING[*]}
 
       Create them at: https://github.com/organizations/$ORG/settings/issue-types
       Workflows keep running without this — they just won't set the native type."
+    fi
   fi
 fi
 echo ""
