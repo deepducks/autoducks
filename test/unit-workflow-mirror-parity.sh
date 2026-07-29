@@ -29,7 +29,12 @@ for tmpl in "$RUNTIME_DIR"/autoducks-*.yml; do
     pass "$base: template and mirror are byte-identical"
   else
     fail "$base: template and mirror differ"
-    diff -u "$tmpl" "$mirror" | head -10
+    # sed, not head: head closes the pipe after 10 lines, and under
+    # `set -euo pipefail` the SIGPIPE it sends to diff aborts the whole run at
+    # the first divergent file — so a 15-file drift reported as 1. sed reads to
+    # EOF, and `|| true` absorbs diff's exit 1 (files differ, which is the
+    # expected case here).
+    diff -u "$tmpl" "$mirror" | sed -n '1,10p' || true
   fi
 done
 
