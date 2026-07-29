@@ -34,38 +34,47 @@ source "$REPO_ROOT/.autoducks/core/orchestration/fold-duplicate.sh"
 
 echo "── fold_duplicate::close: ordered sequence ──"
 reset
+label::_invalidate
 fold_duplicate::close "42" "7"
 
-if [[ "$(wc -l < "$LOG")" -eq 4 ]]; then
-  pass "exactly 4 calls made"
+# label::ensure adds one `gh label list` cache-fill call ahead of the
+# create, since it needs to check for a case-variant before creating.
+if [[ "$(wc -l < "$LOG")" -eq 5 ]]; then
+  pass "exactly 5 calls made"
 else
-  fail "expected 4 calls, got: $(cat "$LOG")"
+  fail "expected 5 calls, got: $(cat "$LOG")"
 fi
 
 mapfile -t LINES < "$LOG"
-if [[ "${LINES[0]}" == GH:label\ create\ Duplicate* ]]; then
-  pass "step 1: gh label create Duplicate"
+if [[ "${LINES[0]}" == GH:label\ list* ]]; then
+  pass "step 1: gh label list (label::ensure cache fill)"
 else
-  fail "step 1 not gh label create: ${LINES[0]:-<missing>}"
+  fail "step 1 not gh label list: ${LINES[0]:-<missing>}"
 fi
-if [[ "${LINES[1]}" == "ADD:42|Duplicate" ]]; then
-  pass "step 2: its::add_label DUP Duplicate"
+if [[ "${LINES[1]}" == GH:label\ create\ Duplicate* ]]; then
+  pass "step 2: gh label create Duplicate"
 else
-  fail "step 2 not its::add_label: ${LINES[1]:-<missing>}"
+  fail "step 2 not gh label create: ${LINES[1]:-<missing>}"
 fi
-if [[ "${LINES[2]}" == "CLOSE:42|Duplicate of #7.|not_planned" ]]; then
-  pass "step 3: its::close_issue DUP ... not_planned"
+if [[ "${LINES[2]}" == "ADD:42|Duplicate" ]]; then
+  pass "step 3: its::add_label DUP Duplicate"
 else
-  fail "step 3 not its::close_issue not_planned: ${LINES[2]:-<missing>}"
+  fail "step 3 not its::add_label: ${LINES[2]:-<missing>}"
 fi
-if [[ "${LINES[3]}" == "LINK:42|7" ]]; then
-  pass "step 4: its::link_sub_issue DUP CANONICAL"
+if [[ "${LINES[3]}" == "CLOSE:42|Duplicate of #7.|not_planned" ]]; then
+  pass "step 4: its::close_issue DUP ... not_planned"
 else
-  fail "step 4 not its::link_sub_issue: ${LINES[3]:-<missing>}"
+  fail "step 4 not its::close_issue not_planned: ${LINES[3]:-<missing>}"
+fi
+if [[ "${LINES[4]}" == "LINK:42|7" ]]; then
+  pass "step 5: its::link_sub_issue DUP CANONICAL"
+else
+  fail "step 5 not its::link_sub_issue: ${LINES[4]:-<missing>}"
 fi
 
 echo "── fold_duplicate::close: idempotent no-op when every step fails (already closed) ──"
 reset
+label::_invalidate
 gh() { echo "GH:$*" >> "$LOG"; return 1; }
 its::add_label()    { echo "ADD:$1|$2" >> "$LOG"; return 1; }
 its::close_issue()  { echo "CLOSE:$1|$2|$3" >> "$LOG"; return 1; }
@@ -76,8 +85,8 @@ if fold_duplicate::close "42" "7"; then
 else
   fail "fold_duplicate::close propagated a failure from a downstream call"
 fi
-if [[ "$(wc -l < "$LOG")" -eq 4 ]]; then
-  pass "all 4 steps still attempted despite failures"
+if [[ "$(wc -l < "$LOG")" -eq 5 ]]; then
+  pass "all 5 steps (list, create, add, close, link) still attempted despite failures"
 else
   fail "not all steps attempted: $(cat "$LOG")"
 fi
@@ -90,10 +99,14 @@ its::link_sub_issue() { echo "LINK:$1|$2" >> "$LOG"; }
 
 echo "── fold_duplicate::close: safe to re-run back-to-back (idempotent) ──"
 reset
+label::_invalidate
 fold_duplicate::close "42" "7"
 fold_duplicate::close "42" "7"
+# First call: list + create + add + close + link (5). Second call: the
+# label is now cached under its exact casing, so label::ensure short-circuits
+# with no gh call at all — add + close + link only (3). 5 + 3 = 8.
 if [[ "$(wc -l < "$LOG")" -eq 8 ]]; then
-  pass "second re-run repeats the same 4 calls without erroring"
+  pass "second re-run reuses the cached label (no repeat gh label list/create) without erroring"
 else
   fail "re-run did not repeat cleanly: $(cat "$LOG")"
 fi

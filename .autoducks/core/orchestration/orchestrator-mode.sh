@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ORCHESTRATOR_MODE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../config/label-utils.sh
+source "$ORCHESTRATOR_MODE_DIR/../config/label-utils.sh"
+
 # orchestrator_mode::resolve FEATURE_ISSUE → echoes "waves" | "sequential"
 #
 # Precedence: OVERRIDE_MODE (directive/input) > Mode:* label > config default.
@@ -21,8 +25,8 @@ orchestrator_mode::resolve() {
   # 2. Persisted label.
   local labels
   labels=$(its::get_issue "$issue" | jq -r '.labels[] // empty' 2>/dev/null || true)
-  if grep -qx 'Mode:sequential' <<<"$labels"; then echo "sequential"; return 0; fi
-  if grep -qx 'Mode:waves'      <<<"$labels"; then echo "waves";      return 0; fi
+  if label::in_list "$labels" Mode:sequential; then echo "sequential"; return 0; fi
+  if label::in_list "$labels" Mode:waves;      then echo "waves";      return 0; fi
 
   # 3. Config default (already validated by load-config).
   echo "${AUTODUCKS_ORCHESTRATOR_MODE:-waves}"

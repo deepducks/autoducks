@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SET_PRIORITY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../../../core/config/label-utils.sh
+source "$SET_PRIORITY_DIR/../../../core/config/label-utils.sh"
+
 # its::_set_priority_via_labels ISSUE_ID PRIORITY
 #
 # Strips any existing `Priority:*` label from ISSUE_ID and applies
@@ -15,8 +19,8 @@ its::_set_priority_via_labels() {
   local label
   while IFS= read -r label; do
     [[ -z "$label" ]] && continue
-    [[ "$label" == Priority:* ]] && its::remove_label "$issue_id" "$label"
-  done <<< "$current_labels"
+    its::remove_label "$issue_id" "$label"
+  done < <(label::has_prefix_in_list "$current_labels" "Priority:")
 
   its::add_label "$issue_id" "Priority:${priority}"
 }

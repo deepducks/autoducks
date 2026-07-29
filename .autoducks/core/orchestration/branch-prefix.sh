@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+BRANCH_PREFIX_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../config/label-utils.sh
+source "$BRANCH_PREFIX_DIR/../config/label-utils.sh"
+
 # ── Branch prefix by issue type (D10) ────────────────────────────────
 # Feature issues get `feature/…` branches; Bug issues get `fix/…` branches.
 # Task branches inherit the prefix of the parent (feature/bug) branch they
@@ -17,7 +21,7 @@ branch_prefix_for_issue() {
   type="${type#"${type%%[![:space:]]*}"}"
   type="${type%"${type##*[![:space:]]}"}"
   labels=$(echo "$data" | jq -r '.labels[]? // empty')
-  if [[ "$type" == "Bug" ]] || echo "$labels" | grep -qx 'Bug'; then
+  if [[ "${type,,}" == "bug" ]] || label::in_list "$labels" Bug; then
     echo "fix"
   else
     echo "feature"
