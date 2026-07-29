@@ -8,7 +8,7 @@ set -euo pipefail
 # Output: key=value lines to stdout
 #   command          — canonical verb: architect, engineer, execute, fix, revert, close, review, rework, defer, resolve
 #   original_command — the raw verb the user typed, before alias normalization
-#   model            — claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5, or empty
+#   model            — claude-opus-5, claude-sonnet-5, claude-haiku-4-5, or empty
 #   effort           — off, low, medium, high, max, or empty
 #   max_turns        — positive integer within a sane upper bound, or empty.
 #                       Set via a `turns=<n>`, `max-turns=<n>`, `max_turns=<n>`,
@@ -191,7 +191,7 @@ if [[ -n "$DIRECTIVE" ]]; then
     if [[ "$_lc" =~ ^model:(.+)$ ]]; then
       _m=$(echo "${BASH_REMATCH[1]}" | tr -d ',.!?;')
       case "$_m" in
-        opus)     MODEL="claude-opus-4-8" ;;
+        opus)     MODEL="claude-opus-5" ;;
         sonnet)   MODEL="claude-sonnet-5" ;;
         haiku)    MODEL="claude-haiku-4-5" ;;
         claude-*) MODEL="$_m" ;;
@@ -232,7 +232,7 @@ if [[ -n "$DIRECTIVE" ]]; then
     t=$(echo "$_lc" | tr -d ',.!?:;#')
     case "$t" in
       # Model aliases (positional)
-      opus)                    MODEL="claude-opus-4-8" ;;
+      opus)                    MODEL="claude-opus-5" ;;
       sonnet)                  MODEL="claude-sonnet-5" ;;
       haiku)                   MODEL="claude-haiku-4-5" ;;
       # Effort aliases (positional)

@@ -73,13 +73,13 @@ assert_out "directive mid-comment ignored (must be line start)" \
 assert_out "prose containing /fixed does not fire or normalize to fix" \
   "I just /fixed a typo" "command="
 assert_out "directive on later line" $'some context\n/execute opus' \
-  "command=execute" "model=claude-opus-4-8"
+  "command=execute" "model=claude-opus-5"
 
 echo "── model overrides ──"
-assert_out "positional opus" "/execute opus" "model=claude-opus-4-8"
+assert_out "positional opus" "/execute opus" "model=claude-opus-5"
 assert_out "positional sonnet" "/execute sonnet" "model=claude-sonnet-5"
 assert_out "positional haiku" "/execute haiku" "model=claude-haiku-4-5"
-assert_out "named model:opus" "/execute model:opus" "model=claude-opus-4-8"
+assert_out "named model:opus" "/execute model:opus" "model=claude-opus-5"
 assert_out "named model:claude-sonnet-5" "/execute model:claude-sonnet-5" \
   "model=claude-sonnet-5"
 assert_out "unknown model ignored" "/execute model:gpt-4" "model="
@@ -93,9 +93,9 @@ assert_out "effort off" "/execute effort:off" "effort=off"
 assert_out "no effort yields empty (defaults win downstream)" "/execute" \
   "effort="
 assert_out "combined model+effort" "/architect opus max" \
-  "model=claude-opus-4-8" "effort=max"
+  "model=claude-opus-5" "effort=max"
 assert_out "model:opus effort:max" "/execute model:opus effort:max" \
-  "model=claude-opus-4-8" "effort=max"
+  "model=claude-opus-5" "effort=max"
 
 echo "── max_turns overrides ──"
 assert_out "turns:5" "/execute turns:5" "max_turns=5"
@@ -135,7 +135,7 @@ assert_out "invalid chain verbs filtered" "/architect #auto:engineer+banana" \
   "auto_chain=engineer"
 assert_out "wholly invalid chain empty" "/architect #auto:banana" "auto_chain="
 assert_out "chain with other tokens" "/architect opus #auto:engineer turns:3" \
-  "auto_chain=engineer" "model=claude-opus-4-8" "max_turns=3"
+  "auto_chain=engineer" "model=claude-opus-5" "max_turns=3"
 assert_out "architect #auto:engineer+execute matches prior /quack equivalent" \
   "/architect #auto:engineer+execute" "command=architect" "auto_chain=engineer+execute"
 
