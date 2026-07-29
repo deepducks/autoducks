@@ -15,6 +15,6 @@ fold_duplicate::close() {
   gh label create "Duplicate" --repo "$REPO" --color "CFD3D7" \
     --description "Closed as a duplicate of another issue" 2>/dev/null || true
   its::add_label "$dup" "Duplicate" 2>/dev/null || true
-  its::close_issue "$dup" "Duplicate of #$canonical." "not_planned" 2>/dev/null || true
+  its::close_issue "$dup" "Duplicate of #$canonical." "not_planned" || true
   its::link_sub_issue "$dup" "$canonical" >/dev/null 2>&1 || true
 }

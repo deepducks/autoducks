@@ -201,7 +201,7 @@ else
   pass "published body is design-only after stripping the existing tactical plan"
 fi
 
-if grep -q 'issue close 201 ' "$GH_LOG" && grep -q 'not_planned' "$GH_LOG"; then
+if grep -q 'issue close 201 ' "$GH_LOG" && grep -q -- '--reason not planned' "$GH_LOG"; then
   pass "superseded task #201 closed as not_planned"
 else
   fail "superseded task #201 was not closed as not_planned; log: $(grep 'issue close' "$GH_LOG" || echo none)"
