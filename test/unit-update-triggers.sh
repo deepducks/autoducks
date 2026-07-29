@@ -74,7 +74,8 @@ if diff -r "$REPO_ROOT/.github/workflows" "$SCRATCH/.github/workflows" >/dev/nul
   pass "regenerated guards match the committed workflows"
 else
   fail "regenerated guards differ from committed workflows"
-  diff -r "$REPO_ROOT/.github/workflows" "$SCRATCH/.github/workflows" | head -10
+  # sed + `|| true` rather than `| head`: see unit-workflow-mirror-parity.sh.
+  diff -r "$REPO_ROOT/.github/workflows" "$SCRATCH/.github/workflows" | sed -n '1,10p' || true
 fi
 
 echo "── reviewer guard fires on both issue and PR comments ──"
