@@ -117,13 +117,16 @@ if [[ -d "$TMP_DIR/.github/ISSUE_TEMPLATE" ]]; then
 fi
 
 # Copy scripts
-mkdir -p scripts
-for f in setup.sh install.sh update-triggers.sh smoke-test.sh smoke-test-plan.sh smoke-test-product.sh; do
+mkdir -p scripts scripts/tests
+for f in setup.sh install.sh update-triggers.sh smoke-test.sh smoke-test-plan.sh smoke-test-product.sh tests/run.sh tests/label-utils.test.sh; do
   if [[ -f "$TMP_DIR/scripts/$f" ]]; then
     cp "$TMP_DIR/scripts/$f" "scripts/$f"
   fi
 done
 chmod +x scripts/*.sh
+# The chmod above only globs scripts/*.sh, not the tests/ subdirectory; `find`
+# is a no-op (not a glob error) when scripts/tests ends up empty.
+find scripts/tests -maxdepth 1 -name '*.sh' -exec chmod +x {} +
 echo "  Scripts copied"
 
 # Make all .sh files executable
