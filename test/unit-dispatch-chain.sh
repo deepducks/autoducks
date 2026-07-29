@@ -69,9 +69,9 @@ chain::dispatch_next "execute+review" "42"
   || fail "got: $(last_dispatch)"
 
 reset_log
-COMMENTER="alice" OVERRIDE_MODEL="claude-opus-4-8" OVERRIDE_EFFORT="high" OVERRIDE_MAX_TURNS="30" \
+COMMENTER="alice" OVERRIDE_MODEL="claude-opus-5" OVERRIDE_EFFORT="high" OVERRIDE_MAX_TURNS="30" \
   chain::dispatch_next "engineer" "42"
-[[ "$(last_dispatch)" == "autoducks-engineer.yml -f issue_number=42 -f actor=alice -f model=claude-opus-4-8 -f effort=high -f max_turns=30" ]] \
+[[ "$(last_dispatch)" == "autoducks-engineer.yml -f issue_number=42 -f actor=alice -f model=claude-opus-5 -f effort=high -f max_turns=30" ]] \
   && pass "actor/model/effort/turns overrides are forwarded" \
   || fail "got: $(last_dispatch)"
 
