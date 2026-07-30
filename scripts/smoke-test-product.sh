@@ -134,12 +134,13 @@ wait_for_reaction() {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../.autoducks/core/config/label-utils.sh"
 PRIORITY_BACKEND_CONFIGURED=$(jq -r '.product.priority_backend // "auto"' "$SCRIPT_DIR/../.autoducks/autoducks.json" 2>/dev/null || echo "auto")
 
 # --- Ensure labels exist ---
 echo "[1/8] Ensuring labels exist..."
-gh label create "smoke-test" --color "FFA500" --description "Smoke test" $REPO_ARG 2>/dev/null || true
-gh label create "Duplicate"  --color "CFD3D7" --description "Closed as a duplicate of another issue" $REPO_ARG 2>/dev/null || true
+label::ensure "smoke-test" "FFA500" "Smoke test" || echo "Warning: failed to ensure label 'smoke-test'" >&2
+label::ensure "Duplicate"  "CFD3D7" "Closed as a duplicate of another issue" || echo "Warning: failed to ensure label 'Duplicate'" >&2
 pass "Labels ensured"
 echo ""
 

@@ -96,7 +96,12 @@ fi
 REPO_ARG=""
 if [[ -n "$REPO" ]]; then
   REPO_ARG="--repo $REPO"
+else
+  REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || echo "")
 fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../.autoducks/core/config/label-utils.sh"
 
 # =============================================================================
 # Security scenarios (--security flag)
@@ -119,8 +124,8 @@ if [[ "$SECURITY" == true ]]; then
   echo ""
 
   # Ensure labels exist
-  gh label create "Tactics:done" --color "D93F0B" --description "Tactical plan complete" $REPO_ARG 2>/dev/null || true
-  gh label create "smoke-test" --color "FFA500" --description "Smoke test" $REPO_ARG 2>/dev/null || true
+  label::ensure "Tactics:done" "D93F0B" "Tactical plan complete" || echo "Warning: failed to ensure label 'Tactics:done'" >&2
+  label::ensure "smoke-test" "FFA500" "Smoke test" || echo "Warning: failed to ensure label 'smoke-test'" >&2
   gh label create "priority:P0" --color "B60205" --description "Critical" $REPO_ARG 2>/dev/null || true
 
   # ---------------------------------------------------------------------------
@@ -381,8 +386,8 @@ echo ""
 
 # --- Ensure labels exist ---
 echo "[1/5] Ensuring labels exist..."
-gh label create "Tactics:done" --color "D93F0B" --description "Tactical plan complete" $REPO_ARG 2>/dev/null || true
-gh label create "smoke-test" --color "FFA500" --description "Smoke test" $REPO_ARG 2>/dev/null || true
+label::ensure "Tactics:done" "D93F0B" "Tactical plan complete" || echo "Warning: failed to ensure label 'Tactics:done'" >&2
+label::ensure "smoke-test" "FFA500" "Smoke test" || echo "Warning: failed to ensure label 'smoke-test'" >&2
 gh label create "priority:P0" --color "B60205" --description "Critical" $REPO_ARG 2>/dev/null || true
 
 # --- Create task issues ---
