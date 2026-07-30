@@ -39,6 +39,7 @@ done
 #   its::sub_issues_available(any_issue_id)          → token ∈ {available, unavailable, forbidden, error}
 #   its::list_comments(issue_id, limit?)             → JSON array
 #   its::list_sub_issues(issue_id)                   → JSON array
+#   its::get_parent(issue_id)                        → parent number | empty; exit 1 = query failed
 #   its::get_issue_edit_history(issue_id)             → JSON array
 #   its::delete_comment(comment_id)
 #   its::update_comment(comment_id, body)
@@ -63,6 +64,7 @@ REQUIRED_FUNCTIONS=(
   "its::sub_issues_available"
   "its::list_comments"
   "its::list_sub_issues"
+  "its::get_parent"
   "its::get_issue_edit_history"
   "its::delete_comment"
   "its::update_comment"
