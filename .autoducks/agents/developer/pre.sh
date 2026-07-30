@@ -49,7 +49,21 @@ status_comment::start "$ISSUE_NUM"
 # yet, hand off to the Maestro on the parent — it owns branch + PR creation
 # (D7) and will dispatch this task back in wave order.
 if [[ -z "$FEATURE_NUM" ]]; then
-  PARENT_NUM=$(gh api "repos/$REPO/issues/$ISSUE_NUM" --jq '.parent.number // empty' 2>/dev/null || true)
+  # its::get_parent separates "no parent" (exit 0, empty) from "could not ask"
+  # (exit 1). Collapsing the two is what made every comment-triggered task run
+  # refuse: the old inline `gh api … --jq '.parent.number'` read a field the REST
+  # issue payload does not have, so it was unconditionally empty and every task
+  # looked like an orphan.
+  PARENT_LOOKUP_OK=true
+  PARENT_NUM="$(its::get_parent "$ISSUE_NUM")" || PARENT_LOOKUP_OK=false
+
+  if [[ "$PARENT_LOOKUP_OK" != true ]]; then
+    status_comment::delegate "$ISSUE_NUM" "Could not determine whether this issue has a parent feature/bug — the issue-tracker query failed, so the run stopped rather than guess. This is **not** a statement about the issue: retry, or dispatch the Developer directly with an explicit \`base_branch\` if you know the parent branch."
+    touch "$AUTODUCKS_DOR_DELEGATED_MARKER"
+    [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "dor_skip=true" >> "$GITHUB_OUTPUT"
+    exit 0
+  fi
+
   if [[ -n "$PARENT_NUM" ]]; then
     PARENT_TITLE=$(its::get_issue "$PARENT_NUM" | jq -r '.title')
     PARENT_PREFIX=$(branch_prefix_for_issue "$PARENT_NUM")
