@@ -314,6 +314,27 @@ EOF
   emit_group "       " "(" "        " "))" "${all[@]}"
 }
 
+# Update agent guard: fires unconditionally on schedule/workflow_dispatch, and
+# on issue comments matching /update (built-in + custom aliases). Scheduled
+# shape mirrors render_product's — the schedule and workflow_dispatch event
+# names bypass the comment clauses entirely.
+render_update() {
+  local -a all=(update); mapfile -t c < <(read_custom update); all+=("${c[@]}")
+  cat <<'EOF'
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request == null &&
+       github.event.comment.author_association != 'MANNEQUIN' &&
+EOF
+  if ((${#all[@]} == 1)); then
+    printf "       startsWith(github.event.comment.body, '%s'))\n" "$(cmd_for update)"
+  else
+    emit_group "       " "(" "        " "))" "${all[@]}"
+  fi
+}
+
 # ── Bake product.schedule into autoducks-product.yml's `schedule:` trigger ──
 # GitHub's `on.schedule` cron is static YAML — it cannot read config at run
 # time, so like the comment guards it must be baked in. `product.enabled ==
@@ -358,6 +379,48 @@ patch_product_cron() {
   echo "  baked product schedule ($bn)"
 }
 
+# ── Bake update.schedule into autoducks-update.yml's `schedule:` trigger ──
+# Modeled line-for-line on patch_product_cron, including the re-insert-after-
+# `on:` branch for re-enabling after a disabled run.
+patch_update_cron() {
+  local bn="autoducks-update.yml"
+  local runtime="$RUNTIME_DIR/$bn"
+  if [[ ! -f "$runtime" ]]; then
+    echo "update-triggers: missing $runtime" >&2
+    exit 1
+  fi
+  local enabled cron
+  # NOTE: jq's `//` alternative operator treats `false` like `null` — an
+  # explicit `.update.enabled // true` would always resolve to `true`.
+  enabled="$(jq -r 'if .update.enabled == false then "false" else "true" end' "$CONFIG")"
+  cron="$(jq -r '.update.schedule // "23 6 * * 1"' "$CONFIG")"
+  if [[ "$enabled" == "false" ]]; then
+    awk '
+      /^  schedule:$/ { getline; next }
+      { print }
+    ' "$runtime" > "$runtime.tmp"
+  elif grep -q '^  schedule:$' "$runtime"; then
+    local cron_line="    - cron: '${cron}'"
+    awk -v line="$cron_line" '
+      /^    - cron:/ { print line; next }
+      { print }
+    ' "$runtime" > "$runtime.tmp"
+  else
+    # Re-enabling after a prior enabled:false run: the `schedule:` trigger
+    # was removed outright, so reinsert it right after `on:` (its original
+    # template position) rather than only rewriting an existing cron line.
+    local cron_line="    - cron: '${cron}'"
+    awk -v line="$cron_line" '
+      /^on:$/ { print; print "  schedule:"; print line; next }
+      { print }
+    ' "$runtime" > "$runtime.tmp"
+  fi
+  mv "$runtime.tmp" "$runtime"
+  mkdir -p "$WORKFLOW_DIR"
+  cp "$runtime" "$WORKFLOW_DIR/$bn"
+  echo "  baked update schedule ($bn)"
+}
+
 # ── Splice a rendered guard into a workflow file, then mirror it ─────
 apply_file() { # $1 = basename, $2.. = render function + args
   local bn="$1"; shift
@@ -394,5 +457,7 @@ apply_file autoducks-revert.yml    render_simple revert
 apply_file autoducks-close.yml     render_simple close
 apply_file autoducks-product.yml   render_product
 patch_product_cron
+apply_file autoducks-update.yml    render_update
+patch_update_cron
 
 echo "Done. Commit the modified .github/workflows/ and .autoducks/runtimes/ files."

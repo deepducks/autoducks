@@ -39,6 +39,16 @@ curl -fsSL https://raw.githubusercontent.com/deepducks/autoducks/main/scripts/in
 
 See the [installation guide](https://autoducks.openvibes.tech/getting-started/installation/) for prerequisites and setup checks.
 
+## Self-updating
+
+Once installed, autoducks keeps itself current: a scheduled Update Agent (`/update`, `workflow_dispatch`, or the configured cron) checks `update.source_repo` for a newer release on `update.channel` (`stable` by default), runs any required config migrations, and delivers the result as a pull request. To stay on a known-good version instead of tracking the latest, set `update.pin` in `.autoducks/autoducks.json`:
+
+```json
+{ "update": { "pin": "0.1.0" } }
+```
+
+Setting `pin` to a prior version is also the one-step rollback path after a bad update. See the [Updates reference](https://autoducks.openvibes.tech/reference/updates/) for channels, drift detection, and the full rollback procedure.
+
 ## First command
 
 Open an issue describing what you want, then comment:
@@ -63,6 +73,7 @@ The pipeline designs, plans, and implements it — opening a PR per task and a f
 | Migrating from `/agents` | <https://autoducks.openvibes.tech/guides/migrating-from-agents/> |
 | Slash command reference | <https://autoducks.openvibes.tech/reference/slash-commands/> |
 | Configuration | <https://autoducks.openvibes.tech/reference/configuration/> |
+| Updates (self-update, pinning, rollback) | <https://autoducks.openvibes.tech/reference/updates/> |
 | Labels | <https://autoducks.openvibes.tech/reference/labels/> |
 | Branch naming | <https://autoducks.openvibes.tech/reference/branch-naming/> |
 | Security | <https://autoducks.openvibes.tech/reference/security/> |

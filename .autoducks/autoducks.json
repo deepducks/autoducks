@@ -63,6 +63,17 @@
     "max_issues_per_run": 100,
     "provisional_classification": true
   },
+  "update": {
+    "enabled": true,
+    "schedule": "23 6 * * 1",
+    "channel": "stable",
+    "pin": null,
+    "mode": "pr",
+    "auto_merge": "off",
+    "on_drift": "warn",
+    "notify_issue": null,
+    "source_repo": "deepducks/autoducks"
+  },
   "triggers": {
     "architect": [],
     "engineer":  [],
@@ -75,7 +86,8 @@
     "defer":     [],
     "resolve":   [],
     "triage":    [],
-    "merge":     []
+    "merge":     [],
+    "update":    []
   },
   "review": {
     "security_guidelines": ".autoducks/security-guidelines.md",
@@ -113,7 +125,8 @@
       "defer":     { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR"] },
       "resolve":   { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
       "product":   { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
-      "merge":     { "trusted_associations": ["OWNER", "MEMBER"] }
+      "merge":     { "trusted_associations": ["OWNER", "MEMBER"] },
+      "update":    { "trusted_associations": ["OWNER", "MEMBER"] }
     }
   },
   "plugins": []

@@ -27,8 +27,8 @@ if [[ ! -f "$CONFIG" ]]; then
   exit 1
 fi
 
-AGENTS=(architect engineer execute fix revert close review rework defer resolve triage merge)
-BUILTINS="architect design engineer tactics execute run work fix revert close review rework defer resolve triage merge"
+AGENTS=(architect engineer execute fix revert close review rework defer resolve triage merge update)
+BUILTINS="architect design engineer tactics execute run work fix revert close review rework defer resolve triage merge update"
 
 # Command namespace (validated; falls back to empty — bare short forms — on
 # garbage). namespace = command with a single optional leading '/' stripped.

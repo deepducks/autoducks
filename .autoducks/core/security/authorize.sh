@@ -49,7 +49,7 @@ authz::audit() {
 #
 # Backward-compatible baseline (applied when .security is absent or a key
 # is missing): trusted=OWNER,MEMBER,COLLABORATOR; codeowners=false;
-# revert/close default to trusted=OWNER,MEMBER.
+# revert/close/update default to trusted=OWNER,MEMBER.
 authz::load_config() {
   local agent="$1"
   # The Maestro and Developer are both faces of the `execute` command — they
@@ -75,7 +75,8 @@ authz::load_config() {
       "revert":  { "trusted_associations": ["OWNER", "MEMBER"] },
       "close":   { "trusted_associations": ["OWNER", "MEMBER"] },
       "product": { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
-      "merge":   { "trusted_associations": ["OWNER", "MEMBER"] }
+      "merge":   { "trusted_associations": ["OWNER", "MEMBER"] },
+      "update":  { "trusted_associations": ["OWNER", "MEMBER"] }
     }
   }'
 

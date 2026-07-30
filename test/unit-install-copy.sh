@@ -20,6 +20,19 @@ trap 'rm -rf "$SCRATCH"' EXIT
 SOURCE_DIR="$SCRATCH/source"
 CONSUMER="$SCRATCH/consumer"
 
+# ── Stub `gh` so the sha-resolution step never touches the network: exiting
+#    non-zero simulates "gh unavailable/unauthenticated", which install.sh
+#    already handles by falling back gracefully. Keeps this suite's "never
+#    touches the network" guarantee intact even though a real `gh` may be on
+#    PATH in whatever environment runs it. ──
+STUB_BIN="$SCRATCH/stub-bin"
+mkdir -p "$STUB_BIN"
+cat > "$STUB_BIN/gh" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$STUB_BIN/gh"
+
 # ── Build the offline "download" source: real .autoducks/, ISSUE_TEMPLATE,
 #    and the 5 scripts install.sh copies into a consumer repo ──
 mkdir -p "$SOURCE_DIR/.github/ISSUE_TEMPLATE" "$SOURCE_DIR/scripts"
@@ -39,7 +52,8 @@ printf 'name: CI — unit tests\n' > "$SOURCE_DIR/.github/workflows/ci-unit-test
 mkdir -p "$CONSUMER"
 
 run_install() { # runs the real install.sh, offline seam pointed at SOURCE_DIR
-  (cd "$CONSUMER" && AUTODUCKS_SOURCE_DIR="$SOURCE_DIR" bash "$REPO_ROOT/scripts/install.sh" --no-setup)
+  (cd "$CONSUMER" && AUTODUCKS_SOURCE_DIR="$SOURCE_DIR" PATH="$STUB_BIN:$PATH" \
+    bash "$REPO_ROOT/scripts/install.sh" --no-setup)
 }
 
 # ═══ Fresh install ═══
@@ -229,11 +243,22 @@ else
   fail "update: workflows mirror out of sync with runtime templates"
 fi
 
-HOOK_USES_COUNT=$(grep -rc "uses: \./\.github/actions/autoducks/" "$CONSUMER/.github/workflows/"*.yml | awk -F: '{sum += $2} END {print sum}')
-if [[ "$HOOK_USES_COUNT" -eq 24 ]]; then
-  pass "update: hook 'uses:' lines survived across all 12 workflow templates"
+# Derive the expectation from the templates rather than hard-coding it. The
+# count is a property of how many agent workflows ship (two hook lines each),
+# so a literal goes stale the moment one is added — which is exactly what
+# happened when autoducks-update.yml took the total from 24 to 26. What this
+# test is actually for is that the hook lines *survive* the copy, so compare
+# consumer against source and let the number follow.
+HOOK_USES_EXPECTED=$(grep -rc "uses: \./\.github/actions/autoducks/" \
+  "$REPO_ROOT/.autoducks/runtimes/github-actions/"autoducks-*.yml \
+  | awk -F: '{sum += $2} END {print sum+0}')
+HOOK_USES_COUNT=$(grep -rc "uses: \./\.github/actions/autoducks/" "$CONSUMER/.github/workflows/"*.yml | awk -F: '{sum += $2} END {print sum+0}')
+if [[ "$HOOK_USES_EXPECTED" -gt 0 && "$HOOK_USES_COUNT" -eq "$HOOK_USES_EXPECTED" ]]; then
+  pass "update: all $HOOK_USES_EXPECTED hook 'uses:' lines survived the copy"
+elif [[ "$HOOK_USES_EXPECTED" -eq 0 ]]; then
+  fail "update: found no hook 'uses:' lines in the runtime templates — the probe itself is broken"
 else
-  fail "update: expected 24 hook 'uses:' lines, found $HOOK_USES_COUNT"
+  fail "update: expected $HOOK_USES_EXPECTED hook 'uses:' lines, found $HOOK_USES_COUNT"
 fi
 
 # ═══ Idempotence ═══

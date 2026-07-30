@@ -20,6 +20,7 @@ new_repo() {
   REPO="$SCRATCH/$1"
   mkdir -p "$REPO/.autoducks/core/config"
   cp "$REPO_ROOT/.autoducks/core/config/apply-plugins.sh" "$REPO/.autoducks/core/config/"
+  cp "$REPO_ROOT/.autoducks/core/config/semver.sh" "$REPO/.autoducks/core/config/"
   cat > "$REPO/.autoducks/autoducks.json" <<'EOF'
 {"plugins": []}
 EOF
@@ -360,6 +361,48 @@ else
   grep -qi "claude/mcp.json defines server 'undeclared' but manifest 'mcpServers' does not declare it" /tmp/apply-plugins-crossvalidate2.log \
     && pass "mcp.json entry with no manifest declaration fails validation with an actionable message" \
     || fail "wrong error for undeclared mcpServers entry"
+fi
+
+echo "── HOST_VERSION: .autoducks/VERSION present, autoducks.json has no version → gate is live ──"
+new_repo hostversion-live
+set_plugins "$REPO" '[{"name":"alpha","source":".autoducks/plugins/alpha","config":{}}]'
+make_plugin "$REPO" alpha '[]' '[]'
+jq '.autoducksVersion = ">=99.0.0"' "$REPO/.autoducks/plugins/alpha/plugin.json" > "$REPO/.autoducks/plugins/alpha/plugin.json.tmp" \
+  && mv "$REPO/.autoducks/plugins/alpha/plugin.json.tmp" "$REPO/.autoducks/plugins/alpha/plugin.json"
+printf '1.0.0\n' > "$REPO/.autoducks/VERSION"
+if run_compiler "$REPO" >/tmp/apply-plugins-hostversion-live.log 2>&1; then
+  fail "plugin requiring >=99.0.0 compiled against .autoducks/VERSION 1.0.0"
+else
+  grep -qi "requires autoducksVersion '>=99.0.0', host is '1.0.0'" /tmp/apply-plugins-hostversion-live.log \
+    && pass "present .autoducks/VERSION makes the autoducksVersion gate live and enforced" \
+    || fail "wrong error for live HOST_VERSION gate: $(cat /tmp/apply-plugins-hostversion-live.log)"
+fi
+
+echo "── HOST_VERSION: .autoducks/VERSION absent → gate stays advisory ──"
+new_repo hostversion-absent
+set_plugins "$REPO" '[{"name":"alpha","source":".autoducks/plugins/alpha","config":{}}]'
+make_plugin "$REPO" alpha '[]' '[]'
+jq '.autoducksVersion = ">=99.0.0"' "$REPO/.autoducks/plugins/alpha/plugin.json" > "$REPO/.autoducks/plugins/alpha/plugin.json.tmp" \
+  && mv "$REPO/.autoducks/plugins/alpha/plugin.json.tmp" "$REPO/.autoducks/plugins/alpha/plugin.json"
+if run_compiler "$REPO" >/tmp/apply-plugins-hostversion-absent.log 2>&1; then
+  pass "absent .autoducks/VERSION and unset autoducks.json.version leaves the gate advisory-only"
+else
+  fail "gate enforced with no HOST_VERSION available: $(cat /tmp/apply-plugins-hostversion-absent.log)"
+fi
+
+echo "── HOST_VERSION: explicit autoducks.json.version overrides .autoducks/VERSION ──"
+new_repo hostversion-override
+set_plugins "$REPO" '[{"name":"alpha","source":".autoducks/plugins/alpha","config":{}}]'
+make_plugin "$REPO" alpha '[]' '[]'
+jq '.autoducksVersion = ">=99.0.0"' "$REPO/.autoducks/plugins/alpha/plugin.json" > "$REPO/.autoducks/plugins/alpha/plugin.json.tmp" \
+  && mv "$REPO/.autoducks/plugins/alpha/plugin.json.tmp" "$REPO/.autoducks/plugins/alpha/plugin.json"
+printf '1.0.0\n' > "$REPO/.autoducks/VERSION"
+jq '.version = "100.0.0"' "$REPO/.autoducks/autoducks.json" > "$REPO/.autoducks/autoducks.json.tmp" \
+  && mv "$REPO/.autoducks/autoducks.json.tmp" "$REPO/.autoducks/autoducks.json"
+if run_compiler "$REPO" >/tmp/apply-plugins-hostversion-override.log 2>&1; then
+  pass "explicit autoducks.json.version (100.0.0) overrides .autoducks/VERSION (1.0.0) and satisfies the constraint"
+else
+  fail "explicit autoducks.json.version override did not take precedence: $(cat /tmp/apply-plugins-hostversion-override.log)"
 fi
 
 echo ""
