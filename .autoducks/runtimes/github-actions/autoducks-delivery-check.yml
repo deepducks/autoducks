@@ -4,6 +4,20 @@ on:
   pull_request:
     # `closed` drives the sibling gitlink re-pin below, not the poller.
     types: [opened, synchronize, reopened, ready_for_review, closed]
+  # Any push to the default branch can move a gitlink — a PR merge, but also a
+  # direct commit. Only the merge fires a `pull_request` event, so without this
+  # a hand-pushed gitlink bump strands every open parent PR on a stale pin with
+  # nothing watching (#119b). Inert outside metarepo mode.
+  #
+  # Filtered by exclusion, never by an allow-list of branch names: the pipeline
+  # prefixes are fixed (`feature/`, `fix/` — see branch-prefix.sh) and a default
+  # branch is never one of them, so this drops the task-branch noise without ever
+  # being able to suppress the branch we actually care about. An allow-list would
+  # silently lose the recovery on any repo whose default branch is not `main`.
+  push:
+    branches-ignore:
+      - 'feature/**'
+      - 'fix/**'
 
 permissions:
   contents: write        # the poller pushes gitlink-only reconcile commits (#119b)
@@ -13,14 +27,16 @@ permissions:
 
 # Serialize the poller per PR: cancelling mid-run would strand the check-run
 # in `in_progress` (traps don't fire on cancellation) and deadlock the
-# required check, so queue rather than cancel.
+# required check, so queue rather than cancel. `github.ref` is the fallback for
+# push events, which carry no pull_request payload.
 concurrency:
-  group: autoducks-delivery-check-${{ github.event.pull_request.number }}
+  group: autoducks-delivery-check-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
   delivery-check:
     if: >-
+      github.event_name == 'pull_request' &&
       github.event.action != 'closed' &&
       (startsWith(github.event.pull_request.head.ref, 'feature/') ||
        startsWith(github.event.pull_request.head.ref, 'fix/')) &&
@@ -83,6 +99,7 @@ jobs:
   # merge instead of a push trigger that would fire on every task branch.
   repin-siblings:
     if: >-
+      github.event_name == 'pull_request' &&
       github.event.action == 'closed' &&
       github.event.pull_request.merged == true &&
       (startsWith(github.event.pull_request.head.ref, 'feature/') ||
@@ -132,4 +149,59 @@ jobs:
         env:
           REPO: ${{ github.repository }}
           MERGED_PR_NUM: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+
+  # The same reconcile, on the other way a gitlink moves: a direct push to the
+  # default branch. `repin-siblings` above only sees PR merges, so without this
+  # a hand-pushed gitlink bump leaves every open parent PR CONFLICTING with
+  # nothing scheduled to notice (#119b). No PR is excluded here — the push
+  # belongs to no PR, so every open parent delivery PR is a candidate.
+  #
+  # This fires on every default-branch push, including in single-repo installs
+  # where it exits immediately via `metarepo::enabled`. That no-op is the price
+  # of the recovery being on by default: a metarepo that had to opt in via a repo
+  # variable would lose it silently by forgetting to set one.
+  repin-on-base-push:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+      id-token: write
+    concurrency:
+      group: autoducks-metarepo-repin-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - name: Mint app token
+        id: apptoken
+        shell: bash
+        env:
+          AUTODUCKS_APP: ${{ vars.AUTODUCKS_APP }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTODUCKS_APP:-}" ]; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BROKER="https://autoducks-api.gustavospgondim.workers.dev"
+          OIDC=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=autoducks-broker" | jq -r .value)
+          TOKEN=$(curl -sf -X POST -H "Authorization: Bearer $OIDC" \
+            "$BROKER/token" | jq -r .token)
+          echo "::add-mask::$TOKEN"
+          echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: Snapshot machinery
+        id: snapshot
+        run: bash .autoducks/core/robustness/snapshot-machinery.sh
+      - name: Re-pin open parent PRs
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/orchestration/repin-open-parent-prs.sh"
+        env:
+          REPO: ${{ github.repository }}
           GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}

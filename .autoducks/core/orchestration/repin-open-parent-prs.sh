@@ -2,9 +2,8 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../config/load-config.sh"
 
-# Re-pin every OTHER open metarepo parent PR after one of them merges into the
-# default branch. Inert outside metarepo mode (byte-identical single-repo
-# behaviour).
+# Re-pin open metarepo parent PRs after the default branch's gitlinks moved.
+# Inert outside metarepo mode (byte-identical single-repo behaviour).
 #
 # Why this exists (#119b): a gitlink is an opaque SHA in the parent's tree, and
 # GitHub merges it 3-way like any other blob. When two parent PRs are open at
@@ -14,21 +13,17 @@ source "$(dirname "${BASH_SOURCE[0]}")/../config/load-config.sh"
 # 00:42:24, four minutes after meta#97 moved main's gitlink at 00:38:43 — and
 # both were repaired by hand.
 #
-# A merged parent PR is the event that moves those gitlinks, so it is also the
-# cheapest place to react: no repo-wide push trigger firing on every task branch,
-# just one bounded pass over the open PRs that could have gone stale.
+# Two events move those gitlinks and both run this: a parent PR merging
+# (`repin-siblings`) and a direct push to the default branch
+# (`repin-on-base-push`). Only the first carries a PR to exclude.
 #
 # The reconcile itself only ever fast-forwards (see metarepo::reconcile_gitlinks
 # and metarepo::pin_relation) — a pin that is ahead of, or diverged from, the
 # child's default branch is reported and left for a human.
 #
-# Residual gap, deliberately not covered: a gitlink moved by a direct push to the
-# default branch (a human commit, not a PR merge) fires no `pull_request` event,
-# so open PRs are reconciled on the next delivery-check run for each rather than
-# immediately.
-#
-# Required env: REPO, MERGED_PR_NUM (the PR that just merged — skipped, since it
-# is no longer open).
+# Required env: REPO.
+# Optional env: MERGED_PR_NUM — the PR that just merged, excluded from the pass.
+# Empty (the direct-push case) means every open parent PR is a candidate.
 
 metarepo::enabled || exit 0
 
@@ -40,9 +35,9 @@ notice() { echo "::notice::repin-open-parent-prs: $*"; }
 MERGED_PR_NUM="${MERGED_PR_NUM:-}"
 
 # Open PRs that carry the delivered-children marker are exactly the parent
-# delivery PRs whose gitlinks this merge may have staled. `--state open` already
-# excludes the PR that just merged, but filter on the number too so a stale list
-# cannot make us re-pin it.
+# delivery PRs whose gitlinks this move may have staled. `--state open` already
+# excludes a PR that just merged, but filter on the number too so a stale list
+# cannot make us re-pin it. An empty MERGED_PR_NUM excludes nothing.
 PRS_JSON="$(gh pr list --repo "$REPO" --state open --limit 100 \
   --json number,headRefName,body,isCrossRepository 2>/dev/null || echo '[]')"
 

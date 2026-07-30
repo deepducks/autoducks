@@ -316,10 +316,34 @@ for dir in ".autoducks/runtimes/github-actions" ".github/workflows"; do
   else
     fail "$dir: the poller job is NOT excluded on closed"
   fi
-  if grep -q "repin-open-parent-prs.sh" "$f"; then
-    pass "$dir: repin-siblings runs repin-open-parent-prs.sh"
+  if [[ "$(grep -c "repin-open-parent-prs.sh" "$f")" -eq 2 ]]; then
+    pass "$dir: both re-pin jobs run repin-open-parent-prs.sh"
   else
-    fail "$dir: repin-siblings does not run repin-open-parent-prs.sh"
+    fail "$dir: expected 2 repin-open-parent-prs.sh invocations, got $(grep -c "repin-open-parent-prs.sh" "$f")"
+  fi
+  # A direct push to the default branch fires no pull_request event, so without
+  # its own trigger a hand-pushed gitlink bump strands every open parent PR.
+  if grep -q "repin-on-base-push:" "$f"; then
+    pass "$dir: repin-on-base-push job present"
+  else
+    fail "$dir: repin-on-base-push job missing"
+  fi
+  if grep -qE "^  push:$" "$f"; then
+    pass "$dir: push is a trigger"
+  else
+    fail "$dir: push is not a trigger"
+  fi
+  if grep -q "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)" "$f"; then
+    pass "$dir: the push job is gated on the default branch"
+  else
+    fail "$dir: the push job is NOT gated on the default branch"
+  fi
+  # Every job must state which event it belongs to, so a push event cannot fall
+  # through to the poller (which would start a check-run with no PR to gate).
+  if [[ "$(grep -c "github.event_name == 'pull_request' &&" "$f")" -eq 2 ]]; then
+    pass "$dir: both pull_request jobs assert the event name"
+  else
+    fail "$dir: expected 2 event_name guards, got $(grep -c "github.event_name == 'pull_request' &&" "$f")"
   fi
 done
 

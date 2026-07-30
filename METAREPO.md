@@ -198,8 +198,9 @@ Two moments reconcile the pin, because neither alone is sufficient:
    to each child's current tip. This covers the two cases delivery cannot:
    an **async auto-merge** cannot report the SHA it will eventually produce, and a
    **sibling parent PR merging** moves the base's gitlink out from under every other
-   open PR. It runs from the delivery poller (per PR) and from the `repin-siblings`
-   job on any parent PR merge.
+   open PR. It runs from three places, covering every way a pin goes stale: the
+   delivery poller (per PR), the `repin-siblings` job on any parent PR merge, and
+   the `repin-on-base-push` job on any direct push to the default branch.
 
 Reconciliation **only ever fast-forwards**. A pin that is *ahead* of the child's
 default branch means the delivery has not merged yet and is left alone; a *diverged*
