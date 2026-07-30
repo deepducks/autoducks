@@ -293,10 +293,33 @@ log "Orchestrator mode: $ORCH_MODE"
 # --- Phase 4: Single-task fast path (structural detection, D12) ---
 # A tactical zone without a waves plan means the Engineer collapsed the plan
 # into a single task carried by the feature issue itself.
+#
+# …but only when the tracker agrees. An unparseable body proves the body has no
+# wave section, not that the feature has no tasks: the Engineer may have created
+# sub-issues and left the body untouched, and a later edit to the design sections
+# can drop a plan the body once carried. Concluding "single task" from the body
+# alone dispatches the Developer onto the feature issue itself, which carries no
+# `<!-- autoducks:modules: -->` marker — so under metarepo mode the first
+# submodule it touches trips the drift guard and the run dies in post, and
+# outside metarepo mode it silently redoes work already split across tasks.
+# Ask the tracker before deciding, and synthesise a plan from the sub-issues so
+# the wave machinery below can proceed. One wave is enough: sequential mode
+# flattens waves anyway, and the done-detection in Phase 6 skips whatever is
+# already merged or CLOSED COMPLETED.
 PARSED=""
 IS_SINGLE=false
 if ! PARSED=$(parse_waves "$ISSUE_BODY" 2>/dev/null); then
-  IS_SINGLE=true
+  _sub_nums="$(its::list_sub_issues "$FEATURE" 2>/dev/null | jq -r '.[].number' 2>/dev/null | sort -n || true)"
+  if [[ -n "${_sub_nums//[[:space:]]/}" ]]; then
+    log "feature #$FEATURE has no wave plan in its body but the tracker reports sub-issues — treating as multi-task"
+    PARSED="WAVE|0|Tasks"
+    while IFS= read -r _n; do
+      [[ -n "$_n" ]] && PARSED+=$'\n'"TASK|0|$_n"
+    done <<< "$_sub_nums"
+  else
+    IS_SINGLE=true
+  fi
+  unset _sub_nums _n
 fi
 
 if [[ "$IS_SINGLE" == "true" ]]; then
