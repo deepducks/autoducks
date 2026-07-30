@@ -53,6 +53,12 @@ its::get_issue_edit_history()  { :; }
 its::delete_comment()          { :; }
 its::update_comment()          { printf 'UPDATE:%s|%s\n' "$1" "$2" >> "${AUTHZ_TEST_LOG:-/dev/null}"; }
 its::assign_issue()            { :; }
+its::reopen_issue()            { :; }
+its::get_parent()              { :; }
+its::list_issues()             { :; }
+its::search_issues()           { :; }
+its::set_priority()            { :; }
+its::priority_backend()        { :; }
 MOCK
 }
 
@@ -485,6 +491,39 @@ run_authz "$D" \
   EVENT_NAME=issue_comment \
   REPO=x/y GH_TOKEN=t
 if [[ "$LAST_EXIT" -eq 0 ]]; then pass "merge allows MEMBER"; else fail "expected 0, got $LAST_EXIT"; fi
+
+echo "[6e] update stays on its own destructive policy (COLLABORATOR denied, OWNER allowed)"
+D=$(new_test_dir "t6e")
+write_config "$D" null
+run_authz "$D" \
+  AUTODUCKS_AGENT=update \
+  ACTOR=alice AUTHOR_ASSOC=COLLABORATOR \
+  EVENT_NAME=issue_comment \
+  ISSUE_NUM=7 COMMENT_ID=200 \
+  REPO=x/y GH_TOKEN=t
+if [[ "$LAST_EXIT" -eq 77 ]]; then pass "update denies COLLABORATOR"; else fail "expected 77, got $LAST_EXIT"; fi
+if grep -q '^REACT:200|-1$' "$LAST_LOG"; then
+  pass "COLLABORATOR /update denial reacts to the trigger comment"
+else
+  fail "missing denial feedback for COLLABORATOR /update (log: $(cat "$LAST_LOG"))"
+fi
+
+run_authz "$D" \
+  AUTODUCKS_AGENT=update \
+  ACTOR=alice AUTHOR_ASSOC=OWNER \
+  EVENT_NAME=issue_comment \
+  REPO=x/y GH_TOKEN=t
+if [[ "$LAST_EXIT" -eq 0 ]]; then pass "update allows OWNER"; else fail "expected 0, got $LAST_EXIT"; fi
+
+echo "[6f] security.per_agent.update override wins over the baseline"
+D=$(new_test_dir "t6f")
+write_config "$D" '{"per_agent":{"update":{"trusted_associations":["OWNER","MEMBER","COLLABORATOR"]}}}'
+run_authz "$D" \
+  AUTODUCKS_AGENT=update \
+  ACTOR=alice AUTHOR_ASSOC=COLLABORATOR \
+  EVENT_NAME=issue_comment \
+  REPO=x/y GH_TOKEN=t
+if [[ "$LAST_EXIT" -eq 0 ]]; then pass "config override widens /update to COLLABORATOR"; else fail "expected 0, got $LAST_EXIT"; fi
 
 # ---------------------------------------------------------------------------
 # Test 7: Audit trail (denials, allowlist, CODEOWNERS)

@@ -211,6 +211,64 @@ AUTODUCKS_CHECKS_MAX_ITERATIONS="$(jq -r '.checks.max_iterations // 3' "$_config
 (( AUTODUCKS_CHECKS_MAX_ITERATIONS < 1 ))  && AUTODUCKS_CHECKS_MAX_ITERATIONS=1
 (( AUTODUCKS_CHECKS_MAX_ITERATIONS > 10 )) && AUTODUCKS_CHECKS_MAX_ITERATIONS=10
 
+# ── Update policy ─────────────────────────────────────────────────────
+# `// null` treats `false` the same as absent, so `enabled` needs the
+# explicit `if == false` form to keep `update.enabled: false` from
+# resolving to "true".
+export AUTODUCKS_UPDATE_ENABLED
+AUTODUCKS_UPDATE_ENABLED="$(jq -r 'if .update.enabled == false then "false" else "true" end' "$_config")"
+
+export AUTODUCKS_UPDATE_SCHEDULE
+AUTODUCKS_UPDATE_SCHEDULE="$(jq -r '.update.schedule // "23 6 * * 1"' "$_config")"
+
+export AUTODUCKS_UPDATE_CHANNEL
+AUTODUCKS_UPDATE_CHANNEL="$(jq -r '.update.channel // "stable"' "$_config")"
+case "$AUTODUCKS_UPDATE_CHANNEL" in
+  stable|edge) ;;
+  *) AUTODUCKS_UPDATE_CHANNEL="stable" ;;   # tolerate garbage
+esac
+
+export AUTODUCKS_UPDATE_PIN
+AUTODUCKS_UPDATE_PIN="$(jq -r '.update.pin // empty' "$_config")"
+
+export AUTODUCKS_UPDATE_MODE
+AUTODUCKS_UPDATE_MODE="$(jq -r '.update.mode // "pr"' "$_config")"
+case "$AUTODUCKS_UPDATE_MODE" in
+  pr|commit|off) ;;
+  *) AUTODUCKS_UPDATE_MODE="pr" ;;   # tolerate garbage
+esac
+
+export AUTODUCKS_UPDATE_AUTO_MERGE
+AUTODUCKS_UPDATE_AUTO_MERGE="$(jq -r '.update.auto_merge // "off"' "$_config")"
+case "$AUTODUCKS_UPDATE_AUTO_MERGE" in
+  off|patch|minor) ;;
+  *) AUTODUCKS_UPDATE_AUTO_MERGE="off" ;;   # "major" is not a legal value; tolerate garbage
+esac
+
+export AUTODUCKS_UPDATE_ON_DRIFT
+AUTODUCKS_UPDATE_ON_DRIFT="$(jq -r '.update.on_drift // "warn"' "$_config")"
+case "$AUTODUCKS_UPDATE_ON_DRIFT" in
+  warn|abort) ;;
+  *) AUTODUCKS_UPDATE_ON_DRIFT="warn" ;;   # tolerate garbage
+esac
+
+export AUTODUCKS_UPDATE_NOTIFY_ISSUE
+AUTODUCKS_UPDATE_NOTIFY_ISSUE="$(jq -r '.update.notify_issue // empty' "$_config")"
+[[ "$AUTODUCKS_UPDATE_NOTIFY_ISSUE" =~ ^[0-9]+$ ]] || AUTODUCKS_UPDATE_NOTIFY_ISSUE=""
+
+export AUTODUCKS_UPDATE_SOURCE_REPO
+AUTODUCKS_UPDATE_SOURCE_REPO="$(jq -r '.update.source_repo // "deepducks/autoducks"' "$_config")"
+
+# ── Package version (installed autoducks release) ────────────────────
+# Same resolution order as apply-plugins.sh's HOST_VERSION: an explicit
+# autoducks.json.version override (for testing a gate) beats the normal
+# .autoducks/VERSION source; empty if neither is present.
+export AUTODUCKS_VERSION
+AUTODUCKS_VERSION="$(jq -r '.version // empty' "$_config")"
+if [[ -z "$AUTODUCKS_VERSION" && -f "$AUTODUCKS_ROOT/VERSION" ]]; then
+  AUTODUCKS_VERSION="$(tr -d '[:space:]' < "$AUTODUCKS_ROOT/VERSION")"
+fi
+
 # ── Source provider interfaces ──────────────────────────────────────
 source "$AUTODUCKS_ROOT/providers/its/interface.sh"
 source "$AUTODUCKS_ROOT/providers/git/interface.sh"
