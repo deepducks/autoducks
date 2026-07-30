@@ -9,9 +9,10 @@
 # Env (from .github/workflows/autoducks-update.yml "Run update" step):
 #   REPO, RUN_ID, REF (dispatch override, optional), MODE (dispatch
 #   override, optional), DRY_RUN, COMMENTER, GH_TOKEN, GITHUB_EVENT_NAME,
-#   GITHUB_STEP_SUMMARY. ISSUE_NUM/COMMENT_ID are read defensively — the
-#   shipped workflow does not currently wire them for comment-triggered
-#   runs, so an empty ISSUE_NUM is treated as a scheduled run.
+#   GITHUB_STEP_SUMMARY, AUTODUCKS_PAT. ISSUE_NUM/COMMENT_ID are wired by the
+#   workflow for comment-triggered runs and empty otherwise, so an empty
+#   ISSUE_NUM still means "scheduled run" — the reads stay defensive, they are
+#   simply no longer dead on the `/update` path.
 set -euo pipefail
 export AUTODUCKS_AGENT="update"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
@@ -290,8 +291,25 @@ update::detect_drift() {
   if [[ -s "$scratch/prev.tar.gz" ]]; then
     mkdir -p "$scratch/prev"
     tar xzf "$scratch/prev.tar.gz" -C "$scratch/prev" --strip-components=1 2>/dev/null || true
-    ( cd "$scratch/prev" 2>/dev/null && [[ -f scripts/update-triggers.sh ]] && bash scripts/update-triggers.sh >/dev/null 2>&1 || true )
-    ( cd "$scratch/prev" 2>/dev/null && [[ -f .autoducks/core/config/apply-plugins.sh ]] && bash .autoducks/core/config/apply-plugins.sh >/dev/null 2>&1 || true )
+
+    # Regenerate with the CONSUMER's config, not upstream's. update-triggers.sh
+    # bakes if:/schedule: regions and apply-plugins.sh compiles plugin artifacts
+    # from autoducks.json — so running them against the tarball's own config
+    # produces a reference tree describing upstream's settings, and every
+    # consumer whose config differs (a different cron, another trigger phrase,
+    # any enabled plugin) sees the whole regenerated surface reported as local
+    # drift. Under `on_drift: abort` that is a hard block on updating a repo
+    # whose only sin is being configured.
+    #
+    # The pre-update snapshot is the consumer's own tree, so its autoducks.json
+    # is the right input. Copy it in before regenerating; if it is missing, skip
+    # regeneration entirely rather than fall back to upstream's — a smaller,
+    # honest diff beats a confidently wrong one.
+    if [[ -f "$pre_update_dir/.autoducks/autoducks.json" && -d "$scratch/prev/.autoducks" ]]; then
+      cp "$pre_update_dir/.autoducks/autoducks.json" "$scratch/prev/.autoducks/autoducks.json"
+      ( cd "$scratch/prev" 2>/dev/null && [[ -f scripts/update-triggers.sh ]] && bash scripts/update-triggers.sh >/dev/null 2>&1 || true )
+      ( cd "$scratch/prev" 2>/dev/null && [[ -f .autoducks/core/config/apply-plugins.sh ]] && bash .autoducks/core/config/apply-plugins.sh >/dev/null 2>&1 || true )
+    fi
   fi
   if [[ -d "$scratch/prev/.autoducks" ]]; then
     update::drift_diff "$pre_update_dir/.autoducks" "$scratch/prev/.autoducks"

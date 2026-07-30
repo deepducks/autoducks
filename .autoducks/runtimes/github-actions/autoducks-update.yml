@@ -115,6 +115,20 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           COMMENTER: ${{ github.event.comment.user.login }}
+          # run.sh's pre-flight tests AUTODUCKS_APP_TOKEN and AUTODUCKS_PAT by
+          # name. The app path sets the former into the job environment when it
+          # mints, but the PAT was only ever folded into GH_TOKEN's fallback
+          # chain — a value, not the name the check reads. A PAT-only install
+          # therefore always resolved to "no identity" and could never update,
+          # which is the configuration the docs tell operators to use.
+          AUTODUCKS_PAT: ${{ secrets.AUTODUCKS_PAT }}
+          # Comment-triggered runs react and post a status comment like every
+          # sibling agent (see autoducks-revert.yml). Without these two the
+          # whole reporting path in run.sh is unreachable and `/update` answers
+          # nothing at all. Empty on schedule/dispatch, which run.sh already
+          # treats as a scheduled run.
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
           GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: User post hook
         if: >-
