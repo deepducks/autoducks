@@ -256,6 +256,8 @@ Enabling metarepo mode **forces `orchestrator.mode = sequential`** (load-config)
 | `Work:coding` | Developer is implementing this task |
 | `Work:done` | Work complete (task merged, or all waves finished) |
 
+**Case-insensitivity.** Label matching across the bash/jq machinery is case-insensitive: routing compares label names without regard to case, so a label typed or created with different casing than the canonical taxonomy above is still recognized. `setup.sh` enforces this at source — when a required label collides case-insensitively with an existing GitHub default (e.g. a repo's stock `bug` colliding with the canonical `Bug`), it renames the existing label to the canonical casing via `gh label edit`, which preserves the label's issue associations rather than creating a duplicate. This auto-rename can be opted out of with `--no-rename` (or `AUTODUCKS_LABEL_AUTORENAME=0`), in which case setup reports the collision and leaves it for manual resolution. The GitHub Actions expression layer (the `if:` guards baked by `scripts/update-triggers.sh`) has its own, separate case-insensitivity guarantee — `contains()`, `startsWith()`/`endsWith()`, and `==` are documented as case-insensitive there too — but the bash layer does not inherit that guarantee from the Actions layer, or vice versa; the two are deliberately redundant, independent protections: normalization-at-source protects the Actions `if:` guards (which only ever test machinery-created label strings), and case-insensitive comparison protects everything running in bash.
+
 Retired (cleaned up on sight by revert/close/engineer): `Spec:draft`, `Spec:plan`, `Tactics:ready`, `Ready`, `Work:progress`, `Tactics:single`, `priority:P0..P3`.
 
 ---
