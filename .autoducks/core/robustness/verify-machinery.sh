@@ -120,6 +120,26 @@ verify_machinery::check_json_yaml() {
 # MISSING/DIFF: a runtime template with no (or a stale) .github/workflows/
 # mirror — setup's original check 9. ORPHAN: a .github/workflows/autoducks-*.yml
 # mirror with no runtime template — the direction setup never tested.
+#
+# Upstream-only workflows are the one legitimate exception to ORPHAN. They live
+# in .github/workflows/ of this repository alone and must never reach a consumer,
+# so they are deliberately absent from RUNTIME_DIR — which install.sh copies
+# wholesale (`cp .autoducks/runtimes/github-actions/autoducks-*.yml`). Without
+# this list, adding such a workflow makes the check fail on a clean tree, since
+# the `autoducks-` prefix is what ORPHAN keys on. (ci-unit-tests.yml escapes it
+# only by not carrying the prefix.)
+_VERIFY_UPSTREAM_ONLY_WORKFLOWS=(
+  "autoducks-release.yml"   # publishes this repo's own releases; consumers never release autoducks
+)
+
+verify_machinery::_is_upstream_only() {
+  local bn="$1" w
+  for w in "${_VERIFY_UPSTREAM_ONLY_WORKFLOWS[@]}"; do
+    [[ "$bn" == "$w" ]] && return 0
+  done
+  return 1
+}
+
 verify_machinery::check_runtime_sync() {
   local ok=0 runtime target bn
   if [[ -d "$RUNTIME_DIR" ]]; then
@@ -140,6 +160,7 @@ verify_machinery::check_runtime_sync() {
     for target in "$WORKFLOW_DIR"/autoducks-*.yml; do
       [[ -f "$target" ]] || continue
       bn="$(basename "$target")"
+      verify_machinery::_is_upstream_only "$bn" && continue
       runtime="$RUNTIME_DIR/$bn"
       if [[ ! -f "$runtime" ]]; then
         echo "ORPHAN .github/workflows/$bn .autoducks/runtimes/github-actions/$bn"

@@ -243,11 +243,22 @@ else
   fail "update: workflows mirror out of sync with runtime templates"
 fi
 
-HOOK_USES_COUNT=$(grep -rc "uses: \./\.github/actions/autoducks/" "$CONSUMER/.github/workflows/"*.yml | awk -F: '{sum += $2} END {print sum}')
-if [[ "$HOOK_USES_COUNT" -eq 24 ]]; then
-  pass "update: hook 'uses:' lines survived across all 12 workflow templates"
+# Derive the expectation from the templates rather than hard-coding it. The
+# count is a property of how many agent workflows ship (two hook lines each),
+# so a literal goes stale the moment one is added — which is exactly what
+# happened when autoducks-update.yml took the total from 24 to 26. What this
+# test is actually for is that the hook lines *survive* the copy, so compare
+# consumer against source and let the number follow.
+HOOK_USES_EXPECTED=$(grep -rc "uses: \./\.github/actions/autoducks/" \
+  "$REPO_ROOT/.autoducks/runtimes/github-actions/"autoducks-*.yml \
+  | awk -F: '{sum += $2} END {print sum+0}')
+HOOK_USES_COUNT=$(grep -rc "uses: \./\.github/actions/autoducks/" "$CONSUMER/.github/workflows/"*.yml | awk -F: '{sum += $2} END {print sum+0}')
+if [[ "$HOOK_USES_EXPECTED" -gt 0 && "$HOOK_USES_COUNT" -eq "$HOOK_USES_EXPECTED" ]]; then
+  pass "update: all $HOOK_USES_EXPECTED hook 'uses:' lines survived the copy"
+elif [[ "$HOOK_USES_EXPECTED" -eq 0 ]]; then
+  fail "update: found no hook 'uses:' lines in the runtime templates — the probe itself is broken"
 else
-  fail "update: expected 24 hook 'uses:' lines, found $HOOK_USES_COUNT"
+  fail "update: expected $HOOK_USES_EXPECTED hook 'uses:' lines, found $HOOK_USES_COUNT"
 fi
 
 # ═══ Idempotence ═══
