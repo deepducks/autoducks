@@ -172,10 +172,59 @@ final PR:
   (or a merge-commit fallback if it diverged); `squash` policy rewrites the SHA →
   the parent gitlink is **re-pinned**.
 - **Protected child** → open a marked PR and **merge-commit + auto-merge-when-ready**
-  (merges when required checks pass; SHA preserved, no re-pin).
+  (merges when required checks pass).
 
 The human merges the parent last. A **skip-marker** (`<!-- autoducks:metarepo-managed
 -->`) on child PRs keeps the child's own reviewer/rework/commit-lint dormant.
+
+### The gitlink pin contract
+
+**A parent gitlink always pins the tip of the child's default branch — never the tip
+of the child's feature branch.**
+
+The distinction is not cosmetic. A gitlink is an opaque SHA in the parent's tree, and
+GitHub merges it 3-way like any other blob: base vs ours vs theirs. Reachability from
+the default branch is *not* the property that governs it. A parent PR pinning a feature
+tip that a delivery merge commit kept perfectly reachable still conflicts the moment
+the base's gitlink moves — which is exactly how both parent PRs of the 2026-07-29
+incident flipped to `CONFLICTING/DIRTY` (#119).
+
+Two moments reconcile the pin, because neither alone is sufficient:
+
+1. **At delivery**, `git::submodule_deliver` re-reads the child's default-branch tip
+   after any *synchronous* merge and returns that, asking Maestro for a gitlink bump
+   when it differs from the feature tip.
+2. **Late**, `metarepo::reconcile_gitlinks` fast-forwards an open parent PR's gitlinks
+   to each child's current tip. This covers the two cases delivery cannot:
+   an **async auto-merge** cannot report the SHA it will eventually produce, and a
+   **sibling parent PR merging** moves the base's gitlink out from under every other
+   open PR. It runs from the delivery poller (per PR) and from the `repin-siblings`
+   job on any parent PR merge.
+
+Reconciliation **only ever fast-forwards**. A pin that is *ahead* of the child's
+default branch means the delivery has not merged yet and is left alone; a *diverged*
+pin means history was rewritten and is reported for a human. It never moves a pin
+backwards or across rewritten history.
+
+### Required-check recovery
+
+Auto-merge only fires when the required checks report, so a child delivery PR whose
+`opened` event produced no workflow run waits forever — `autoducks#1121` sat
+`MERGEABLE/BLOCKED` for 53 minutes until a human toggled draft→ready by hand. An
+**empty** `statusCheckRollup` is the signature (a *pending* check reports an entry with
+a null conclusion), and the recovery is the same draft→ready toggle
+(`git::retrigger_child_check`) that the conflict path already used:
+
+- `submodule_deliver` asserts the checks exist right after arming `--auto`, and again
+  on the fallback path where auto-merge could not be enabled at all.
+- the delivery poller re-fires the check after `metarepo.check_recovery.poll_rounds`
+  rounds with an empty rollup, and **fails the delivery check with that diagnosis** one
+  window later rather than hanging to the delivery timeout.
+
+Note this path does **not** assume `--auto` is available: `allow_auto_merge` cannot be
+enabled on a private repo under some plans, and `PATCH`ing it returns `200` while the
+field stays `false`. Such a child always lands on the fallback path, so it gets the
+same check assertion.
 
 ---
 
@@ -206,6 +255,9 @@ The human merges the parent last. A **skip-marker** (`<!-- autoducks:metarepo-ma
 | `metarepo.auth.mode` | `single_pat` \| `per_owner_pat` \| `github_app` | Credential resolution. |
 | `metarepo.submodules.<path>.external_cycle` | bool | Child has its own feature cycle (public OSS). |
 | `metarepo.submodules.<path>.protected` | bool \| null | `null` = detect at runtime. |
+| `metarepo.check_recovery.assert_attempts` | int | Times delivery re-checks that a child PR has any check run (default 3). |
+| `metarepo.check_recovery.assert_interval_seconds` | int | Wait between those attempts (default 5). |
+| `metarepo.check_recovery.poll_rounds` | int | Poll rounds with an empty rollup before the poller re-fires the check (default 2). |
 | `defaults.merge_method` | `squash` \| `merge` \| `rebase` \| `auto` | Merge policy; squash re-pins on delivery. |
 
 See `.autoducks/design/AGENTS.md` → "Metarepo mode" for the full model.

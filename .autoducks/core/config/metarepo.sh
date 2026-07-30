@@ -207,6 +207,106 @@ metarepo::repin_gitlinks() {
   fi
 }
 
+# metarepo::pin_relation(slug, pinned_sha, tip_sha) → one of
+#   identical | behind | ahead | diverged | unknown
+# describing where the currently pinned SHA sits relative to the child's
+# default-branch tip. `behind` is the only safe direction to reconcile in: the
+# pin is an ancestor of the tip, so moving it forward is a fast-forward that adds
+# no history the parent had not already accepted. `ahead` means the child has not
+# merged yet (an async auto-merge still pending) and moving the pin would regress
+# it; `diverged` means something rewrote the child's history and a human should
+# look. Uses the compare API with base=tip, head=pin, so GitHub's own answer
+# decides — no local clone of the child is needed.
+metarepo::pin_relation() {
+  local slug="$1" pinned="$2" tip="$3"
+  [[ -n "$slug" && -n "$pinned" && -n "$tip" ]] || { echo unknown; return 0; }
+  [[ "$pinned" == "$tip" ]] && { echo identical; return 0; }
+  local token status
+  token="$(git::resolve_token "$slug")"
+  status="$(GH_TOKEN="$token" gh api "repos/$slug/compare/${tip}...${pinned}" --jq '.status' 2>/dev/null || true)"
+  case "$status" in
+    identical|behind|ahead|diverged) echo "$status" ;;
+    *) echo unknown ;;
+  esac
+}
+
+# metarepo::reconcile_gitlinks(head_branch, path ...) — bring a parent PR's
+# gitlinks back in line with each child's *current* default-branch tip, then push
+# to head_branch. Returns 0 when nothing needed doing or the push succeeded.
+#
+# This is the late reconciliation half of the pin contract (#119b). Two things
+# make it necessary, and neither is knowable when the pin is first written:
+#
+#   1. An async auto-merge delivery cannot report the SHA it will produce, so the
+#      pin written at delivery time is provisional until the child PR merges.
+#   2. Nothing rebases an open parent PR's gitlink when the parent's default
+#      branch moves. Two parent PRs open at once means the first to merge leaves
+#      the second pinning a SHA that no longer matches its base — a gitlink is an
+#      opaque SHA and GitHub's 3-way merge conflicts on it, reachable or not.
+#      That is exactly how meta#108 went CONFLICTING 4 minutes after meta#97
+#      moved main's gitlink.
+#
+# Only fast-forwards are applied (see metarepo::pin_relation); anything else is
+# reported and left alone, so this can never quietly move a pin backwards or
+# across rewritten history.
+metarepo::reconcile_gitlinks() {
+  local head_branch="$1"; shift
+  local token; token="$(git::resolve_token "${REPO:-}")"
+
+  git::configure_identity 2>/dev/null || true
+  if [[ -n "$token" ]]; then
+    git remote set-url origin "https://x-access-token:${token}@github.com/${REPO}.git"
+  fi
+  git fetch -q origin "$head_branch" 2>/dev/null || { echo "::warning::reconcile: cannot fetch $head_branch" >&2; return 1; }
+  git checkout -q -B "$head_branch" "origin/$head_branch" 2>/dev/null || { echo "::warning::reconcile: cannot checkout $head_branch" >&2; return 1; }
+
+  local path slug ctok default_branch tip pinned relation changed=0
+  for path in "$@"; do
+    [[ -n "$path" ]] || continue
+    slug="$(metarepo::slug_for_path "$path" 2>/dev/null || true)"
+    [[ -n "$slug" ]] || continue
+    pinned="$(git rev-parse "HEAD:$path" 2>/dev/null || true)"
+    [[ -n "$pinned" ]] || continue
+    ctok="$(git::resolve_token "$slug")"
+    default_branch="$(GH_TOKEN="$ctok" gh api "repos/$slug" --jq '.default_branch' 2>/dev/null || echo "main")"
+    tip="$(GH_TOKEN="$ctok" gh api "repos/$slug/commits/$default_branch" --jq '.sha' 2>/dev/null || true)"
+    [[ -n "$tip" ]] || { echo "::warning::reconcile: cannot read $slug $default_branch tip — leaving '$path' pinned at $pinned" >&2; continue; }
+
+    relation="$(metarepo::pin_relation "$slug" "$pinned" "$tip")"
+    case "$relation" in
+      identical)
+        ;;
+      behind)
+        if git update-index --cacheinfo "160000,${tip},${path}" 2>/dev/null; then
+          changed=1
+          echo "::notice::reconcile: '$path' → $tip (was $pinned, a fast-forward on $slug $default_branch)" >&2
+        fi
+        ;;
+      ahead)
+        echo "::notice::reconcile: '$path' pin $pinned is ahead of $slug $default_branch ($tip) — delivery has not merged yet, leaving it alone." >&2
+        ;;
+      *)
+        echo "::warning::reconcile: '$path' pin $pinned and $slug $default_branch ($tip) are $relation — refusing to move the gitlink automatically." >&2
+        ;;
+    esac
+  done
+  [[ "$changed" == 1 ]] || return 0
+
+  git commit -q -m "chore(metarepo): reconcile submodule gitlinks with child default branches" 2>/dev/null || return 0
+  if git push -q origin "HEAD:refs/heads/${head_branch}" 2>/dev/null; then
+    echo "::notice::reconcile: pushed reconciled gitlink(s) to $head_branch" >&2
+    # STDOUT contract: the new head SHA, and only when a reconcile was actually
+    # pushed. Callers use it to attach anything anchored on the old head (the
+    # delivery check-run) to the commit that superseded it; an empty stdout means
+    # "nothing moved", which must not be confused with a branch that merely
+    # advanced for unrelated reasons.
+    git rev-parse HEAD
+    return 0
+  fi
+  echo "::warning::reconcile: could not push reconciled gitlinks to $head_branch (raced with another push?) — the next run retries." >&2
+  return 1
+}
+
 # metarepo::agent_context_block → the runtime "you ARE in metarepo mode" signal
 # injected into the engineer/developer LLM inputs. Without this, an agent can't
 # tell it's a metarepo and edits the metarepo's OWN .autoducks/ machinery instead

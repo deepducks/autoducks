@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+NOTIFY_FAILURE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./failure-reported.sh
+source "$NOTIFY_FAILURE_DIR/failure-reported.sh"
+
 # Notify about a failure on a task issue and optionally on the parent feature issue.
 # Usage: notify_failure <issue_id> <run_id> [feature_issue_id]
 #
@@ -144,6 +148,7 @@ what went wrong.${partial_section}
 **Next:** $retry."
 
   its::comment_issue "$issue_id" "$body" || true
+  feedback::mark_reported   # the watchdog must stay quiet now (#117)
 
   if [[ -n "$feature_issue_id" ]]; then
     local feature_body="⚠️ **Task #$issue_id failed.**
@@ -186,6 +191,7 @@ branch into \`${branch}\` and fix the conflicting files), then comment
 \`$(autoducks_command_for fix)\` to retry."
 
   its::comment_issue "$issue_id" "$body" || true
+  feedback::mark_reported   # the watchdog must stay quiet now (#117)
 
   if [[ -n "$feature_issue_id" ]]; then
     local feature_body="🔀 **Task #$issue_id hit a merge conflict.**

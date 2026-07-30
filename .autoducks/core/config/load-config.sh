@@ -106,6 +106,24 @@ AUTODUCKS_DELIVERY_POLL_INTERVAL_SECONDS="$(jq -r '.metarepo.delivery_check.poll
 [[ "$AUTODUCKS_DELIVERY_POLL_INTERVAL_SECONDS" =~ ^[0-9]+$ ]] || AUTODUCKS_DELIVERY_POLL_INTERVAL_SECONDS=30
 (( AUTODUCKS_DELIVERY_POLL_INTERVAL_SECONDS < 30 )) && AUTODUCKS_DELIVERY_POLL_INTERVAL_SECONDS=30
 
+# ── Missing-required-check recovery (#119c) ──────────────────────────────
+# A child delivery PR with an empty statusCheckRollup is waiting on a check that
+# was never produced, so `--auto` can never fire. These bound how patient the
+# recovery is: how many attempts submodule_deliver makes right after arming
+# auto-merge, and how many poll rounds the delivery poller tolerates before it
+# re-fires the check (and, a second window later, fails with that diagnosis).
+export AUTODUCKS_CHECK_ASSERT_ATTEMPTS
+AUTODUCKS_CHECK_ASSERT_ATTEMPTS="$(jq -r '.metarepo.check_recovery.assert_attempts // 3' "$_config")"
+[[ "$AUTODUCKS_CHECK_ASSERT_ATTEMPTS" =~ ^[0-9]+$ ]] && (( AUTODUCKS_CHECK_ASSERT_ATTEMPTS >= 1 )) || AUTODUCKS_CHECK_ASSERT_ATTEMPTS=3
+
+export AUTODUCKS_CHECK_ASSERT_INTERVAL_SECONDS
+AUTODUCKS_CHECK_ASSERT_INTERVAL_SECONDS="$(jq -r '.metarepo.check_recovery.assert_interval_seconds // 5' "$_config")"
+[[ "$AUTODUCKS_CHECK_ASSERT_INTERVAL_SECONDS" =~ ^[0-9]+$ ]] && (( AUTODUCKS_CHECK_ASSERT_INTERVAL_SECONDS >= 1 )) || AUTODUCKS_CHECK_ASSERT_INTERVAL_SECONDS=5
+
+export AUTODUCKS_CHECK_RECOVERY_ROUNDS
+AUTODUCKS_CHECK_RECOVERY_ROUNDS="$(jq -r '.metarepo.check_recovery.poll_rounds // 2' "$_config")"
+[[ "$AUTODUCKS_CHECK_RECOVERY_ROUNDS" =~ ^[0-9]+$ ]] && (( AUTODUCKS_CHECK_RECOVERY_ROUNDS >= 1 )) || AUTODUCKS_CHECK_RECOVERY_ROUNDS=2
+
 # ── Orchestrator mode ─────────────────────────────────────────────────
 export AUTODUCKS_ORCHESTRATOR_MODE
 AUTODUCKS_ORCHESTRATOR_MODE="$(jq -r '.orchestrator.mode // "waves"' "$_config")"
