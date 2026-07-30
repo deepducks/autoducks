@@ -114,7 +114,7 @@ if [[ "$TASK_COUNT" -eq 1 ]]; then
   # since reconcile_tasks (which normally closes dropped tasks) is skipped.
   # OLD_NUMBERS is "" for a single-task source body (no YAML) → no-op.
   for old in ${OLD_NUMBERS:-}; do
-    its::close_issue "$old" "Superseded by revised single-task plan on #$ISSUE_NUM" "not_planned" 2>/dev/null || true
+    its::close_issue "$old" "Superseded by revised single-task plan on #$ISSUE_NUM" "not_planned" || true
   done
 
   TASK_NUMBERS=""

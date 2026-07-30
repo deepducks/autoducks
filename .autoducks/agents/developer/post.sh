@@ -278,7 +278,7 @@ $SUMMARY"
       its::close_issue "$ISSUE_NUM" \
         "Auto-closed by the Developer agent after merging sub-PR #$PR_NUM into \`$BASE_BRANCH\`." \
         "completed" \
-        2>/dev/null || echo "::warning::Could not close task #$ISSUE_NUM"
+        || echo "::warning::Could not close task #$ISSUE_NUM"
     fi
 
     # Trigger orchestrator continuation (non-fatal — the PR merge event is the
@@ -300,7 +300,7 @@ elif [[ "$ISSUE_NUM" != "$FEATURE_NUM" && -s "$AUTODUCKS_NO_CODE_RESULT" ]]; the
   its::close_issue "$ISSUE_NUM" \
     "Auto-closed by the Developer agent — no code change was required; see the recorded result above." \
     "completed" \
-    2>/dev/null || echo "::warning::Could not close task #$ISSUE_NUM"
+    || echo "::warning::Could not close task #$ISSUE_NUM"
 
   if [[ -n "${FEATURE_NUM:-}" && "$FEATURE_NUM" != "0" ]]; then
     git::dispatch_workflow "autoducks-maestro.yml" \

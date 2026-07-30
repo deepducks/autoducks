@@ -64,7 +64,7 @@ fi
 
 # Close task issues
 for t in "${TASK_NUMBERS[@]:-}"; do
-  its::close_issue "$t" "Reverted by \`$(autoducks_command_for revert)\` on #$FEATURE" "not_planned" 2>/dev/null || echo "::debug::Could not close #$t (likely already closed)"
+  its::close_issue "$t" "Reverted by \`$(autoducks_command_for revert)\` on #$FEATURE" "not_planned" || true
 done
 
 # Remove labels

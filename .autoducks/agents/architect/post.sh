@@ -72,7 +72,7 @@ if [[ -f /tmp/architect-strip-tactical.flag ]]; then
       [[ -n "$old" ]] || continue
       its::close_issue "$old" \
         "Superseded by a design revision on #$ISSUE_NUM — re-run \`$(autoducks_command_for engineer)\` to regenerate the plan." \
-        "not_planned" 2>/dev/null || true
+        "not_planned" || true
     done < /tmp/architect-dropped-tasks.txt
   fi
   ARCHITECT_STRIPPED=1

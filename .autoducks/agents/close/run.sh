@@ -51,7 +51,7 @@ for t in "${TASK_NUMBERS[@]:-}"; do
   for lbl in "Work:coding" "Work:progress" "Work:done"; do
     its::remove_label "$t" "$lbl" 2>/dev/null || true
   done
-  its::close_issue "$t" "Closed via \`$(autoducks_command_for close)\` on #$FEATURE" 2>/dev/null || true
+  its::close_issue "$t" "Closed via \`$(autoducks_command_for close)\` on #$FEATURE" || true
   ((TASKS_CLOSED++)) || true
 done
 
@@ -101,6 +101,6 @@ its::close_issue "$FEATURE" "Closed by @$COMMENTER via \`$(autoducks_command_for
 **Cleanup summary:**
 - Tasks closed: $TASKS_CLOSED
 - PRs closed: $PRS_CLOSED
-- Branches deleted: $BRANCHES_DELETED" 2>/dev/null || echo "::debug::Feature issue #$FEATURE already closed; skipping close comment"
+- Branches deleted: $BRANCHES_DELETED" || echo "::debug::Feature issue #$FEATURE already closed; skipping close comment"
 
 react_to_comment "${COMMENT_ID:-}" "+1"

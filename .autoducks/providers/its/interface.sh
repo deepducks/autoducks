@@ -26,7 +26,8 @@ done
 #
 #   its::get_issue(issue_id)                         → JSON {title, body, labels, type, author}
 #   its::create_issue(title, body, labels, type, parent_id?)  → issue_id
-#   its::close_issue(issue_id, comment?, reason?)
+#   its::close_issue(issue_id, comment?, reason?)   reason ∈ {completed, not_planned, duplicate}
+#     → 0 closed (or already closed) | 1 close failed (issue still open) | 2 invalid reason
 #   its::reopen_issue(issue_id, comment?)
 #   its::update_issue_body(issue_id, body)
 #   its::comment_issue(issue_id, body)
