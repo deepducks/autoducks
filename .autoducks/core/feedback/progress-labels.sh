@@ -2,6 +2,10 @@
 # Progress-label helpers. Names, colors, and descriptions live in one place
 # so agents don't drift out of sync.
 
+PROGRESS_LABELS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../config/label-utils.sh
+source "$PROGRESS_LABELS_DIR/../config/label-utils.sh"
+
 # Ordered as (name, color, description) triples.
 AUTODUCKS_PROGRESS_LABELS=(
   "Design:draft|C5DEF5|Architect agent is drafting the design"
@@ -33,10 +37,8 @@ progress_labels::ensure() {
   local entry name color desc
   for entry in "${AUTODUCKS_PROGRESS_LABELS[@]}" "${AUTODUCKS_MODE_LABELS[@]}"; do
     IFS='|' read -r name color desc <<< "$entry"
-    gh label create "$name" \
-      --repo "$REPO" \
-      --color "$color" \
-      --description "$desc" 2>/dev/null || true
+    label::ensure "$name" "$color" "$desc" \
+      || echo "progress_labels::ensure: failed to ensure label '$name'" >&2
   done
 }
 

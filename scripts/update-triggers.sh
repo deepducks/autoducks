@@ -91,6 +91,24 @@ emit_group() {
 }
 
 # ── Per-guard renderers (the full block, up to but not including runs-on) ──
+#
+# The guards below test label/type strings verbatim ('Task', 'Tactics:done',
+# 'Autoducks:external') with no case-folding. That's deliberate, not an
+# oversight: GitHub documents contains(), startsWith(), endsWith(), and == on
+# strings as case-insensitive comparisons in Actions expressions —
+# https://docs.github.com/en/actions/reference/evaluate-expressions-in-workflows-and-actions
+# — so the expression layer already tolerates any casing these guards will
+# ever see.
+#
+# The bash/jq layer elsewhere in this machinery does NOT inherit that
+# property automatically; it has its own separate case-insensitive
+# comparison (see the Labels section of .autoducks/design/AGENTS.md). The
+# two are independent, deliberately redundant guarantees.
+#
+# Regardless of the expression layer's own behaviour, 'Task', 'Tactics:done'
+# and 'Autoducks:external' are machinery-created labels/types — never
+# hand-typed by a human — so normalization-at-source (setup.sh's
+# rename-on-collision) is the load-bearing protection here either way.
 render_architect() {
   local -a all=(architect design); mapfile -t c < <(read_custom architect); all+=("${c[@]}")
   cat <<'EOF'

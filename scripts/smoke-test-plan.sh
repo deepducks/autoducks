@@ -194,9 +194,11 @@ wait_for_feature_unplanned() {
 # --- Ensure labels exist (plan agent creates priority:P* lazily but we
 #     want them ready so we can assert quickly) ---
 echo "[1/9] Ensuring labels exist..."
-gh label create "Tactics:done" --color "D93F0B" --description "Tactical plan complete" $REPO_ARG 2>/dev/null || true
-gh label create "Draft"       --color "CCCCCC" --description "Draft issue, not yet designed" $REPO_ARG 2>/dev/null || true
-gh label create "smoke-test"  --color "FFA500" --description "Smoke test" $REPO_ARG 2>/dev/null || true
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../.autoducks/core/config/label-utils.sh"
+label::ensure "Tactics:done" "D93F0B" "Tactical plan complete" || echo "Warning: failed to ensure label 'Tactics:done'" >&2
+label::ensure "Draft"        "CCCCCC" "Draft issue, not yet designed" || echo "Warning: failed to ensure label 'Draft'" >&2
+label::ensure "smoke-test"   "FFA500" "Smoke test" || echo "Warning: failed to ensure label 'smoke-test'" >&2
 gh label create "priority:P0" --color "B60205" --description "Critical" $REPO_ARG 2>/dev/null || true
 pass "Labels ensured"
 echo ""

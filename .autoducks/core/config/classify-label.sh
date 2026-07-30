@@ -8,6 +8,10 @@
 [[ -n "${_CLASSIFY_LABEL_SH_LOADED:-}" ]] && return 0
 readonly _CLASSIFY_LABEL_SH_LOADED=1
 
+CLASSIFY_LABEL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./label-utils.sh
+source "$CLASSIFY_LABEL_DIR/label-utils.sh"
+
 # classify_label::color KIND — canonical hex color for a classification label.
 classify_label::color() {
   case "$1" in
@@ -16,13 +20,11 @@ classify_label::color() {
   esac
 }
 
-# classify_label::ensure KIND — create the canonical label if missing (no-op if
-# it already exists, tolerant of the create race).
+# classify_label::ensure KIND — create-or-reconcile the canonical label (case
+# repaired to KIND if it exists under different casing; created if missing).
 classify_label::ensure() {
   local kind="$1"
-  gh label create "$kind" --repo "$REPO" \
-    --color "$(classify_label::color "$kind")" \
-    --description "Autoducks ${kind,,} pipeline" 2>/dev/null || true
+  label::ensure "$kind" "$(classify_label::color "$kind")" "Autoducks ${kind,,} pipeline"
 }
 
 # classify_label::apply ISSUE KIND — ensure the label exists, add it to ISSUE,

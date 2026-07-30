@@ -100,7 +100,7 @@ if [[ "$SCOPE" == "single" ]]; then
   ISSUE_JSON=$(its::get_issue "$ISSUE_NUM")
   ISSUES_JSON=$(jq -n --argjson n "$ISSUE_NUM" --argjson issue "$ISSUE_JSON" \
     '[{number: $n, title: $issue.title, body: $issue.body, labels: $issue.labels,
-       type: $issue.type, already_prioritized: ($issue.labels | any(startswith("Priority:"))),
+       type: $issue.type, already_prioritized: ($issue.labels | any(ascii_downcase | startswith("priority:"))),
        dedup_candidates: []}]')
 else
   RAW_ISSUES=$(its::list_issues open "$MAX_ISSUES")
@@ -164,7 +164,7 @@ else
   # so post.sh re-checks freshly (and cheaply, only for accepted decisions)
   # right before applying — this is a hint, not the enforcement point.
   if [[ "$BACKEND" == "labels" ]]; then
-    ISSUES_JSON=$(echo "$ISSUES_JSON" | jq -c '[.[] | . + {already_prioritized: (.labels | any(startswith("Priority:")))}]')
+    ISSUES_JSON=$(echo "$ISSUES_JSON" | jq -c '[.[] | . + {already_prioritized: (.labels | any(ascii_downcase | startswith("priority:")))}]')
   else
     ISSUES_JSON=$(echo "$ISSUES_JSON" | jq -c '[.[] | . + {already_prioritized: false}]')
   fi
@@ -175,8 +175,8 @@ fi
 # `off`/`project`-style split is needed) — applies to both single and sweep
 # scope alike.
 ISSUES_JSON=$(echo "$ISSUES_JSON" | jq -c '[.[] | . + {
-  already_classified: ((.type == "Feature" or .type == "Bug") or (.labels | any(. == "Feature" or . == "Bug"))),
-  design_done: (.labels | any(. == "Design:done"))
+  already_classified: ((((.type // "") | ascii_downcase) == "feature") or (((.type // "") | ascii_downcase) == "bug") or (.labels | any(ascii_downcase == "feature" or ascii_downcase == "bug"))),
+  design_done: (.labels | any(ascii_downcase == "design:done"))
 }]')
 
 DUPLICATES_ENABLED_JSON="false"

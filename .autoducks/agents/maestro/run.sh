@@ -13,6 +13,7 @@ source "$AUTODUCKS_ROOT/core/orchestration/branch-prefix.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/dispatch-chain.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/orchestrator-mode.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
+source "$AUTODUCKS_ROOT/core/config/label-utils.sh"
 
 log() { echo "[maestro] $*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
@@ -247,7 +248,7 @@ ISSUE_LABELS=$(echo "$ISSUE_DATA" | jq -r '.labels[]')
 # Without `Tactics:done` there is nothing to orchestrate. Delegate to the
 # Engineer (which itself delegates to the Architect when the design is
 # missing) and re-queue execution behind it.
-if ! echo "$ISSUE_LABELS" | grep -qx 'Tactics:done'; then
+if ! label::in_list "$ISSUE_LABELS" "Tactics:done"; then
   if chain::dispatch_prerequisite "engineer" "execute" "${AUTO_CHAIN:-}" "$FEATURE"; then
     DELEGATE_MSG="This issue has no \`Tactics:done\` label, so the **Engineer** was dispatched first to produce the tactical plan. Execution resumes automatically when planning finishes."
     orchestrator_comment::upsert "$FEATURE" "🔁 **Not ready to execute** — $DELEGATE_MSG"

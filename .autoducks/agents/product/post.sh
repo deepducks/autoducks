@@ -10,6 +10,7 @@ source "$AUTODUCKS_ROOT/core/feedback/notify-skip.sh"
 source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/fold-duplicate.sh"
 source "$AUTODUCKS_ROOT/core/config/classify-label.sh"
+source "$AUTODUCKS_ROOT/core/config/label-utils.sh"
 
 ISSUE_NUM="${ISSUE_NUM:-}"
 COMMENT_ISSUE_NUM="${COMMENT_ISSUE_NUM:-}"
@@ -217,7 +218,7 @@ product::_already_prioritized() {
   local issue="$1" issue_json="$2"
   case "$BACKEND" in
     labels)
-      echo "$issue_json" | jq -e '.labels | any(startswith("Priority:"))' >/dev/null 2>&1
+      echo "$issue_json" | jq -e '.labels | any(ascii_downcase | startswith("priority:"))' >/dev/null 2>&1
       ;;
     project)
       local val
@@ -256,9 +257,8 @@ if [[ "$BACKEND" != "off" && "$PRIORITY_COUNT" -gt 0 ]]; then
     product::_already_prioritized "$issue" "$issue_json" && continue
 
     if [[ "$BACKEND" == "labels" ]]; then
-      gh label create "Priority:${priority}" --repo "$REPO" \
-        --color "$(product::_priority_color "$priority")" \
-        --description "Autoducks triage priority: ${priority}" >/dev/null 2>&1 || true
+      label::ensure "Priority:${priority}" "$(product::_priority_color "$priority")" \
+        "Autoducks triage priority: ${priority}" >/dev/null 2>&1 || true
     fi
 
     its::set_priority "$issue" "$priority" >/dev/null 2>&1 || true
@@ -336,9 +336,9 @@ if [[ "$CLASSIFICATION_COUNT" -gt 0 ]]; then
     # label) or already designed — the Architect owns classification once
     # an issue reaches that stage; never override it. This guard also
     # doubles as the idempotency guard.
-    if [[ "$issue_type" == "Feature" || "$issue_type" == "Bug" ]] \
-       || echo "$issue_labels" | grep -qxE 'Feature|Bug' \
-       || echo "$issue_labels" | grep -qx 'Design:done'; then
+    if [[ "${issue_type,,}" == "feature" || "${issue_type,,}" == "bug" ]] \
+       || label::any_in_list "$issue_labels" Feature Bug \
+       || label::in_list "$issue_labels" "Design:done"; then
       continue
     fi
 

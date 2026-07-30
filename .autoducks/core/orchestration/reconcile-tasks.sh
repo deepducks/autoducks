@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+RECONCILE_TASKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../config/label-utils.sh
+source "$RECONCILE_TASKS_DIR/../config/label-utils.sh"
+
 # Reconcile tasks from a parsed plan with existing tasks
 # Usage: reconcile_tasks <feature_issue_id> <tasks_jsonl_file> <existing_task_numbers_space_separated>
 # Returns: space-separated list of final task numbers (in order)
@@ -18,8 +22,7 @@ reconcile_tasks() {
   : > /tmp/link-outcomes.tsv
 
   # Ensure Task label exists — color/desc must match scripts/setup.sh
-  gh label create "Task" --color "1D76DB" --description "Autoducks task issue" \
-    --repo "$REPO" 2>/dev/null || true
+  label::ensure "Task" "1D76DB" "Autoducks task issue" 2>/dev/null || true
 
   while IFS= read -r line; do
     local ref title body labels

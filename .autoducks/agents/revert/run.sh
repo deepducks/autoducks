@@ -4,6 +4,7 @@ export AUTODUCKS_AGENT="revert"
 source "$(dirname "${BASH_SOURCE[0]}")/../../core/config/load-config.sh"
 source "$AUTODUCKS_ROOT/core/feedback/react-to-comment.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/parse-waves.sh"
+source "$AUTODUCKS_ROOT/core/config/label-utils.sh"
 
 FEATURE="${FEATURE_ISSUE:?FEATURE_ISSUE env var required}"
 
@@ -29,9 +30,20 @@ PROGRESS_LABELS=(draft "Design:draft" "Design:done" "Tactics:crafting" "Tactics:
                   "Spec:draft" "Spec:plan" "Tactics:ready" "Work:progress" \
                   "Ready" "Tactics:single" "Mode:waves" "Mode:sequential")
 
+# Gate labels used to detect "was this issue ever automated" — PROGRESS_LABELS
+# minus the bare "draft" marker. Under case-insensitive matching, "draft"
+# would also match the human-authored "Draft" marker, which isn't evidence
+# the pipeline ever ran; folding it into the gate would let revert tear down
+# an un-automated issue. It stays in PROGRESS_LABELS above, where folding
+# "Draft" into label *removal* during teardown is harmless.
+GATE_LABELS=("Design:draft" "Design:done" "Tactics:crafting" "Tactics:done" \
+              "Work:orchestrating" "Work:coding" "Work:done" \
+              "Spec:draft" "Spec:plan" "Tactics:ready" "Work:progress" \
+              "Ready" "Tactics:single" "Mode:waves" "Mode:sequential")
+
 HAS_PROGRESS_LABEL=0
-for lbl in "${PROGRESS_LABELS[@]}"; do
-  if echo "$ISSUE_LABELS" | grep -qxF "$lbl"; then
+for lbl in "${GATE_LABELS[@]}"; do
+  if label::in_list "$ISSUE_LABELS" "$lbl"; then
     HAS_PROGRESS_LABEL=1
     break
   fi
