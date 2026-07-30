@@ -15,7 +15,7 @@
 # CHECKS
 #   1. gh CLI authentication
 #   2. Required labels (feature, smoke-test, priority:P0-P3, progress) — CREATES if missing
-#   3. CLAUDE_CODE_OAUTH_TOKEN secret — reports if missing
+#   3. LLM credential — resolves ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_BASE_URL+AUTH_TOKEN at repo or org level; reports if missing, org-blocked, or unverifiable
 #   4. Repository Actions workflow permissions — reports if wrong
 #   5. Claude Code GitHub App installation — reports if missing
 #   6. Sub-issues API availability — probes the sub_issues endpoint; reports if unavailable
@@ -66,6 +66,14 @@ pass() { echo "  ✅ $1"; PASS=$((PASS+1)); }
 fail() { echo "  ❌ $1"; FAIL=$((FAIL+1)); }
 manual() { echo "  ⚠️  $1"; MANUAL=$((MANUAL+1)); }
 
+ORG="${REPO%%/*}"
+# "PUBLIC" | "PRIVATE" | "INTERNAL"; empty when the probe is refused.
+VISIBILITY=$(gh repo view "$REPO" --json visibility --jq '.visibility' 2>/dev/null || echo "")
+# Hoisted from check 7. Check 3 needs it to tell "owner is a user account"
+# (no org tier exists) apart from "the org lookup was refused". Check 7 keeps
+# its existing body and simply reads this value.
+TYPES_JSON=$(gh api "orgs/$ORG/issue-types" 2>/dev/null || echo "")
+
 echo "=== Setup check for $REPO ==="
 echo ""
 
@@ -114,27 +122,211 @@ echo ""
 
 # --- Check 3: Secret ---
 echo "[3/12] Required secrets"
-SECRET_NAMES=$(gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null || true)
-VAR_NAMES=$(gh variable list $REPO_ARG --json name --jq '.[].name' 2>/dev/null || true)
-has_secret() { grep -qx "$1" <<< "$SECRET_NAMES"; }
-has_var() { grep -qx "$1" <<< "$VAR_NAMES"; }
+REPO_SECRETS_OK=true
+SECRET_NAMES=$(gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null) \
+  || { REPO_SECRETS_OK=false; SECRET_NAMES=""; }
+REPO_VARS_OK=true
+VAR_NAMES=$(gh variable list $REPO_ARG --json name --jq '.[].name' 2>/dev/null) \
+  || { REPO_VARS_OK=false; VAR_NAMES=""; }
+
+has_secret() { [[ -n "$SECRET_NAMES" ]] && grep -qx "$1" <<< "$SECRET_NAMES"; }
+has_var()    { [[ -n "$VAR_NAMES" ]]    && grep -qx "$1" <<< "$VAR_NAMES"; }
+
+# Org-level listings, fetched once and cached. Feeds credential_source below,
+# which answers where a credential name would resolve from at run time —
+# repo-level, org-level, blocked by org plan, absent, or unknowable. Wired
+# into check 3's branching in a later task; this task only builds the layer.
+ORG_SECRETS_OK=false
+ORG_SECRETS_TSV=""      # name<TAB>visibility, one per line
+ORG_VARS_OK=false
+ORG_VARS_TSV=""
+
+if ORG_SECRETS_TSV=$(gh api --paginate "orgs/$ORG/actions/secrets" \
+      --jq '.secrets[] | [.name, .visibility] | @tsv' 2>/dev/null); then
+  ORG_SECRETS_OK=true
+else
+  ORG_SECRETS_TSV=""
+fi
+
+if ORG_VARS_TSV=$(gh api --paginate "orgs/$ORG/actions/variables" \
+      --jq '.variables[] | [.name, .visibility] | @tsv' 2>/dev/null); then
+  ORG_VARS_OK=true
+else
+  ORG_VARS_TSV=""
+fi
+
+# A personal account has no org tier at all. Distinguish 404-because-user from
+# 404-because-forbidden so single-user repos get the clean "No LLM credential
+# is configured" message instead of a confusing "could not verify".
+if [[ "$ORG_SECRETS_OK" != true && -z "$TYPES_JSON" ]]; then
+  OWNER_TYPE=$(gh api "users/$ORG" --jq '.type' 2>/dev/null || echo "")
+  if [[ "$OWNER_TYPE" == "User" ]]; then
+    ORG_SECRETS_OK=true; ORG_SECRETS_TSV=""
+    ORG_VARS_OK=true;    ORG_VARS_TSV=""
+  fi
+fi
+
+# "free" | "team" | "enterprise" | … ; empty when not readable (requires org owner).
+ORG_PLAN=$(gh api "orgs/$ORG" --jq '.plan.name // empty' 2>/dev/null || echo "")
+
+# org_visibility_covers <visibility> <name> <kind>   kind ∈ secrets|variables
+#   0 = covers this repository, 1 = does not
+org_visibility_covers() {
+  local vis="$1" name="$2" kind="$3"
+  case "$vis" in
+    all) return 0 ;;
+    private)
+      # GitHub's `private` visibility means "every non-public repository",
+      # which includes INTERNAL repos on Enterprise plans.
+      [[ "$VISIBILITY" != "PUBLIC" ]] && return 0 || return 1 ;;
+    selected)
+      # Capture first, then match. Under `set -o pipefail`, `grep -q` exiting on
+      # its first match while `gh` is still writing later pages kills `gh` with
+      # SIGPIPE (141); piped directly, that would report a successful match as
+      # "does not cover". The herestring removes the pipeline entirely.
+      local repos
+      repos=$(gh api --paginate "orgs/$ORG/actions/$kind/$name/repositories" \
+                --jq '.repositories[].full_name' 2>/dev/null) || return 1
+      grep -qxF "$REPO" <<< "$repos"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# credential_source <NAME> <kind>   kind ∈ secrets|variables
+# echoes exactly one of: repo | org | org-blocked | none | unknown
+credential_source() {
+  local name="$1" kind="${2:-secrets}"
+  local repo_ok org_ok org_tsv vis
+
+  if [[ "$kind" == "variables" ]]; then
+    repo_ok="$REPO_VARS_OK"; org_ok="$ORG_VARS_OK"; org_tsv="$ORG_VARS_TSV"
+    has_var "$name" && { echo repo; return; }
+  else
+    repo_ok="$REPO_SECRETS_OK"; org_ok="$ORG_SECRETS_OK"; org_tsv="$ORG_SECRETS_TSV"
+    has_secret "$name" && { echo repo; return; }
+  fi
+
+  # No repo-level hit. If the repo-level call itself failed, a repo secret may
+  # exist and simply be invisible — the answer is not knowable.
+  [[ "$repo_ok" != true ]] && { echo unknown; return; }
+  [[ "$org_ok"  != true ]] && { echo unknown; return; }
+
+  vis=$(awk -F'\t' -v n="$name" '$1 == n { print $2; exit }' <<< "$org_tsv")
+  [[ -z "$vis" ]] && { echo none; return; }
+
+  org_visibility_covers "$vis" "$name" "$kind" || { echo none; return; }
+
+  # Covered on paper. Now the plan gate.
+  if [[ "$VISIBILITY" == "PUBLIC" ]]; then
+    echo org; return                     # plan is irrelevant for public repos
+  fi
+  if [[ -z "$VISIBILITY" ]]; then
+    echo unknown; return                 # could not read repo visibility
+  fi
+  case "$ORG_PLAN" in
+    free) echo org-blocked ;;            # verified: resolves EMPTY in private repos
+    "")   echo unknown ;;                # plan not readable → cannot assert
+    *)    echo org ;;                    # team/enterprise: org secrets reach private repos
+  esac
+}
+
+# org_has <NAME> [kind]  — is there an org-level entry with this name at all?
+# Deliberately ignores visibility: shadowing is about the name colliding.
+org_has() {
+  local name="$1" kind="${2:-secrets}" tsv
+  if [[ "$kind" == "variables" ]]; then tsv="$ORG_VARS_TSV"; else tsv="$ORG_SECRETS_TSV"; fi
+  awk -F'\t' -v n="$name" '$1 == n { found = 1; exit } END { exit !found }' <<< "$tsv"
+}
 
 # Any one of these authenticates the agents: the Anthropic API key, a Claude
 # Code subscription token, or a custom Anthropic-compatible endpoint with its
-# own credential (ANTHROPIC_BASE_URL may be a secret or a repo variable).
-if has_secret "ANTHROPIC_API_KEY"; then
-  pass "Secret ANTHROPIC_API_KEY is configured"
-elif has_secret "CLAUDE_CODE_OAUTH_TOKEN"; then
-  pass "Secret CLAUDE_CODE_OAUTH_TOKEN is configured (subscription auth)"
-elif has_secret "ANTHROPIC_BASE_URL" || has_var "ANTHROPIC_BASE_URL"; then
-  if has_secret "ANTHROPIC_AUTH_TOKEN"; then
+# own credential (ANTHROPIC_BASE_URL may be a secret or a repo variable). Each
+# resolves independently through credential_source, which knows about repo
+# vs. org tiers, the org-plan gate on private repos, and unknowable lookups.
+SRC_API_KEY=$(credential_source ANTHROPIC_API_KEY)
+SRC_OAUTH=$(credential_source CLAUDE_CODE_OAUTH_TOKEN)
+SRC_BASE_URL_SECRET=$(credential_source ANTHROPIC_BASE_URL)
+SRC_BASE_URL_VAR=$(credential_source ANTHROPIC_BASE_URL variables)
+SRC_AUTH_TOKEN=$(credential_source ANTHROPIC_AUTH_TOKEN)
+
+# Human-readable provenance for the pass message.
+where() {
+  case "$1" in
+    repo) echo "repository secret" ;;
+    org)  echo "organization secret" ;;
+    *)    echo "$1" ;;
+  esac
+}
+
+# shadow_advisory <NAME> <SRC> [kind]  — informational only, never counted:
+# a repo-level credential that also has an org-level entry of the same name
+# will always win (env > repo > org), so the org copy silently does nothing.
+shadow_advisory() {
+  local name="$1" src="$2" kind="${3:-secrets}"
+  if [[ "$src" == repo ]] && org_has "$name" "$kind"; then
+    echo "     ℹ️  A repository-level $name shadows the organization secret of the"
+    echo "         same name (precedence: environment > repository > organization)."
+    echo "         An org-level rotation will not reach this repo until the repo copy is removed."
+  fi
+}
+
+if [[ "$SRC_API_KEY" == repo || "$SRC_API_KEY" == org ]]; then
+  pass "Secret ANTHROPIC_API_KEY is configured ($(where "$SRC_API_KEY"))"
+  shadow_advisory ANTHROPIC_API_KEY "$SRC_API_KEY"
+elif [[ "$SRC_OAUTH" == repo || "$SRC_OAUTH" == org ]]; then
+  pass "Secret CLAUDE_CODE_OAUTH_TOKEN is configured (subscription auth) ($(where "$SRC_OAUTH"))"
+  shadow_advisory CLAUDE_CODE_OAUTH_TOKEN "$SRC_OAUTH"
+elif [[ "$SRC_BASE_URL_SECRET" == repo || "$SRC_BASE_URL_SECRET" == org || "$SRC_BASE_URL_VAR" == repo || "$SRC_BASE_URL_VAR" == org ]]; then
+  if [[ "$SRC_AUTH_TOKEN" == repo || "$SRC_AUTH_TOKEN" == org ]]; then
     pass "Custom endpoint configured (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN)"
+    shadow_advisory ANTHROPIC_BASE_URL "$SRC_BASE_URL_SECRET"
+    shadow_advisory ANTHROPIC_BASE_URL "$SRC_BASE_URL_VAR" variables
+    shadow_advisory ANTHROPIC_AUTH_TOKEN "$SRC_AUTH_TOKEN"
   else
     manual "ANTHROPIC_BASE_URL is set but no credential for it
 
       Add the gateway's key: gh secret set ANTHROPIC_AUTH_TOKEN $REPO_ARG
       (or gh secret set ANTHROPIC_API_KEY $REPO_ARG if it authenticates via x-api-key)"
   fi
+elif [[ "$SRC_API_KEY" == org-blocked || "$SRC_OAUTH" == org-blocked || "$SRC_BASE_URL_SECRET" == org-blocked || "$SRC_BASE_URL_VAR" == org-blocked || "$SRC_AUTH_TOKEN" == org-blocked ]]; then
+  if [[ "$SRC_API_KEY" == org-blocked ]]; then
+    BLOCKED_NAME="ANTHROPIC_API_KEY"
+  elif [[ "$SRC_OAUTH" == org-blocked ]]; then
+    BLOCKED_NAME="CLAUDE_CODE_OAUTH_TOKEN"
+  elif [[ "$SRC_BASE_URL_SECRET" == org-blocked || "$SRC_BASE_URL_VAR" == org-blocked ]]; then
+    BLOCKED_NAME="ANTHROPIC_BASE_URL"
+  else
+    BLOCKED_NAME="ANTHROPIC_AUTH_TOKEN"
+  fi
+  manual "Organization secret $BLOCKED_NAME lists this repository, but it will arrive EMPTY
+
+      $REPO is PRIVATE and the '$ORG' organization is on the Free plan.
+      Organization secrets reach public repositories only on Free; GitHub's API
+      accepts adding a private repository to the selected list without any
+      error, and the value then resolves empty at run time.
+
+      Fix: add a repository-level secret, which behaves identically on public
+      and private repos:
+        gh secret set $BLOCKED_NAME --repo $REPO
+      Or upgrade the organization to Team/Enterprise."
+elif [[ "$SRC_API_KEY" == unknown || "$SRC_OAUTH" == unknown || "$SRC_BASE_URL_SECRET" == unknown || "$SRC_BASE_URL_VAR" == unknown || "$SRC_AUTH_TOKEN" == unknown ]]; then
+  UNKNOWN_MSG="Could not verify the LLM credential — it may come from an organization secret
+
+      Listing organization secrets for '$ORG' was refused. That needs org-owner
+      access (classic token scope 'admin:org', or the fine-grained
+      'Organization secrets: read' permission)."
+  if [[ "$REPO_SECRETS_OK" == false ]]; then
+    UNKNOWN_MSG="$UNKNOWN_MSG
+      Listing repository secrets was also refused — that needs repo admin."
+  fi
+  UNKNOWN_MSG="$UNKNOWN_MSG
+
+      If ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, or
+      ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN are configured at the
+      organization level, this repository is fine. Verify at:
+        https://github.com/organizations/$ORG/settings/secrets/actions"
+  manual "$UNKNOWN_MSG"
 else
   manual "No LLM credential is configured
 
@@ -204,8 +396,6 @@ echo ""
 # types aren't configured — the type parameter is silently ignored by the
 # API. But without them, typed feature/task relationships don't render.
 echo "[7/12] Issue types (Feature, Task)"
-ORG=$(echo "$REPO" | cut -d/ -f1)
-TYPES_JSON=$(gh api "orgs/$ORG/issue-types" 2>/dev/null || echo "")
 if [[ -z "$TYPES_JSON" ]]; then
   manual "Could not list issue types for org '$ORG' (not an org, or no admin access).
       If '$ORG' is a user account, types are only available under organizations.
@@ -230,7 +420,6 @@ fi
 echo ""
 
 # --- Check 8: Public-repo security ---
-VISIBILITY=$(gh repo view "$REPO" --json visibility --jq '.visibility' 2>/dev/null || echo "")
 if [[ "$VISIBILITY" == "PUBLIC" ]]; then
   echo "[8/12] Public-repo security posture"
   HAS_SEC=$(jq -r '.security != null' .autoducks/autoducks.json 2>/dev/null || echo "false")
