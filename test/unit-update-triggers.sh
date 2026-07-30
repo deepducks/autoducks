@@ -261,6 +261,101 @@ grep -q "cron: '15 4 \* \* \*'" "$SCRATCH/.github/workflows/autoducks-product.ym
   && pass "schedule trigger restored with the current cron on re-enable" \
   || fail "schedule trigger not restored on re-enable"
 
+echo "── render_update: custom triggers.update aliases are baked into the update guard ──"
+python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+cfg["triggers"]["update"] = ["refresh"]
+json.dump(cfg, open(p, "w"), indent=2)
+EOF
+run
+grep -q "'/update'" "$SCRATCH/.github/workflows/autoducks-update.yml" \
+  && pass "built-in /update alias retained alongside custom alias" || fail "/update missing after adding custom alias"
+grep -q "'/refresh'" "$SCRATCH/.github/workflows/autoducks-update.yml" \
+  && pass "update custom alias baked into update guard" || fail "refresh missing in update guard"
+
+echo "── render_update: idempotent with custom triggers.update aliases ──"
+cp "$SCRATCH/.autoducks/runtimes/github-actions/autoducks-update.yml" "$SCRATCH/update-with-alias-before.yml"
+run
+if diff "$SCRATCH/update-with-alias-before.yml" "$SCRATCH/.autoducks/runtimes/github-actions/autoducks-update.yml" >/dev/null; then
+  pass "second run with custom alias is byte-identical"
+else
+  fail "autoducks-update.yml changed on a no-op second run (with custom alias)"
+fi
+
+echo "── render_update: idempotent without custom triggers.update aliases ──"
+python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+cfg["triggers"]["update"] = []
+json.dump(cfg, open(p, "w"), indent=2)
+EOF
+run
+cp "$SCRATCH/.autoducks/runtimes/github-actions/autoducks-update.yml" "$SCRATCH/update-no-alias-before.yml"
+run
+if diff "$SCRATCH/update-no-alias-before.yml" "$SCRATCH/.autoducks/runtimes/github-actions/autoducks-update.yml" >/dev/null; then
+  pass "second run without custom alias is byte-identical"
+else
+  fail "autoducks-update.yml changed on a no-op second run (without custom alias)"
+fi
+if diff "$SCRATCH/.autoducks/runtimes/github-actions/autoducks-update.yml" \
+        "$SCRATCH/.github/workflows/autoducks-update.yml" >/dev/null; then
+  pass "autoducks-update.yml runtime and .github/workflows/ copies match"
+else
+  fail "autoducks-update.yml runtime/.github mirror out of sync"
+fi
+
+echo "── patch_update_cron: update.schedule is baked into the workflow's schedule.cron ──"
+python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+cfg["update"]["schedule"] = "7 4 * * 3"
+json.dump(cfg, open(p, "w"), indent=2)
+EOF
+run
+grep -q "cron: '7 4 \* \* 3'" "$SCRATCH/.github/workflows/autoducks-update.yml" \
+  && pass "baked cron reflects update.schedule" || fail "update.schedule not baked into cron"
+grep -q "cron: '7 4 \* \* 3'" "$SCRATCH/.autoducks/runtimes/github-actions/autoducks-update.yml" \
+  && pass "baked cron reflects update.schedule in runtime template" || fail "update.schedule not baked into runtime cron"
+
+echo "── patch_update_cron: update.enabled=false removes the schedule trigger ──"
+python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+cfg["update"]["enabled"] = False
+json.dump(cfg, open(p, "w"), indent=2)
+EOF
+run
+if grep -q "^  schedule:$" "$SCRATCH/.github/workflows/autoducks-update.yml"; then
+  fail "schedule trigger still present after update.enabled=false"
+else
+  pass "schedule trigger removed when update.enabled=false"
+fi
+grep -q "workflow_dispatch:" "$SCRATCH/.github/workflows/autoducks-update.yml" \
+  && pass "workflow_dispatch trigger survives update.enabled=false" || fail "workflow_dispatch lost when update.enabled=false"
+grep -q "issue_comment:" "$SCRATCH/.github/workflows/autoducks-update.yml" \
+  && pass "issue_comment trigger survives update.enabled=false" || fail "issue_comment lost when update.enabled=false"
+
+echo "── patch_update_cron: re-enabling restores the schedule trigger with the current cron ──"
+python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+cfg["update"]["enabled"] = True
+cfg["update"]["schedule"] = "15 5 * * 2"
+json.dump(cfg, open(p, "w"), indent=2)
+EOF
+run
+grep -q "^  schedule:$" "$SCRATCH/.github/workflows/autoducks-update.yml" \
+  && pass "schedule trigger key reinserted under on: on re-enable" || fail "schedule trigger key not reinserted on re-enable"
+grep -q "cron: '15 5 \* \* 2'" "$SCRATCH/.github/workflows/autoducks-update.yml" \
+  && pass "schedule trigger restored with the current cron on re-enable" \
+  || fail "schedule trigger not restored on re-enable"
+
 echo "── custom prefix is baked into guards ──"
 python3 - "$SCRATCH/.autoducks/autoducks.json" <<'EOF'
 import json, sys
