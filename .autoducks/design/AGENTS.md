@@ -150,6 +150,10 @@ Utility agents handle recovery, cleanup, and lifecycle operations. They are not 
 
 **Verb:** `close` — tears a finished pipeline down: closes child tasks and PRs, deletes task and pipeline branches (both prefixes), strips labels, closes the issue with a cleanup summary. Security default: `OWNER`, `MEMBER`.
 
+### Update Agent
+
+**Verb:** `update` — keeps the installed machinery current. Checks `update.source_repo` (default `deepducks/autoducks`) for a newer version on the configured `channel` (`stable`/`edge`), runs every migration under [`migrations/<version>/migrate.sh`](../migrations/README.md) for versions in `(installed, target]`, and delivers the result per `update.mode`: a pull request (`pr`, the default), a direct commit (`commit`), or no-op (`off`). Fires on `update.schedule` (baked into the workflow, like `product.schedule`), plus `workflow_dispatch` and `/update` unconditionally. Detects **drift** — local edits to vendored machinery outside the consumer-owned set ([`core/config/consumer-owned.sh`](../core/config/consumer-owned.sh)) — and either warns and proceeds or aborts, per `update.on_drift`. PR-only by default (`mode: pr`); like Revert/Close, it is not part of the planning-to-execution pipeline and carries no stage labels. Security default: `OWNER`, `MEMBER`.
+
 ---
 
 ## Reviewer Agent
@@ -270,6 +274,8 @@ Retired (cleaned up on sight by revert/close/engineer): `Spec:draft`, `Spec:plan
 .autoducks/
   autoducks.json          # Project configuration: command prefix, providers,
                           # defaults (model/effort/branches/merge), triggers, security
+  VERSION                 # Installed machinery version (semver, e.g. 0.1.0)
+  CHANGELOG.md            # Keep-a-Changelog history; `### Breaking` marks a non-additive release
   assets/                 # Static assets (status-comment loading.gif)
   design/
     AGENTS.md             # This document — canonical agent architecture reference
@@ -281,6 +287,9 @@ Retired (cleaned up on sight by revert/close/engineer): `Spec:draft`, `Spec:plan
     fix/                  # defaults.json + prompt.md + pre.sh/post.sh
     revert/               # defaults.json + run.sh (no LLM)
     close/                # defaults.json + run.sh (no LLM)
+    update/               # defaults.json + run.sh (no LLM)
+  migrations/
+    <version>/migrate.sh  # Consumer-owned config migrations, run in ascending semver order
   core/
     config/               # load-config, load-agent-defaults, parse-directive,
                           # generate-trigger-conditions
