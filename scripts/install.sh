@@ -7,20 +7,45 @@
 #   curl -fsSL https://raw.githubusercontent.com/deepducks/autoducks/main/scripts/install.sh | bash
 #   curl -fsSL .../install.sh | bash -s -- --repo OWNER/REPO
 #   curl -fsSL .../install.sh | bash -s -- --no-setup
+#   curl -fsSL .../install.sh | bash -s -- --channel edge
+#   curl -fsSL .../install.sh | bash -s -- --source-repo OWNER/REPO --ref v0.2.0
 #
 # WHAT IT DOES
 #   Downloads the .autoducks/ directory tree and copies runtime workflows
 #   into .github/workflows/. On fresh install, runs setup automatically.
+#   Records what was installed in .autoducks/.installed.json.
 # =============================================================================
 
 set -euo pipefail
 
+# ── Self-exec guard ─────────────────────────────────────────────────────────
+# Must be the very first thing this script does. When invoked as
+# `bash scripts/install.sh` from inside the repo being installed into, this
+# same file is later overwritten (it re-copies scripts/install.sh out of the
+# downloaded tree, further down). Bash reads a script off disk incrementally
+# as it executes it, so overwriting the file mid-run truncates/corrupts the
+# still-running interpreter. Re-exec from a private temp copy so the running
+# process never reads through the file it's about to replace. No-op when
+# piped via `curl | bash` ($0 is not a real path inside the target repo then).
+if [[ -z "${AUTODUCKS_SELF_EXEC_GUARD:-}" ]] && [[ -f "$0" ]]; then
+  SELF_ABS="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  CWD_ABS="$(pwd)"
+  if [[ "$SELF_ABS" == "$CWD_ABS"/* ]]; then
+    SELF_TMP="$(mktemp)"
+    cp "$SELF_ABS" "$SELF_TMP"
+    chmod +x "$SELF_TMP"
+    AUTODUCKS_SELF_EXEC_GUARD=1 exec bash "$SELF_TMP" "$@"
+  fi
+fi
+
 SOURCE_REPO="deepducks/autoducks"
-BRANCH="main"
+CHANNEL="stable"
+REF=""
 
 REPO=""
 NO_SETUP=false
 APP_MODE=false
+LOCK_NOTE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -30,15 +55,40 @@ while [[ $# -gt 0 ]]; do
     # workflows (un-gates the mint step so no AUTODUCKS_APP variable is needed).
     # Used by the cloud/installer-workflow setup where the app is installed.
     --app-mode) APP_MODE=true; shift ;;
-    # Pin the machinery to a specific ref (commit SHA/tag) instead of main.
-    --ref) BRANCH="$2"; shift 2 ;;
+    # Pin the machinery to a specific ref (commit SHA/tag/branch) instead of
+    # the channel default.
+    --ref) REF="$2"; shift 2 ;;
+    # Release channel used to pick a default ref when --ref is not given:
+    # stable -> main, edge -> edge.
+    --channel) CHANNEL="$2"; shift 2 ;;
+    # Fetch the machinery from a different source repo (fork/private mirror)
+    # instead of deepducks/autoducks.
+    --source-repo) SOURCE_REPO="$2"; shift 2 ;;
+    # Free-form note recorded as .installed.json's installed_by field.
+    --lock-note) LOCK_NOTE="$2"; shift 2 ;;
     -h|--help)
-      sed -n '2,14p' "$0"
+      sed -n '2,17p' "$0"
       exit 0
       ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
+
+if [[ -z "$REF" ]]; then
+  case "$CHANNEL" in
+    stable) REF="main" ;;
+    edge) REF="edge" ;;
+    *) echo "Unknown --channel: $CHANNEL (expected stable or edge)" >&2; exit 1 ;;
+  esac
+fi
+
+if [[ -n "$LOCK_NOTE" ]]; then
+  INSTALLED_BY="$LOCK_NOTE"
+elif [[ -n "${GITHUB_WORKFLOW:-}" && -n "${GITHUB_RUN_ID:-}" ]]; then
+  INSTALLED_BY="${GITHUB_WORKFLOW}#${GITHUB_RUN_ID}"
+else
+  INSTALLED_BY="manual"
+fi
 
 FRESH_INSTALL=true
 if [[ -f ".autoducks/autoducks.json" ]]; then
@@ -52,6 +102,22 @@ else
 fi
 echo ""
 
+# Read any pre-existing lockfile before the tree is replaced, so its
+# ref/sha/version can be carried forward as this run's "previous". Not
+# stashed like the consumer-owned set below: it's output, not consumer state.
+PREVIOUS_JSON="null"
+if [[ -f ".autoducks/.installed.json" ]] && command -v jq &>/dev/null; then
+  PREVIOUS_JSON="$(jq -c '{ref: (.ref // ""), sha: (.sha // ""), version: (.version // "")}' \
+    ".autoducks/.installed.json" 2>/dev/null || echo "null")"
+fi
+
+# Resolve the ref to a commit SHA before downloading, so a mid-run upstream
+# push cannot make the download and the recorded lockfile disagree.
+RESOLVED_SHA=""
+if command -v gh &>/dev/null; then
+  RESOLVED_SHA="$(gh api "repos/${SOURCE_REPO}/commits/${REF}" --jq .sha 2>/dev/null || true)"
+fi
+
 # Download the full .autoducks/ tree via GitHub API (tarball), unless a
 # local source dir is provided (e.g. for offline testing).
 echo "Downloading .autoducks/ tree..."
@@ -62,52 +128,117 @@ if [[ -n "${AUTODUCKS_SOURCE_DIR:-}" ]]; then
   echo "  Using local source dir: $TMP_DIR"
 else
   TMP_DIR=$(mktemp -d)
-  curl -sL "https://api.github.com/repos/${SOURCE_REPO}/tarball/${BRANCH}" \
-    | tar xz -C "$TMP_DIR" --strip-components=1
+  DOWNLOAD_REF="${RESOLVED_SHA:-$REF}"
+  TARBALL_FILE="$(mktemp)"
+  curl -sL "https://api.github.com/repos/${SOURCE_REPO}/tarball/${DOWNLOAD_REF}" -o "$TARBALL_FILE"
+  if [[ -z "$RESOLVED_SHA" ]]; then
+    # gh unavailable: derive the sha from the tarball's top-level directory,
+    # the same directory --strip-components=1 strips off below.
+    TARBALL_TOP_DIR="$(tar tzf "$TARBALL_FILE" | head -1)"
+    TARBALL_TOP_DIR="${TARBALL_TOP_DIR%%/*}"
+    RESOLVED_SHA="${TARBALL_TOP_DIR##*-}"
+  fi
+  tar xzf "$TARBALL_FILE" -C "$TMP_DIR" --strip-components=1
+  rm -f "$TARBALL_FILE"
 fi
+
+# The consumer-owned set is the single source of truth for what install.sh
+# must never clobber. Source it from the just-downloaded tree, not the local
+# .autoducks/ (which may not exist yet on a fresh install, or may predate
+# this file on an update from an older version).
+# shellcheck source=/dev/null
+source "$TMP_DIR/.autoducks/core/config/consumer-owned.sh"
 
 # Copy .autoducks/ directory, preserving consumer-owned files across updates.
 STASH_DIR=$(mktemp -d)
-if [[ -f ".autoducks/autoducks.json" ]]; then
-  cp ".autoducks/autoducks.json" "$STASH_DIR/autoducks.json"
-fi
-if [[ -f ".autoducks/providers/llm/claude/settings.json" ]]; then
-  mkdir -p "$STASH_DIR/providers/llm/claude"
-  cp ".autoducks/providers/llm/claude/settings.json" "$STASH_DIR/providers/llm/claude/settings.json"
-fi
-if [[ -d ".autoducks/custom" ]]; then
-  cp -R ".autoducks/custom" "$STASH_DIR/custom"
-fi
-if [[ -d ".autoducks/plugins" ]]; then
-  cp -R ".autoducks/plugins" "$STASH_DIR/plugins"
-fi
+SECURITY_GUIDELINES_STASHED=false
+for rel in "${AUTODUCKS_CONSUMER_OWNED[@]}"; do
+  src=".autoducks/$rel"
+  if [[ "$rel" == "security-guidelines.md" ]]; then
+    # Only preserved when the consumer's copy differs from the incoming
+    # template, so a never-edited file still receives upstream improvements.
+    incoming="$TMP_DIR/.autoducks/$rel"
+    if [[ -f "$src" ]] && [[ -f "$incoming" ]] && ! cmp -s "$src" "$incoming"; then
+      mkdir -p "$STASH_DIR/$(dirname "$rel")"
+      cp "$src" "$STASH_DIR/$rel"
+      SECURITY_GUIDELINES_STASHED=true
+    fi
+    continue
+  fi
+  if [[ -d "$src" ]]; then
+    mkdir -p "$STASH_DIR/$(dirname "$rel")"
+    cp -R "$src" "$STASH_DIR/$rel"
+  elif [[ -f "$src" ]]; then
+    mkdir -p "$STASH_DIR/$(dirname "$rel")"
+    cp "$src" "$STASH_DIR/$rel"
+  fi
+done
 
 rm -rf .autoducks
 cp -R "$TMP_DIR/.autoducks" .autoducks
 
-if [[ -f "$STASH_DIR/autoducks.json" ]]; then
-  cp "$STASH_DIR/autoducks.json" ".autoducks/autoducks.json"
-fi
-if [[ -f "$STASH_DIR/providers/llm/claude/settings.json" ]]; then
-  mkdir -p ".autoducks/providers/llm/claude"
-  cp "$STASH_DIR/providers/llm/claude/settings.json" ".autoducks/providers/llm/claude/settings.json"
-fi
-if [[ -d "$STASH_DIR/custom" ]]; then
-  rm -rf ".autoducks/custom"
-  cp -R "$STASH_DIR/custom" ".autoducks/custom"
-fi
-if [[ -d "$STASH_DIR/plugins" ]]; then
-  rm -rf ".autoducks/plugins"
-  cp -R "$STASH_DIR/plugins" ".autoducks/plugins"
-fi
+for rel in "${AUTODUCKS_CONSUMER_OWNED[@]}"; do
+  stashed="$STASH_DIR/$rel"
+  dest=".autoducks/$rel"
+  if [[ -d "$stashed" ]]; then
+    rm -rf "$dest"
+    cp -R "$stashed" "$dest"
+  elif [[ -f "$stashed" ]]; then
+    mkdir -p "$(dirname "$dest")"
+    cp "$stashed" "$dest"
+  fi
+done
 
 rm -rf "$STASH_DIR"
 echo "  .autoducks/ installed"
+
+if [[ "$FRESH_INSTALL" == "false" ]]; then
+  if [[ "$SECURITY_GUIDELINES_STASHED" == "true" ]]; then
+    echo "  security-guidelines.md: kept local edits (differs from incoming template)"
+  else
+    echo "  security-guidelines.md: replaced with incoming template (no local edits)"
+  fi
+fi
+
+# Write the install lockfile after the copy, so any .installed.json riding in
+# the tarball is overwritten by the real record of this run.
+if command -v jq &>/dev/null; then
+  VERSION_VALUE="$(cat .autoducks/VERSION 2>/dev/null || echo "")"
+  INSTALLED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq -n \
+    --arg source_repo "$SOURCE_REPO" \
+    --arg channel "$CHANNEL" \
+    --arg ref "$REF" \
+    --arg sha "$RESOLVED_SHA" \
+    --arg version "$VERSION_VALUE" \
+    --arg installed_at "$INSTALLED_AT" \
+    --arg installed_by "$INSTALLED_BY" \
+    --argjson previous "$PREVIOUS_JSON" \
+    '{schemaVersion: 1, source_repo: $source_repo, channel: $channel, ref: $ref,
+      sha: $sha, version: $version, installed_at: $installed_at,
+      installed_by: $installed_by, previous: $previous}' \
+    > .autoducks/.installed.json
+  echo "  Lockfile written: .autoducks/.installed.json"
+else
+  echo "  Warning: jq not found, skipping .installed.json lockfile" >&2
+fi
 
 # Copy runtime workflows to .github/workflows/
 mkdir -p .github/workflows
 cp .autoducks/runtimes/github-actions/autoducks-*.yml .github/workflows/
 echo "  Workflows copied to .github/workflows/"
+
+# Prune stale mirrors: a .github/workflows/autoducks-*.yml left over from a
+# runtime that was renamed/removed upstream has no counterpart in the new
+# runtime templates and would otherwise linger forever.
+for wf in .github/workflows/autoducks-*.yml; do
+  [[ -f "$wf" ]] || continue
+  bn="$(basename "$wf")"
+  if [[ ! -f ".autoducks/runtimes/github-actions/$bn" ]]; then
+    rm -f "$wf"
+    echo "  Removed stale mirror: $wf"
+  fi
+done
 
 # Copy issue templates
 mkdir -p .github/ISSUE_TEMPLATE

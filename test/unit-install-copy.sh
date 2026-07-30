@@ -20,6 +20,19 @@ trap 'rm -rf "$SCRATCH"' EXIT
 SOURCE_DIR="$SCRATCH/source"
 CONSUMER="$SCRATCH/consumer"
 
+# ── Stub `gh` so the sha-resolution step never touches the network: exiting
+#    non-zero simulates "gh unavailable/unauthenticated", which install.sh
+#    already handles by falling back gracefully. Keeps this suite's "never
+#    touches the network" guarantee intact even though a real `gh` may be on
+#    PATH in whatever environment runs it. ──
+STUB_BIN="$SCRATCH/stub-bin"
+mkdir -p "$STUB_BIN"
+cat > "$STUB_BIN/gh" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$STUB_BIN/gh"
+
 # ── Build the offline "download" source: real .autoducks/, ISSUE_TEMPLATE,
 #    and the 5 scripts install.sh copies into a consumer repo ──
 mkdir -p "$SOURCE_DIR/.github/ISSUE_TEMPLATE" "$SOURCE_DIR/scripts"
@@ -39,7 +52,8 @@ printf 'name: CI — unit tests\n' > "$SOURCE_DIR/.github/workflows/ci-unit-test
 mkdir -p "$CONSUMER"
 
 run_install() { # runs the real install.sh, offline seam pointed at SOURCE_DIR
-  (cd "$CONSUMER" && AUTODUCKS_SOURCE_DIR="$SOURCE_DIR" bash "$REPO_ROOT/scripts/install.sh" --no-setup)
+  (cd "$CONSUMER" && AUTODUCKS_SOURCE_DIR="$SOURCE_DIR" PATH="$STUB_BIN:$PATH" \
+    bash "$REPO_ROOT/scripts/install.sh" --no-setup)
 }
 
 # ═══ Fresh install ═══
