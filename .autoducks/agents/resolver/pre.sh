@@ -8,6 +8,7 @@ source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/status-comment.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/branch-prefix.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/parse-waves.sh"
+source "$AUTODUCKS_ROOT/core/config/label-utils.sh"
 
 rm -f "$AUTODUCKS_PRE_FAILED_MARKER"
 mkdir -p "$AUTODUCKS_MARKER_DIR"
@@ -216,7 +217,8 @@ if [[ "$IS_AUTOMATIC" == "true" ]]; then
   fi
 
   OPT_OUT_LABEL=$(jq -r '.resolver.opt_out_label // "Resolve:off"' "$AUTODUCKS_ROOT/autoducks.json")
-  if gh pr view "$PR_NUM" --repo "$REPO" --json labels --jq '.labels[].name' 2>/dev/null | grep -qxF "$OPT_OUT_LABEL"; then
+  pr_labels=$(gh pr view "$PR_NUM" --repo "$REPO" --json labels --jq '.labels[].name' 2>/dev/null)
+  if label::in_list "$pr_labels" "$OPT_OUT_LABEL"; then
     skip_resolve "PR #$PR_NUM carries the \`$OPT_OUT_LABEL\` opt-out label."
   fi
 fi

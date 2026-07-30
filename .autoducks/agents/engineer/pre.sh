@@ -15,6 +15,7 @@ source "$AUTODUCKS_ROOT/core/orchestration/tactical-zone.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/dispatch-chain.sh"
 source "$AUTODUCKS_ROOT/core/orchestration/delivery-phase.sh"
 source "$AUTODUCKS_ROOT/core/context/resolve-context.sh"
+source "$AUTODUCKS_ROOT/core/config/label-utils.sh"
 
 trap '_rc=$?; touch "$AUTODUCKS_PRE_FAILED_MARKER"; \
       notify_failure "$ISSUE_NUM" "$RUN_ID" "" 2>/dev/null || true; \
@@ -61,12 +62,12 @@ if [[ "${COMMAND:-}" == "execute" ]]; then
 fi
 ISSUE_TYPE=$(echo "$ISSUE_DATA" | jq -r '.type // empty')
 is_classified=false
-if [[ "$ISSUE_TYPE" == "Feature" || "$ISSUE_TYPE" == "Bug" ]] \
-   || echo "$ISSUE_LABELS" | grep -qxE 'Feature|Bug'; then
+if [[ "${ISSUE_TYPE,,}" == "feature" || "${ISSUE_TYPE,,}" == "bug" ]] \
+   || label::any_in_list "$ISSUE_LABELS" Feature Bug; then
   is_classified=true
 fi
 
-if ! echo "$ISSUE_LABELS" | grep -qx 'Design:done' || [[ "$is_classified" == false ]]; then
+if ! label::in_list "$ISSUE_LABELS" "Design:done" || [[ "$is_classified" == false ]]; then
   if chain::dispatch_prerequisite "architect" "engineer" "$DOR_CHAIN" "$ISSUE_NUM"; then
     status_comment::delegate "$ISSUE_NUM" "This issue has no completed, classified design, so the **Architect** was dispatched first to create (or revise) the design. The Engineer will re-run automatically when it finishes."
     touch "$AUTODUCKS_DOR_DELEGATED_MARKER"
@@ -92,7 +93,7 @@ if metarepo::enabled; then metarepo::agent_context_block > /tmp/metarepo-context
 # Revision mode: a completed tactical plan already exists (D6 — `Tactics:done`
 # is both the completion record and the routing signal).
 IS_REVISION="false"
-if echo "$ISSUE_LABELS" | grep -qx "Tactics:done"; then
+if label::in_list "$ISSUE_LABELS" "Tactics:done"; then
   IS_REVISION="true"
 fi
 
