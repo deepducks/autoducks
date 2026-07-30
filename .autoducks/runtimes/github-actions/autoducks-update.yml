@@ -91,7 +91,23 @@ jobs:
       - name: Run update
         id: run
         if: steps.authz.outcome == 'success'
-        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/agents/update/run.sh"
+        # This workflow ships enabled with a weekly cron, so it runs in every
+        # consumer install whether or not the agent it invokes is present. If
+        # the hook is missing, blindly `bash`-ing it fails the job every week
+        # with a bare "No such file or directory" — noise that says nothing
+        # about the repo and that the operator cannot act on. Report the state
+        # once, plainly, and exit clean instead.
+        #
+        # `update.enabled` is read by run.sh, not here, so it cannot gate this:
+        # a missing hook is precisely the case where nothing exists to read it.
+        run: |
+          set -euo pipefail
+          _hook="${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/agents/update/run.sh"
+          if [[ ! -f "$_hook" ]]; then
+            echo "::notice::update agent not installed at $_hook — skipping. This machinery version ships the update workflow without the agent; re-run scripts/install.sh once a version providing it is released."
+            exit 0
+          fi
+          bash "$_hook"
         env:
           REF: ${{ inputs.ref }}
           MODE: ${{ inputs.mode }}
