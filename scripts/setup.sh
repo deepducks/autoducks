@@ -122,10 +122,122 @@ echo ""
 
 # --- Check 3: Secret ---
 echo "[3/12] Required secrets"
-SECRET_NAMES=$(gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null || true)
-VAR_NAMES=$(gh variable list $REPO_ARG --json name --jq '.[].name' 2>/dev/null || true)
-has_secret() { grep -qx "$1" <<< "$SECRET_NAMES"; }
-has_var() { grep -qx "$1" <<< "$VAR_NAMES"; }
+REPO_SECRETS_OK=true
+SECRET_NAMES=$(gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null) \
+  || { REPO_SECRETS_OK=false; SECRET_NAMES=""; }
+REPO_VARS_OK=true
+VAR_NAMES=$(gh variable list $REPO_ARG --json name --jq '.[].name' 2>/dev/null) \
+  || { REPO_VARS_OK=false; VAR_NAMES=""; }
+
+has_secret() { [[ -n "$SECRET_NAMES" ]] && grep -qx "$1" <<< "$SECRET_NAMES"; }
+has_var()    { [[ -n "$VAR_NAMES" ]]    && grep -qx "$1" <<< "$VAR_NAMES"; }
+
+# Org-level listings, fetched once and cached. Feeds credential_source below,
+# which answers where a credential name would resolve from at run time —
+# repo-level, org-level, blocked by org plan, absent, or unknowable. Wired
+# into check 3's branching in a later task; this task only builds the layer.
+ORG_SECRETS_OK=false
+ORG_SECRETS_TSV=""      # name<TAB>visibility, one per line
+ORG_VARS_OK=false
+ORG_VARS_TSV=""
+
+if ORG_SECRETS_TSV=$(gh api --paginate "orgs/$ORG/actions/secrets" \
+      --jq '.secrets[] | [.name, .visibility] | @tsv' 2>/dev/null); then
+  ORG_SECRETS_OK=true
+else
+  ORG_SECRETS_TSV=""
+fi
+
+if ORG_VARS_TSV=$(gh api --paginate "orgs/$ORG/actions/variables" \
+      --jq '.variables[] | [.name, .visibility] | @tsv' 2>/dev/null); then
+  ORG_VARS_OK=true
+else
+  ORG_VARS_TSV=""
+fi
+
+# A personal account has no org tier at all. Distinguish 404-because-user from
+# 404-because-forbidden so single-user repos get the clean "No LLM credential
+# is configured" message instead of a confusing "could not verify".
+if [[ "$ORG_SECRETS_OK" != true && -z "$TYPES_JSON" ]]; then
+  OWNER_TYPE=$(gh api "users/$ORG" --jq '.type' 2>/dev/null || echo "")
+  if [[ "$OWNER_TYPE" == "User" ]]; then
+    ORG_SECRETS_OK=true; ORG_SECRETS_TSV=""
+    ORG_VARS_OK=true;    ORG_VARS_TSV=""
+  fi
+fi
+
+# "free" | "team" | "enterprise" | … ; empty when not readable (requires org owner).
+ORG_PLAN=$(gh api "orgs/$ORG" --jq '.plan.name // empty' 2>/dev/null || echo "")
+
+# org_visibility_covers <visibility> <name> <kind>   kind ∈ secrets|variables
+#   0 = covers this repository, 1 = does not
+org_visibility_covers() {
+  local vis="$1" name="$2" kind="$3"
+  case "$vis" in
+    all) return 0 ;;
+    private)
+      # GitHub's `private` visibility means "every non-public repository",
+      # which includes INTERNAL repos on Enterprise plans.
+      [[ "$VISIBILITY" != "PUBLIC" ]] && return 0 || return 1 ;;
+    selected)
+      # Capture first, then match. Under `set -o pipefail`, `grep -q` exiting on
+      # its first match while `gh` is still writing later pages kills `gh` with
+      # SIGPIPE (141); piped directly, that would report a successful match as
+      # "does not cover". The herestring removes the pipeline entirely.
+      local repos
+      repos=$(gh api --paginate "orgs/$ORG/actions/$kind/$name/repositories" \
+                --jq '.repositories[].full_name' 2>/dev/null) || return 1
+      grep -qxF "$REPO" <<< "$repos"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# credential_source <NAME> <kind>   kind ∈ secrets|variables
+# echoes exactly one of: repo | org | org-blocked | none | unknown
+credential_source() {
+  local name="$1" kind="${2:-secrets}"
+  local repo_ok org_ok org_tsv vis
+
+  if [[ "$kind" == "variables" ]]; then
+    repo_ok="$REPO_VARS_OK"; org_ok="$ORG_VARS_OK"; org_tsv="$ORG_VARS_TSV"
+    has_var "$name" && { echo repo; return; }
+  else
+    repo_ok="$REPO_SECRETS_OK"; org_ok="$ORG_SECRETS_OK"; org_tsv="$ORG_SECRETS_TSV"
+    has_secret "$name" && { echo repo; return; }
+  fi
+
+  # No repo-level hit. If the repo-level call itself failed, a repo secret may
+  # exist and simply be invisible — the answer is not knowable.
+  [[ "$repo_ok" != true ]] && { echo unknown; return; }
+  [[ "$org_ok"  != true ]] && { echo unknown; return; }
+
+  vis=$(awk -F'\t' -v n="$name" '$1 == n { print $2; exit }' <<< "$org_tsv")
+  [[ -z "$vis" ]] && { echo none; return; }
+
+  org_visibility_covers "$vis" "$name" "$kind" || { echo none; return; }
+
+  # Covered on paper. Now the plan gate.
+  if [[ "$VISIBILITY" == "PUBLIC" ]]; then
+    echo org; return                     # plan is irrelevant for public repos
+  fi
+  if [[ -z "$VISIBILITY" ]]; then
+    echo unknown; return                 # could not read repo visibility
+  fi
+  case "$ORG_PLAN" in
+    free) echo org-blocked ;;            # verified: resolves EMPTY in private repos
+    "")   echo unknown ;;                # plan not readable → cannot assert
+    *)    echo org ;;                    # team/enterprise: org secrets reach private repos
+  esac
+}
+
+# org_has <NAME> [kind]  — is there an org-level entry with this name at all?
+# Deliberately ignores visibility: shadowing is about the name colliding.
+org_has() {
+  local name="$1" kind="${2:-secrets}" tsv
+  if [[ "$kind" == "variables" ]]; then tsv="$ORG_VARS_TSV"; else tsv="$ORG_SECRETS_TSV"; fi
+  awk -F'\t' -v n="$name" '$1 == n { found = 1; exit } END { exit !found }' <<< "$tsv"
+}
 
 # Any one of these authenticates the agents: the Anthropic API key, a Claude
 # Code subscription token, or a custom Anthropic-compatible endpoint with its
