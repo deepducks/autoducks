@@ -34,6 +34,10 @@
 #  12. Plugin compilation sync — recomputes apply-plugins.sh's output and diffs it
 #      against the committed aggregators/compiled/* artifacts; validates each
 #      enabled plugin's manifest, config, and version gate; surfaces requiresSecrets
+#  13. Update policy — prints the effective `update` block; confirms
+#      .autoducks/.installed.json exists/parses and its version agrees with
+#      .autoducks/VERSION; when enabled && mode != off, requires an identity
+#      capable of pushing workflow files (vars.AUTODUCKS_APP or AUTODUCKS_PAT)
 # =============================================================================
 
 set -euo pipefail
@@ -45,7 +49,7 @@ while [[ $# -gt 0 ]]; do
     --repo) REPO="$2"; shift 2 ;;
     --no-rename) AUTORENAME=false; shift ;;
     -h|--help)
-      sed -n '2,37p' "$0"
+      sed -n '2,41p' "$0"
       exit 0
       ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -90,7 +94,7 @@ echo "=== Setup check for $REPO ==="
 echo ""
 
 # --- Check 1: gh CLI auth ---
-echo "[1/12] GitHub CLI authentication"
+echo "[1/13] GitHub CLI authentication"
 if gh auth status &>/dev/null; then
   pass "gh CLI is authenticated"
 else
@@ -100,7 +104,7 @@ fi
 echo ""
 
 # --- Check 2: Labels ---
-echo "[2/12] Required labels"
+echo "[2/13] Required labels"
 LABELS=("Feature|6F42C1|Orchestration feature issue"
         "Bug|D73A4A|Autoducks bug pipeline"
         "Task|1D76DB|Autoducks task issue"
@@ -110,7 +114,9 @@ LABELS=("Feature|6F42C1|Orchestration feature issue"
         "Priority:High|D93F0B|Autoducks triage priority: High"
         "Priority:Medium|FBCA04|Autoducks triage priority: Medium"
         "Priority:Low|0E8A16|Autoducks triage priority: Low"
-        "Duplicate|CFD3D7|Closed as a duplicate of another issue")
+        "Duplicate|CFD3D7|Closed as a duplicate of another issue"
+        "Autoducks:update|0366D6|Pull request opened by the automatic update agent"
+        "Autoducks:breaking|E11D21|Update includes a breaking change — requires manual review before merge")
 
 # Progress labels: sourced from progress-labels.sh so the two lists can't drift apart.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -153,7 +159,7 @@ done
 echo ""
 
 # --- Check 3: Secret ---
-echo "[3/12] Required secrets"
+echo "[3/13] Required secrets"
 REPO_SECRETS_OK=true
 SECRET_NAMES=$(gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null) \
   || { REPO_SECRETS_OK=false; SECRET_NAMES=""; }
@@ -371,7 +377,7 @@ fi
 echo ""
 
 # --- Check 4: Actions permissions ---
-echo "[4/12] Actions workflow permissions"
+echo "[4/13] Actions workflow permissions"
 PERMS=$(gh api "repos/$REPO/actions/permissions/workflow" --jq '.default_workflow_permissions + "|" + (.can_approve_pull_request_reviews | tostring)' 2>/dev/null || echo "")
 
 if [[ -z "$PERMS" ]]; then
@@ -387,7 +393,7 @@ fi
 echo ""
 
 # --- Check 5: Claude Code GitHub App ---
-echo "[5/12] Claude Code GitHub App"
+echo "[5/13] Claude Code GitHub App"
 # There is no public API to list installations on a repo without proper auth.
 # Best we can do is check if the workflows can authenticate — which only happens at runtime.
 manual "Verify the Claude Code GitHub App is installed on this repository
@@ -397,7 +403,7 @@ manual "Verify the Claude Code GitHub App is installed on this repository
 echo ""
 
 # --- Check 6: Sub-issues API availability ---
-echo "[6/12] Sub-issues API availability"
+echo "[6/13] Sub-issues API availability"
 # Probe against an arbitrary issue in the repo. If the repo has zero issues,
 # the check is inconclusive — report a soft manual item.
 FIRST_ISSUE=$(gh issue list $REPO_ARG --state all --limit 1 --json number \
@@ -427,7 +433,7 @@ echo ""
 # Issue types are an org-level feature. Workflows degrade gracefully if
 # types aren't configured — the type parameter is silently ignored by the
 # API. But without them, typed feature/task relationships don't render.
-echo "[7/12] Issue types (Feature, Task)"
+echo "[7/13] Issue types (Feature, Task)"
 if [[ -z "$TYPES_JSON" ]]; then
   manual "Could not list issue types for org '$ORG' (not an org, or no admin access).
       If '$ORG' is a user account, types are only available under organizations.
@@ -468,7 +474,7 @@ echo ""
 
 # --- Check 8: Public-repo security ---
 if [[ "$VISIBILITY" == "PUBLIC" ]]; then
-  echo "[8/12] Public-repo security posture"
+  echo "[8/13] Public-repo security posture"
   HAS_SEC=$(jq -r '.security != null' .autoducks/autoducks.json 2>/dev/null || echo "false")
   if [[ "$HAS_SEC" == "true" ]]; then
     pass "security block present in .autoducks/autoducks.json"
@@ -481,7 +487,7 @@ if [[ "$VISIBILITY" == "PUBLIC" ]]; then
 fi
 
 # --- Check 9: Runtime sync ---
-echo "[9/12] Runtime workflow sync"
+echo "[9/13] Runtime workflow sync"
 SYNC_OK=true
 while IFS=' ' read -r kind target runtime; do
   case "$kind" in
@@ -499,7 +505,7 @@ echo ""
 # Opt-in (reviewer.required_check=true). Requires the reviewer's Check-run on
 # the integration/base branch so a request-changes verdict blocks the merge.
 # Uses the operator's own gh admin credentials (no stored PAT) and is idempotent.
-echo "[10/12] Reviewer required-check ruleset"
+echo "[10/13] Reviewer required-check ruleset"
 REQUIRED_CHECK=$(jq -r '.reviewer.required_check // false' .autoducks/autoducks.json 2>/dev/null || echo "false")
 if [[ "$REQUIRED_CHECK" != "true" ]]; then
   pass "Reviewer required-check disabled (reviewer.required_check=false) — nothing to enforce"
@@ -549,7 +555,7 @@ echo ""
 # metarepo default branch so a parent PR can't merge until every protected child
 # has delivered. Uses the operator's own gh admin credentials (no stored PAT) and
 # is idempotent — mirrors Check 10's ruleset upsert exactly.
-echo "[11/12] Delivery required-check ruleset"
+echo "[11/13] Delivery required-check ruleset"
 METAREPO_ENABLED=$(jq -r 'if .metarepo.enabled == true then "true" else "false" end' .autoducks/autoducks.json 2>/dev/null || echo "false")
 METAREPO_STRATEGY=$(jq -r '.metarepo.protected_submodule_strategy // "auto_merge"' .autoducks/autoducks.json 2>/dev/null || echo "auto_merge")
 if [[ "$METAREPO_ENABLED" != "true" || "$METAREPO_STRATEGY" != "required_check" ]]; then
@@ -603,7 +609,7 @@ echo ""
 # merge-conflict/collision validation and dies with an actionable message on
 # any of those — we just surface that failure. requiresSecrets checklist
 # surfacing stays here since it's a setup-only concern.
-echo "[12/12] Plugin compilation sync"
+echo "[12/13] Plugin compilation sync"
 COMPILER=".autoducks/core/config/apply-plugins.sh"
 if [[ ! -f "$COMPILER" ]]; then
   manual "Plugin compiler not found at $COMPILER — skipping plugin compilation sync"
@@ -641,6 +647,55 @@ else
       fi
     done < <(jq -c '.plugins // [] | .[]' .autoducks/autoducks.json 2>/dev/null || true)
   fi
+fi
+echo ""
+
+# --- Check 13: Update policy ---
+# GITHUB_TOKEN cannot write .github/workflows/ files (D#952-style guard), so
+# when the update agent is enabled and not manual-only, some other identity
+# must be able to push the machinery PR/branch: either the autoducks GitHub
+# App (vars.AUTODUCKS_APP) or a repository AUTODUCKS_PAT secret.
+echo "[13/13] Update policy"
+UPDATE_JSON=$(jq -c '.update // {}' .autoducks/autoducks.json 2>/dev/null || echo "{}")
+echo "  Effective update block: $UPDATE_JSON"
+
+if [[ -f ".autoducks/.installed.json" ]] && jq -e . ".autoducks/.installed.json" >/dev/null 2>&1; then
+  pass ".autoducks/.installed.json exists and parses"
+else
+  manual ".autoducks/.installed.json is missing or does not parse as JSON
+
+      This lockfile is written by scripts/install.sh; without it the update
+      agent cannot detect drift. Re-run the installer:
+        curl -fsSL https://raw.githubusercontent.com/deepducks/autoducks/main/scripts/install.sh | bash"
+fi
+
+VERSION_FILE_VALUE=$(cat .autoducks/VERSION 2>/dev/null || echo "")
+LOCKFILE_VERSION=$(jq -r '.version // empty' .autoducks/.installed.json 2>/dev/null || echo "")
+if [[ -z "$VERSION_FILE_VALUE" || -z "$LOCKFILE_VERSION" ]]; then
+  manual "Could not compare .autoducks/VERSION ('$VERSION_FILE_VALUE') to the lockfile version ('$LOCKFILE_VERSION') — one or both are missing"
+elif [[ "$VERSION_FILE_VALUE" == "$LOCKFILE_VERSION" ]]; then
+  pass ".autoducks/VERSION ($VERSION_FILE_VALUE) matches the lockfile version"
+else
+  manual ".autoducks/VERSION ($VERSION_FILE_VALUE) does not match the lockfile version ($LOCKFILE_VERSION)
+
+      This usually means machinery files were copied in manually without
+      running the installer. Re-run scripts/install.sh to reconcile."
+fi
+
+UPDATE_ENABLED=$(jq -r 'if .update.enabled == false then "false" else "true" end' .autoducks/autoducks.json 2>/dev/null || echo "true")
+UPDATE_MODE=$(jq -r '.update.mode // "pr"' .autoducks/autoducks.json 2>/dev/null || echo "pr")
+if [[ "$UPDATE_ENABLED" == "true" && "$UPDATE_MODE" != "off" ]]; then
+  if has_var "AUTODUCKS_APP" || has_secret "AUTODUCKS_PAT"; then
+    pass "An identity capable of pushing workflow files is configured (vars.AUTODUCKS_APP or AUTODUCKS_PAT)"
+  else
+    manual "update.enabled=true and update.mode=$UPDATE_MODE, but no identity can push workflow files
+
+      GITHUB_TOKEN cannot write .github/workflows/ — the update agent needs either:
+        the autoducks GitHub App installed (sets vars.AUTODUCKS_APP), or
+        gh secret set AUTODUCKS_PAT $REPO_ARG   (a PAT with 'workflow' scope)"
+  fi
+else
+  pass "Update policy disabled or manual (enabled=$UPDATE_ENABLED, mode=$UPDATE_MODE) — no push identity required"
 fi
 echo ""
 

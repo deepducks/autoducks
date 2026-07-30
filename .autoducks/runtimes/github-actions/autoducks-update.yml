@@ -1,0 +1,138 @@
+name: 'Autoducks: Update'
+
+on:
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      ref: { required: false, type: string, default: '' }
+      mode: { required: false, type: string, default: '' }
+      dry_run: { required: false, type: string, default: 'false' }
+  issue_comment:
+    types: [created]
+
+permissions:
+  id-token: write
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: autoducks-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request == null &&
+       github.event.comment.author_association != 'MANNEQUIN' &&
+       startsWith(github.event.comment.body, '/update'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint app token
+        id: apptoken
+        shell: bash
+        env:
+          # Opt-in flag only (any non-empty value enables app mode). The broker
+          # URL is hardcoded below — if it ever moves, sync autoducks. Absent
+          # flag = skip before any network call, so PAT-only repos never reach
+          # the central broker.
+          AUTODUCKS_APP: ${{ vars.AUTODUCKS_APP }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTODUCKS_APP:-}" ]; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BROKER="https://autoducks-api.gustavospgondim.workers.dev"
+          OIDC=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=autoducks-broker" | jq -r .value)
+          TOKEN=$(curl -sf -X POST -H "Authorization: Bearer $OIDC" \
+            "$BROKER/token" | jq -r .token)
+          echo "::add-mask::$TOKEN"
+          echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      # Pin the machinery to the pipeline's cut commit BEFORE the agent runs, so
+      # an agent editing .autoducks on its own branch cannot corrupt the scripts
+      # that run its build, and the machinery cannot drift across waves/reviews
+      # (bug #952). Every later step runs from "${AUTODUCKS_PINNED_ROOT}/.autoducks".
+      - name: Snapshot machinery
+        id: snapshot
+        run: bash .autoducks/core/robustness/snapshot-machinery.sh
+      - name: Authorize
+        id: authz
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/security/authorize.sh"
+        env:
+          AUTODUCKS_AGENT: update
+          ACTOR: ${{ github.event.comment.user.login || github.event.sender.login }}
+          AUTHOR_ASSOC: ${{ github.event.comment.author_association || github.event.issue.author_association }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: User pre hook
+        if: >-
+          steps.authz.outcome == 'success' &&
+          hashFiles('.github/actions/autoducks/update-pre/action.yml') != ''
+        uses: ./.github/actions/autoducks/update-pre
+        env:
+          AUTODUCKS_AGENT: update
+          AUTODUCKS_STAGE: pre
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: Run update
+        id: run
+        if: steps.authz.outcome == 'success'
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/agents/update/run.sh"
+        env:
+          REF: ${{ inputs.ref }}
+          MODE: ${{ inputs.mode }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: User post hook
+        if: >-
+          always() && steps.authz.outcome == 'success' &&
+          hashFiles('.github/actions/autoducks/update-post/action.yml') != ''
+        uses: ./.github/actions/autoducks/update-post
+        env:
+          AUTODUCKS_AGENT: update
+          AUTODUCKS_STAGE: post
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          AGENT_OUTCOME: ${{ steps.run.outcome }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      # Last-resort backstop for a corrupted run.sh: a hook that dies (or exits
+      # 0) without telling anyone would otherwise let a scheduled update run
+      # fail silently. Gated on run.sh's own outcome, not on whether it
+      # reported — same watchdog shape as autoducks-product.yml (#952/#117).
+      - name: Failure watchdog
+        if: >-
+          always() && steps.authz.outcome == 'success' &&
+          steps.run.outcome == 'failure'
+        env:
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          MSG="⚠️ **Autoducks update run failed.** \
+          [View the run logs](https://github.com/$REPO/actions/runs/$RUN_ID). \
+          **Next:** inspect the run, or re-run manually via workflow_dispatch."
+          NOTIFY_ISSUE="$(jq -r '.update.notify_issue // empty' "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/autoducks.json" 2>/dev/null || true)"
+          if [[ "$NOTIFY_ISSUE" =~ ^[0-9]+$ ]]; then
+            gh issue comment "$NOTIFY_ISSUE" --repo "$REPO" --body "$MSG" || true
+          else
+            echo "$MSG" >> "$GITHUB_STEP_SUMMARY"
+          fi
