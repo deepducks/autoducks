@@ -44,7 +44,8 @@ if ! command -v jq &>/dev/null; then
 fi
 
 # ── Locate .autoducks root / repo root (mirrors load-config.sh) ────────────
-_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_dir="$_SCRIPT_DIR"
 _depth=0
 AUTODUCKS_ROOT=""
 while [[ "$_depth" -lt 10 ]]; do
@@ -59,6 +60,9 @@ done
 REPO_ROOT="$(dirname "$AUTODUCKS_ROOT")"
 CONFIG="$AUTODUCKS_ROOT/autoducks.json"
 [[ -f "$CONFIG" ]] || die "$CONFIG not found"
+
+# shellcheck source=/dev/null
+source "$_SCRIPT_DIR/semver.sh"
 
 # ── Args / dry-run output root (pinned interface for the sync check) ───────
 OUTPUT_ROOT="${AUTODUCKS_APPLY_PLUGINS_OUTPUT_ROOT:-}"
@@ -266,35 +270,25 @@ validate_config() { # $1 = configSchema json (or empty/null), $2 = config json, 
 }
 
 # ── autoducksVersion compat gate (advisory-only when host has no version) ──
-semver_num() { # $1 = "a.b.c..." → sortable fixed-width integer string
-  local IFS=. p
-  read -ra p <<<"$1"
-  printf '%05d%05d%05d' "${p[0]:-0}" "${p[1]:-0}" "${p[2]:-0}"
-}
-
 check_version_compat() { # $1 = host version (may be empty), $2 = plugin constraint (may be empty), $3 = plugin name
   local host="$1" constraint="$2" pname="$3"
   [[ -z "$host" || -z "$constraint" ]] && return 0
 
-  [[ "$constraint" =~ ^(\>=|\<=|\>|\<|=)?([0-9]+\.[0-9]+\.[0-9]+)$ ]] \
-    || die "plugin '$pname': malformed autoducksVersion '$constraint'"
-  local op="${BASH_REMATCH[1]:-=}" ver="${BASH_REMATCH[2]}"
-  local hn pn
-  hn="$(semver_num "$host")"
-  pn="$(semver_num "$ver")"
-  local ok=1
-  case "$op" in
-    ">=") [[ "$hn" > "$pn" || "$hn" == "$pn" ]] && ok=0 ;;
-    "<=") [[ "$hn" < "$pn" || "$hn" == "$pn" ]] && ok=0 ;;
-    ">")  [[ "$hn" > "$pn" ]] && ok=0 ;;
-    "<")  [[ "$hn" < "$pn" ]] && ok=0 ;;
-    "=")  [[ "$hn" == "$pn" ]] && ok=0 ;;
-  esac
-  [[ "$ok" -eq 0 ]] || die "plugin '$pname': requires autoducksVersion '$constraint', host is '$host'"
+  semver::satisfies "$host" "$constraint" && return 0
+  local status=$?
+  if [[ "$status" -eq 2 ]]; then
+    die "plugin '$pname': malformed autoducksVersion '$constraint'"
+  fi
+  die "plugin '$pname': requires autoducksVersion '$constraint', host is '$host'"
 }
 
 # ── Load + validate the plugins[] enablement array ──────────────────────────
+# autoducks.json.version is an optional consumer override for testing a gate;
+# .autoducks/VERSION is the normal source. No stamping — this only reads.
 HOST_VERSION="$(jq -r '.version // empty' "$CONFIG")"
+if [[ -z "$HOST_VERSION" && -f "$AUTODUCKS_ROOT/VERSION" ]]; then
+  HOST_VERSION="$(tr -d '[:space:]' < "$AUTODUCKS_ROOT/VERSION")"
+fi
 PLUGIN_COUNT="$(jq '.plugins // [] | length' "$CONFIG")"
 
 PLUGIN_NAMES=()
