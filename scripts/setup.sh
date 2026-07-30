@@ -15,7 +15,7 @@
 # CHECKS
 #   1. gh CLI authentication
 #   2. Required labels (feature, smoke-test, priority:P0-P3, progress) — CREATES if missing
-#   3. CLAUDE_CODE_OAUTH_TOKEN secret — reports if missing
+#   3. LLM credential — resolves ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_BASE_URL+AUTH_TOKEN at repo or org level; reports if missing, org-blocked, or unverifiable
 #   4. Repository Actions workflow permissions — reports if wrong
 #   5. Claude Code GitHub App installation — reports if missing
 #   6. Sub-issues API availability — probes the sub_issues endpoint; reports if unavailable
@@ -241,20 +241,92 @@ org_has() {
 
 # Any one of these authenticates the agents: the Anthropic API key, a Claude
 # Code subscription token, or a custom Anthropic-compatible endpoint with its
-# own credential (ANTHROPIC_BASE_URL may be a secret or a repo variable).
-if has_secret "ANTHROPIC_API_KEY"; then
-  pass "Secret ANTHROPIC_API_KEY is configured"
-elif has_secret "CLAUDE_CODE_OAUTH_TOKEN"; then
-  pass "Secret CLAUDE_CODE_OAUTH_TOKEN is configured (subscription auth)"
-elif has_secret "ANTHROPIC_BASE_URL" || has_var "ANTHROPIC_BASE_URL"; then
-  if has_secret "ANTHROPIC_AUTH_TOKEN"; then
+# own credential (ANTHROPIC_BASE_URL may be a secret or a repo variable). Each
+# resolves independently through credential_source, which knows about repo
+# vs. org tiers, the org-plan gate on private repos, and unknowable lookups.
+SRC_API_KEY=$(credential_source ANTHROPIC_API_KEY)
+SRC_OAUTH=$(credential_source CLAUDE_CODE_OAUTH_TOKEN)
+SRC_BASE_URL_SECRET=$(credential_source ANTHROPIC_BASE_URL)
+SRC_BASE_URL_VAR=$(credential_source ANTHROPIC_BASE_URL variables)
+SRC_AUTH_TOKEN=$(credential_source ANTHROPIC_AUTH_TOKEN)
+
+# Human-readable provenance for the pass message.
+where() {
+  case "$1" in
+    repo) echo "repository secret" ;;
+    org)  echo "organization secret" ;;
+    *)    echo "$1" ;;
+  esac
+}
+
+# shadow_advisory <NAME> <SRC> [kind]  — informational only, never counted:
+# a repo-level credential that also has an org-level entry of the same name
+# will always win (env > repo > org), so the org copy silently does nothing.
+shadow_advisory() {
+  local name="$1" src="$2" kind="${3:-secrets}"
+  if [[ "$src" == repo ]] && org_has "$name" "$kind"; then
+    echo "     ℹ️  A repository-level $name shadows the organization secret of the"
+    echo "         same name (precedence: environment > repository > organization)."
+    echo "         An org-level rotation will not reach this repo until the repo copy is removed."
+  fi
+}
+
+if [[ "$SRC_API_KEY" == repo || "$SRC_API_KEY" == org ]]; then
+  pass "Secret ANTHROPIC_API_KEY is configured ($(where "$SRC_API_KEY"))"
+  shadow_advisory ANTHROPIC_API_KEY "$SRC_API_KEY"
+elif [[ "$SRC_OAUTH" == repo || "$SRC_OAUTH" == org ]]; then
+  pass "Secret CLAUDE_CODE_OAUTH_TOKEN is configured (subscription auth) ($(where "$SRC_OAUTH"))"
+  shadow_advisory CLAUDE_CODE_OAUTH_TOKEN "$SRC_OAUTH"
+elif [[ "$SRC_BASE_URL_SECRET" == repo || "$SRC_BASE_URL_SECRET" == org || "$SRC_BASE_URL_VAR" == repo || "$SRC_BASE_URL_VAR" == org ]]; then
+  if [[ "$SRC_AUTH_TOKEN" == repo || "$SRC_AUTH_TOKEN" == org ]]; then
     pass "Custom endpoint configured (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN)"
+    shadow_advisory ANTHROPIC_BASE_URL "$SRC_BASE_URL_SECRET"
+    shadow_advisory ANTHROPIC_BASE_URL "$SRC_BASE_URL_VAR" variables
+    shadow_advisory ANTHROPIC_AUTH_TOKEN "$SRC_AUTH_TOKEN"
   else
     manual "ANTHROPIC_BASE_URL is set but no credential for it
 
       Add the gateway's key: gh secret set ANTHROPIC_AUTH_TOKEN $REPO_ARG
       (or gh secret set ANTHROPIC_API_KEY $REPO_ARG if it authenticates via x-api-key)"
   fi
+elif [[ "$SRC_API_KEY" == org-blocked || "$SRC_OAUTH" == org-blocked || "$SRC_BASE_URL_SECRET" == org-blocked || "$SRC_BASE_URL_VAR" == org-blocked || "$SRC_AUTH_TOKEN" == org-blocked ]]; then
+  if [[ "$SRC_API_KEY" == org-blocked ]]; then
+    BLOCKED_NAME="ANTHROPIC_API_KEY"
+  elif [[ "$SRC_OAUTH" == org-blocked ]]; then
+    BLOCKED_NAME="CLAUDE_CODE_OAUTH_TOKEN"
+  elif [[ "$SRC_BASE_URL_SECRET" == org-blocked || "$SRC_BASE_URL_VAR" == org-blocked ]]; then
+    BLOCKED_NAME="ANTHROPIC_BASE_URL"
+  else
+    BLOCKED_NAME="ANTHROPIC_AUTH_TOKEN"
+  fi
+  manual "Organization secret $BLOCKED_NAME lists this repository, but it will arrive EMPTY
+
+      $REPO is PRIVATE and the '$ORG' organization is on the Free plan.
+      Organization secrets reach public repositories only on Free; GitHub's API
+      accepts adding a private repository to the selected list without any
+      error, and the value then resolves empty at run time.
+
+      Fix: add a repository-level secret, which behaves identically on public
+      and private repos:
+        gh secret set $BLOCKED_NAME --repo $REPO
+      Or upgrade the organization to Team/Enterprise."
+elif [[ "$SRC_API_KEY" == unknown || "$SRC_OAUTH" == unknown || "$SRC_BASE_URL_SECRET" == unknown || "$SRC_BASE_URL_VAR" == unknown || "$SRC_AUTH_TOKEN" == unknown ]]; then
+  UNKNOWN_MSG="Could not verify the LLM credential — it may come from an organization secret
+
+      Listing organization secrets for '$ORG' was refused. That needs org-owner
+      access (classic token scope 'admin:org', or the fine-grained
+      'Organization secrets: read' permission)."
+  if [[ "$REPO_SECRETS_OK" == false ]]; then
+    UNKNOWN_MSG="$UNKNOWN_MSG
+      Listing repository secrets was also refused — that needs repo admin."
+  fi
+  UNKNOWN_MSG="$UNKNOWN_MSG
+
+      If ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, or
+      ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN are configured at the
+      organization level, this repository is fine. Verify at:
+        https://github.com/organizations/$ORG/settings/secrets/actions"
+  manual "$UNKNOWN_MSG"
 else
   manual "No LLM credential is configured
 
