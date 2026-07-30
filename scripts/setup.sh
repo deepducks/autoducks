@@ -66,6 +66,14 @@ pass() { echo "  ✅ $1"; PASS=$((PASS+1)); }
 fail() { echo "  ❌ $1"; FAIL=$((FAIL+1)); }
 manual() { echo "  ⚠️  $1"; MANUAL=$((MANUAL+1)); }
 
+ORG="${REPO%%/*}"
+# "PUBLIC" | "PRIVATE" | "INTERNAL"; empty when the probe is refused.
+VISIBILITY=$(gh repo view "$REPO" --json visibility --jq '.visibility' 2>/dev/null || echo "")
+# Hoisted from check 7. Check 3 needs it to tell "owner is a user account"
+# (no org tier exists) apart from "the org lookup was refused". Check 7 keeps
+# its existing body and simply reads this value.
+TYPES_JSON=$(gh api "orgs/$ORG/issue-types" 2>/dev/null || echo "")
+
 echo "=== Setup check for $REPO ==="
 echo ""
 
@@ -204,8 +212,6 @@ echo ""
 # types aren't configured — the type parameter is silently ignored by the
 # API. But without them, typed feature/task relationships don't render.
 echo "[7/12] Issue types (Feature, Task)"
-ORG=$(echo "$REPO" | cut -d/ -f1)
-TYPES_JSON=$(gh api "orgs/$ORG/issue-types" 2>/dev/null || echo "")
 if [[ -z "$TYPES_JSON" ]]; then
   manual "Could not list issue types for org '$ORG' (not an org, or no admin access).
       If '$ORG' is a user account, types are only available under organizations.
@@ -230,7 +236,6 @@ fi
 echo ""
 
 # --- Check 8: Public-repo security ---
-VISIBILITY=$(gh repo view "$REPO" --json visibility --jq '.visibility' 2>/dev/null || echo "")
 if [[ "$VISIBILITY" == "PUBLIC" ]]; then
   echo "[8/12] Public-repo security posture"
   HAS_SEC=$(jq -r '.security != null' .autoducks/autoducks.json 2>/dev/null || echo "false")
