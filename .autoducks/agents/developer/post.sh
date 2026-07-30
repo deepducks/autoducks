@@ -80,11 +80,21 @@ verify_loop::clear_feedback_comment() {
   rm -f "$f"
 }
 
-# Reconstruct state from git (pre.sh exports don't persist across GHA steps)
+# Reconstruct state from git (pre.sh exports don't persist across GHA steps).
+#
+# $BASE_BRANCH is injected per-step by the workflow from
+# steps.ctx.outputs.base_branch. On a workflow_dispatch that is the Maestro's
+# explicit base_branch input and is right; on the comment path there is no such
+# input, so it is the default branch — and rebuilding PR_BASE_BRANCH from it
+# opened every comment-triggered task PR against the default branch instead of
+# the feature branch. pre.sh resolves the parent and publishes the answer under
+# AUTODUCKS_RESOLVED_* (a distinct name, because a step-level `env:` outranks
+# anything written to $GITHUB_ENV). Prefer it; fall back to the old derivation
+# so dispatch runs and single-repo installs behave exactly as before.
 TASK_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-PR_BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_INTEGRATION_BRANCH}"
-BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
-FEATURE_NUM=$(pipeline_branch_number "$BASE_BRANCH")
+PR_BASE_BRANCH="${AUTODUCKS_RESOLVED_PR_BASE_BRANCH:-${BASE_BRANCH:-$AUTODUCKS_INTEGRATION_BRANCH}}"
+BASE_BRANCH="${AUTODUCKS_RESOLVED_BASE_BRANCH:-${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}}"
+FEATURE_NUM="${AUTODUCKS_RESOLVED_FEATURE_NUM:-$(pipeline_branch_number "$BASE_BRANCH")}"
 
 # ── Metarepo recursive commit (children-first) ─────────────────────────
 # In metarepo mode the real code lives in child submodules on the mirrored
