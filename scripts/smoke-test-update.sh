@@ -336,11 +336,19 @@ if [[ -n "$PR_BRANCH" ]]; then
     pass "stale $GHOST_WORKFLOW was pruned"
   fi
 
+  # The design puts "resolving local machinery drift" out of scope: the updater
+  # detects and reports it, never merges it. install.sh replaces .autoducks/
+  # wholesale, so a locally edited machinery file IS overwritten — and the
+  # contract is that the PR body says so, which the next assertion checks.
+  #
+  # Asserting preservation here demanded the opposite of the delivered design,
+  # so this test could never pass against a correct implementation. What is
+  # worth pinning is that the overwrite is not silent.
   POST_DRIFT_CONTENT=$(cd "$SCRATCH_DIR" && git show "origin/${PR_BRANCH}:${DRIFT_FILE}" 2>/dev/null || echo "")
   if echo "$POST_DRIFT_CONTENT" | grep -qF "$DRIFT_MARKER"; then
-    pass "locally edited $DRIFT_FILE was preserved (not silently overwritten)"
+    fail "locally edited $DRIFT_FILE still carries '$DRIFT_MARKER' — the update did not replace the machinery file as install.sh is specified to"
   else
-    fail "locally edited $DRIFT_FILE was overwritten (marker '$DRIFT_MARKER' not found)"
+    pass "locally edited $DRIFT_FILE was replaced by the update, as designed (reporting is asserted next)"
   fi
 
   if echo "$PR_BODY" | grep -qF "$DRIFT_FILE"; then

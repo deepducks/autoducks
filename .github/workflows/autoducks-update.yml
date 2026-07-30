@@ -57,6 +57,15 @@ jobs:
           echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
           echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
+        with:
+          # Without this, checkout persists the default GITHUB_TOKEN into
+          # .git/config as an http.extraheader, and that header outranks the
+          # credentials git::push_branch embeds in the remote URL — so the push
+          # authenticates as GITHUB_TOKEN, which cannot write .github/workflows/.
+          # Rewriting those files is what a machinery update *is*, so every
+          # update would fail at the push. Same fallback chain as every sibling
+          # whose agent pushes (engineer, fix, reviewer, defer).
+          token: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       # Pin the machinery to the pipeline's cut commit BEFORE the agent runs, so
       # an agent editing .autoducks on its own branch cannot corrupt the scripts
       # that run its build, and the machinery cannot drift across waves/reviews
