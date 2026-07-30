@@ -348,14 +348,29 @@ update::pr_body() {
   [[ -n "$pin" ]] && body+="  ·  pin: \`${pin}\`"
   body+=$'\n\n'"From \`${from_sha:-unknown}\` to \`${to_sha}\`."$'\n\n'
 
-  local changelog=""
+  # changelog::_file resolves against $AUTODUCKS_ROOT, and this agent runs from
+  # AUTODUCKS_PINNED_ROOT — the snapshot taken *before* the update. That copy
+  # predates every version being reported on, so changelog::range came back
+  # empty and changelog::has_breaking always returned false. The consequences
+  # ran past a missing section: with has_breaking always false, the ⚠️ Breaking
+  # changes block never rendered and auto_merge_eligible saw a clean bill, so a
+  # release whose changelog declares breaking changes could merge to the
+  # default branch unattended.
+  #
+  # The applied tree is the checkout, and apply_branch has already written the
+  # new machinery into it by the time the body is built, so read from there.
+  local _applied_root="${GITHUB_WORKSPACE:-$PWD}/.autoducks"
+  [[ -f "$_applied_root/CHANGELOG.md" ]] || _applied_root="${AUTODUCKS_ROOT:-.autoducks}"
+
+  local changelog="" _breaking=1
   if [[ -n "$from_version" && -n "$to_version" ]]; then
-    changelog="$(changelog::range "$from_version" "$to_version" 2>/dev/null || true)"
+    changelog="$(AUTODUCKS_ROOT="$_applied_root" changelog::range "$from_version" "$to_version" 2>/dev/null || true)"
+    AUTODUCKS_ROOT="$_applied_root" changelog::has_breaking "$from_version" "$to_version" 2>/dev/null && _breaking=0
   fi
   body+="## Changelog"$'\n\n'
   body+="${changelog:-_No changelog entries found._}"$'\n\n'
 
-  if [[ -n "$from_version" && -n "$to_version" ]] && changelog::has_breaking "$from_version" "$to_version" 2>/dev/null; then
+  if [[ "$_breaking" -eq 0 ]]; then
     body+="## ⚠️ Breaking changes"$'\n\n'
     body+="This update includes breaking changes — review the changelog above before merging."$'\n\n'
   fi
@@ -602,8 +617,16 @@ No PR was opened and no commit was made."
 
   local bump_kind=""
   [[ -n "$installed_version" && -n "$target_version" ]] && bump_kind="$(semver::bump_kind "$installed_version" "$target_version")"
+  # Same stale-root trap as update::pr_body, and the more dangerous half: this
+  # value gates auto_merge_eligible. Read against the pinned pre-update snapshot
+  # it was always 0, so a release declaring breaking changes satisfied the
+  # "no breaking changes" precondition and could auto-merge to the default
+  # branch with nobody looking.
+  local _breaking_root="${GITHUB_WORKSPACE:-$PWD}/.autoducks"
+  [[ -f "$_breaking_root/CHANGELOG.md" ]] || _breaking_root="${AUTODUCKS_ROOT:-.autoducks}"
   local has_breaking=0
-  if [[ -n "$installed_version" && -n "$target_version" ]] && changelog::has_breaking "$installed_version" "$target_version" 2>/dev/null; then
+  if [[ -n "$installed_version" && -n "$target_version" ]] \
+     && AUTODUCKS_ROOT="$_breaking_root" changelog::has_breaking "$installed_version" "$target_version" 2>/dev/null; then
     has_breaking=1
   fi
   local has_drift=0
