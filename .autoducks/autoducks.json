@@ -32,6 +32,11 @@
       "timeout_minutes": 45,
       "poll_interval_seconds": 30
     },
+    "check_recovery": {
+      "assert_attempts": 3,
+      "assert_interval_seconds": 5,
+      "poll_rounds": 2
+    },
     "auth": {
       "mode": "single_pat"
     },

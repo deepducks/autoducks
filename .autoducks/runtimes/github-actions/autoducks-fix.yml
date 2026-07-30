@@ -147,13 +147,20 @@ jobs:
           GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
           LLM_ERROR_SUBTYPE: ${{ steps.llm.outputs.error_subtype }}
           LLM_SKIPPED: ${{ steps.llm.outputs.skipped }}
-      # Last-resort backstop: if the LLM step failed or Post-execution did not
-      # report cleanly (e.g. a corrupted hook that still exits 0), post a notice
-      # from pure YAML so a broken hook can never silently freeze a wave (#952).
+      # Last-resort backstop for a corrupted post.sh: a hook that dies (or exits
+      # 0) without telling the issue anything would otherwise freeze a wave
+      # silently (#952), so post a notice from pure YAML instead.
+      # Gated on whether the hook *reported*, not on whether it *succeeded*:
+      # every deliberate-failure path reports and then exits 1 on purpose, and
+      # keying off `post.outcome` alone made the watchdog contradict the accurate
+      # report it had just posted (#117). The reporting helpers set
+      # `reported=true` in $GITHUB_OUTPUT before that exit; a genuinely corrupted
+      # hook never reaches them, never sets it, and still trips the watchdog.
       - name: Failure watchdog
         if: >-
           always() && steps.authz.outcome == 'success' &&
-          (steps.llm.outcome == 'failure' || steps.post.outcome != 'success')
+          (steps.llm.outcome == 'failure' || steps.post.outcome != 'success') &&
+          steps.post.outputs.reported != 'true'
         env:
           ISSUE_NUM: ${{ github.event.issue.number }}
           RUN_ID: ${{ github.run_id }}

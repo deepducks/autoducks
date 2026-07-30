@@ -17,6 +17,10 @@ set -euo pipefail
 # status comment on several targets (e.g. the Reviewer mirrors to both the
 # feature issue and its PR). Single-target callers are unaffected — they always
 # pass the same issue_id, so start writes and finish reads the same file.
+STATUS_COMMENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./failure-reported.sh
+source "$STATUS_COMMENT_DIR/failure-reported.sh"
+
 _status_comment::_id_file() {
   echo "/tmp/autoducks-status-comment-id.${1}"
 }
@@ -102,12 +106,17 @@ status_comment::finish() {
 }
 
 # status_comment::fail ISSUE_NUM [DETAILS]
+# Reaching here means the run told the issue it failed, on purpose — every
+# deliberate-failure path in every post.sh calls this before its `exit 1`. So it
+# is also the broadest place to set the "already reported" mark that keeps the
+# YAML watchdog quiet (#117).
 status_comment::fail() {
   local issue_id="$1" details="${2:-See the failure report below for diagnosis and next steps.}"
   local label link
   label=$(status_comment::_label)
   link=$(status_comment::_run_link)
   status_comment::_edit "$issue_id" "⚠️ **\`${label}\`**: failed on ${link}" "$details"
+  feedback::mark_reported
 }
 
 # status_comment::cancel ISSUE_NUM [DETAILS]
