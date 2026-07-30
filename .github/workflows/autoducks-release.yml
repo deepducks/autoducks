@@ -1,0 +1,64 @@
+name: 'Autoducks: Release'
+# Upstream-only. scripts/release.sh (also upstream-only — absent from
+# install.sh's copy loop) commits `.autoducks/VERSION` + the CHANGELOG.md
+# section and pushes the `v<semver>` tag; this workflow turns that push into
+# the GitHub release the "stable" channel resolves against. Idempotent
+# (skips if the release already exists) and never fails silently: a
+# `.autoducks/VERSION` change pushed without its matching tag is reported,
+# not swallowed.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: publish GitHub release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Detect .autoducks/VERSION change
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            version:
+              - '.autoducks/VERSION'
+      - name: Publish release for the new VERSION
+        if: steps.changes.outputs.version == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          VERSION="$(tr -d '[:space:]' < .autoducks/VERSION)"
+          TAG="v${VERSION}"
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $TAG already exists — skipping (idempotent)"
+            exit 0
+          fi
+
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::.autoducks/VERSION changed to $VERSION but tag $TAG was not found. scripts/release.sh should have created and pushed it — push the tag manually or re-run scripts/release.sh, then re-run this workflow." >&2
+            exit 1
+          fi
+
+          # shellcheck source=/dev/null
+          source .autoducks/core/config/changelog.sh
+          NOTES="$(changelog::section "$VERSION")" || {
+            echo "::error::no CHANGELOG.md section found for $VERSION — add a '## [$VERSION] - <date>' entry and re-run this workflow." >&2
+            exit 1
+          }
+
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "$NOTES"
+          echo "published release $TAG"
+      - name: Skipped (no VERSION change)
+        if: steps.changes.outputs.version != 'true'
+        run: echo "No .autoducks/VERSION change in this push — nothing to release."
