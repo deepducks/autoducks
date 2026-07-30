@@ -73,6 +73,25 @@ if [[ -z "$FEATURE_NUM" ]]; then
       PR_BASE_BRANCH="$PARENT_BRANCH"
       FEATURE_NUM="$PARENT_NUM"
       TASK_PREFIX="$PARENT_PREFIX"
+
+      # Hand the resolution to post.sh. `export` cannot do this — pre and post
+      # are separate GHA steps, hence post.sh's own "reconstruct state from git"
+      # block. But that block rebuilds PR_BASE_BRANCH from $BASE_BRANCH, which
+      # the workflow injects per-step from steps.ctx.outputs.base_branch: on the
+      # comment path that is the default branch, so the task PR was opened
+      # against the default branch instead of the feature branch.
+      #
+      # Writing BASE_BRANCH itself to $GITHUB_ENV would not help — a step-level
+      # `env:` entry outranks the job environment, so the workflow's value would
+      # win again. Hence a distinct name that no step declares, which post.sh
+      # prefers when present.
+      if [[ -n "${GITHUB_ENV:-}" ]]; then
+        {
+          echo "AUTODUCKS_RESOLVED_BASE_BRANCH=$BASE_BRANCH"
+          echo "AUTODUCKS_RESOLVED_PR_BASE_BRANCH=$PR_BASE_BRANCH"
+          echo "AUTODUCKS_RESOLVED_FEATURE_NUM=$FEATURE_NUM"
+        } >> "$GITHUB_ENV"
+      fi
     else
       git::dispatch_workflow "autoducks-maestro.yml" \
         -f "feature_issue=$PARENT_NUM" \
