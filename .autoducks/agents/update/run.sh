@@ -108,6 +108,20 @@ update::read_installed_field() {
 # → "up-to-date" | "downgrade" | "proceed"
 update::decide() {
   local installed_sha="$1" installed_version="$2" target_sha="$3" target_version="$4" pin="$5"
+  # The lockfile may hold an abbreviated SHA: without `gh`, install.sh derives it
+  # from the tarball's top-level directory, which GitHub names
+  # owner-repo-<abbrev>. resolve_sha always returns the full 40 characters, so
+  # exact equality never matched and the first scheduled run on a curl-installed
+  # repo opened an update PR whose only change was .installed.json itself.
+  # Compare on the shorter length, which is unambiguous for any git object id.
+  if [[ -n "$installed_sha" && -n "$target_sha" ]]; then
+    local _n="${#installed_sha}"
+    [[ "${#target_sha}" -lt "$_n" ]] && _n="${#target_sha}"
+    if [[ "$_n" -ge 7 && "${installed_sha:0:$_n}" == "${target_sha:0:$_n}" ]]; then
+      printf 'up-to-date'
+      return 0
+    fi
+  fi
   if [[ -n "$installed_sha" && "$installed_sha" == "$target_sha" ]]; then
     printf 'up-to-date'
     return 0

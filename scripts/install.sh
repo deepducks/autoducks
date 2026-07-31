@@ -277,13 +277,30 @@ echo "  Workflows copied to .github/workflows/"
 # Prune stale mirrors: a .github/workflows/autoducks-*.yml left over from a
 # runtime that was renamed/removed upstream has no counterpart in the new
 # runtime templates and would otherwise linger forever.
+#
+# "No runtime template" is not sufficient on its own. Upstream-only workflows —
+# autoducks-release.yml is one — live in .github/workflows/ by design and are
+# deliberately absent from runtimes/ so they never ship to a consumer. Pruning on
+# the template check alone deletes them, and running this script inside
+# deepducks/autoducks itself would remove the release workflow that publishes the
+# tags the entire `stable` channel resolves against.
+#
+# The distinction is already in the source tree, so it needs no list to maintain:
+# a retired workflow is absent from the source's runtimes/ *and* its
+# .github/workflows/; an upstream-only one is present in the latter. Keep
+# anything the source still ships at repo level.
 for wf in .github/workflows/autoducks-*.yml; do
   [[ -f "$wf" ]] || continue
   bn="$(basename "$wf")"
-  if [[ ! -f ".autoducks/runtimes/github-actions/$bn" ]]; then
-    rm -f "$wf"
-    echo "  Removed stale mirror: $wf"
+  if [[ -f ".autoducks/runtimes/github-actions/$bn" ]]; then
+    continue
   fi
+  if [[ -f "$TMP_DIR/.github/workflows/$bn" ]]; then
+    echo "  Kept upstream-only workflow: $wf"
+    continue
+  fi
+  rm -f "$wf"
+  echo "  Removed stale mirror: $wf"
 done
 
 # Copy issue templates
