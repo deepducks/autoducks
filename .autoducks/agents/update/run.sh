@@ -310,11 +310,37 @@ update::drift_diff() {
 # consumer's update-triggers.sh/apply-plugins.sh against it so baked
 # if:/schedule: regions and compiled plugin artifacts are comparable, then
 # diffs it against the working tree's pre-update state.
+# Exit codes carry what stdout cannot: 0 = comparison ran (stdout is the drifted
+# paths, empty meaning none), 2 = could not be determined.
+#
+# The distinction is a safety gate, not bookkeeping. The fetch below used to be
+# anonymous and swallowed with `|| true`, so a rate limit — the likely outcome of
+# an unauthenticated API call on a busy runner — produced an empty tarball, no
+# extracted tree, no call to drift_diff, and therefore no output: identical to
+# "the consumer changed nothing". `on_drift: abort` then never fired and
+# auto_merge_eligible saw has_drift=0, so an update could merge itself over a
+# consumer's local machinery edits without anyone seeing a word about it.
 update::detect_drift() {
   local previous_sha="$1" pre_update_dir="$2"
   [[ -n "$previous_sha" ]] || return 0
   local scratch; scratch="$(mktemp -d)"
-  curl -fsSL "https://api.github.com/repos/$SRC/tarball/$previous_sha" -o "$scratch/prev.tar.gz" 2>/dev/null || true
+
+  # Authenticate: this is the same API the rest of the agent uses with a token,
+  # and the one call that was left anonymous is the one whose failure is silent.
+  local _auth=()
+  [[ -n "${GH_TOKEN:-}" ]] && _auth=(-H "Authorization: Bearer $GH_TOKEN")
+  if ! curl -fsSL "${_auth[@]}" \
+       "https://api.github.com/repos/$SRC/tarball/$previous_sha" -o "$scratch/prev.tar.gz" 2>/dev/null; then
+    echo "::warning::update: could not fetch $SRC@${previous_sha:0:7} to compare against — local machinery drift is UNKNOWN for this run." >&2
+    rm -rf "$scratch"
+    return 2
+  fi
+  if ! tar tzf "$scratch/prev.tar.gz" >/dev/null 2>&1; then
+    echo "::warning::update: the previous-machinery tarball for ${previous_sha:0:7} is not readable — local machinery drift is UNKNOWN for this run." >&2
+    rm -rf "$scratch"
+    return 2
+  fi
+
   if [[ -s "$scratch/prev.tar.gz" ]]; then
     mkdir -p "$scratch/prev"
     tar xzf "$scratch/prev.tar.gz" -C "$scratch/prev" --strip-components=1 2>/dev/null || true
@@ -338,9 +364,12 @@ update::detect_drift() {
       ( cd "$scratch/prev" 2>/dev/null && [[ -f .autoducks/core/config/apply-plugins.sh ]] && bash .autoducks/core/config/apply-plugins.sh >/dev/null 2>&1 || true )
     fi
   fi
-  if [[ -d "$scratch/prev/.autoducks" ]]; then
-    update::drift_diff "$pre_update_dir/.autoducks" "$scratch/prev/.autoducks"
+  if [[ ! -d "$scratch/prev/.autoducks" ]]; then
+    echo "::warning::update: the previous-machinery tarball carried no .autoducks/ — local machinery drift is UNKNOWN for this run." >&2
+    rm -rf "$scratch"
+    return 2
   fi
+  update::drift_diff "$pre_update_dir/.autoducks" "$scratch/prev/.autoducks"
   rm -rf "$scratch"
 }
 
@@ -618,10 +647,24 @@ update::main() {
     exit 1
   fi
 
-  local drift_paths drift_section
+  local drift_paths drift_section drift_unknown=0
   drift_paths="$(mktemp)"
-  update::detect_drift "$previous_sha" "$pre_update_dir" >"$drift_paths" || true
-  if [[ -s "$drift_paths" ]]; then
+  update::detect_drift "$previous_sha" "$pre_update_dir" >"$drift_paths" || {
+    [[ "$?" -eq 2 ]] && drift_unknown=1
+  }
+
+  # "Could not determine" is not "none". Treated as none, a rate-limited fetch
+  # would let on_drift=abort pass and auto-merge overwrite a consumer's local
+  # machinery edits silently — the one outcome the drift feature exists to
+  # prevent. So it fails closed: abort where abort is configured, and never
+  # auto-merge on an unknown.
+  if [[ "$drift_unknown" -eq 1 ]]; then
+    if [[ "$AUTODUCKS_UPDATE_ON_DRIFT" == "abort" ]]; then
+      update::report_failure "Local machinery drift could not be determined for this run (the previous machinery tree could not be fetched or read) and \`update.on_drift\` is \`abort\` — the update branch was discarded. Re-run once upstream is reachable."
+      update::discard_branch "$branch"
+      exit 1
+    fi
+  elif [[ -s "$drift_paths" ]]; then
     if [[ "$AUTODUCKS_UPDATE_ON_DRIFT" == "abort" ]]; then
       local first_file; first_file="$(head -1 "$drift_paths")"
       update::report_failure "Local machinery changes were detected in \`$first_file\`$( [[ "$(wc -l <"$drift_paths")" -gt 1 ]] && printf ' (and %d more)' "$(( $(wc -l <"$drift_paths") - 1 ))" ) and \`update.on_drift\` is \`abort\` — the update branch was discarded."
@@ -630,7 +673,14 @@ update::main() {
     fi
   fi
   drift_section="$(mktemp)"
-  update::drift_section "$pre_update_dir" "$drift_paths" >"$drift_section"
+  if [[ "$drift_unknown" -eq 1 ]]; then
+    # Say so in the PR body. A reviewer who sees no drift section reasonably
+    # concludes there was none; silence here would be the same lie the exit
+    # code was added to stop telling.
+    printf '## ⚠️ Local machinery drift: UNKNOWN\n\nThe previously installed machinery could not be fetched or read, so this run could not tell whether local edits are being overwritten. Review the diff before merging.\n\n' >"$drift_section"
+  else
+    update::drift_section "$pre_update_dir" "$drift_paths" >"$drift_section"
+  fi
 
   local verify_output; verify_output="$(mktemp)"
   local checks_ok=1
@@ -659,8 +709,12 @@ No PR was opened and no commit was made; the update branch was discarded."
      && AUTODUCKS_ROOT="$_breaking_root" changelog::has_breaking "$installed_version" "$target_version" 2>/dev/null; then
     has_breaking=1
   fi
+  # An unknown counts as drift for the auto-merge gate. auto_merge_eligible's
+  # question is "is it safe to merge this without a human looking", and the
+  # honest answer when drift could not be evaluated is no.
   local has_drift=0
   [[ -s "$drift_paths" ]] && has_drift=1
+  [[ "$drift_unknown" -eq 1 ]] && has_drift=1
 
   local body; body="$(update::pr_body "$installed_version" "$target_version" "$CHANNEL" "$PIN" \
     "$installed_sha" "$target_sha" "$migration_report" "$drift_section" "$verify_output" "$previous_sha")"
