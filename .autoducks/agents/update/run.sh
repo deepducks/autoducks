@@ -178,8 +178,35 @@ update::snapshot_pre_update() {
   [[ -d .autoducks ]] && cp -a .autoducks "$dest/.autoducks"
 }
 
+# update::discard_branch BRANCH — remove the remote ref this agent created.
+# Called on every path that gives up after apply_branch: the branch exists on
+# the remote from that moment on, but the run only earns it by clearing
+# migrations, drift and verify-machinery.
+update::discard_branch() {
+  local branch="${1:-}"
+  [[ -n "$branch" ]] || return 0
+  gh api "repos/$REPO/git/refs/heads/$branch" -X DELETE --silent 2>/dev/null || true
+  echo "::notice::update: discarded $branch — the cycle did not reach a PR." >&2
+}
+
 update::apply_branch() {
   local base="$1" branch="$2" target_sha="$3" channel="$4"
+
+  # create_branch POSTs a remote ref, and GitHub answers 422 "Reference already
+  # exists" for one that is already there — non-zero under `set -euo pipefail`,
+  # with no trap, so the run would die before any reporting function ran. A
+  # branch left behind by an earlier aborted cycle (or by a maintainer closing
+  # the update PR without merging, which never deletes the head) therefore
+  # wedged every later run, silently and permanently.
+  #
+  # The autoducks/update-* namespace belongs to this agent: nothing else writes
+  # it, and a stale one has no value because the target SHA is recomputed each
+  # cycle. Clear it first, then create.
+  if gh api "repos/$REPO/git/refs/heads/$branch" --silent 2>/dev/null; then
+    echo "::notice::update: $branch already exists from an earlier cycle — replacing it." >&2
+    gh api "repos/$REPO/git/refs/heads/$branch" -X DELETE --silent 2>/dev/null || true
+  fi
+
   git::create_branch "$base" "$branch"
   git fetch origin "$branch" --quiet
   git checkout -B "$branch" "origin/$branch" --quiet
@@ -586,7 +613,8 @@ update::main() {
 
   local migration_report; migration_report="$(mktemp)"
   if ! update::run_migrations "$installed_version" "$target_version" ".autoducks/migrations" "$migration_report"; then
-    update::report_failure "Migration to v${target_version} failed — see the run log. No branch was pushed."
+    update::discard_branch "$branch"
+    update::report_failure "Migration to v${target_version} failed — see the run log. The update branch was discarded."
     exit 1
   fi
 
@@ -596,7 +624,8 @@ update::main() {
   if [[ -s "$drift_paths" ]]; then
     if [[ "$AUTODUCKS_UPDATE_ON_DRIFT" == "abort" ]]; then
       local first_file; first_file="$(head -1 "$drift_paths")"
-      update::report_failure "Local machinery changes were detected in \`$first_file\`$( [[ "$(wc -l <"$drift_paths")" -gt 1 ]] && printf ' (and %d more)' "$(( $(wc -l <"$drift_paths") - 1 ))" ) and \`update.on_drift\` is \`abort\` — no branch was pushed."
+      update::report_failure "Local machinery changes were detected in \`$first_file\`$( [[ "$(wc -l <"$drift_paths")" -gt 1 ]] && printf ' (and %d more)' "$(( $(wc -l <"$drift_paths") - 1 ))" ) and \`update.on_drift\` is \`abort\` — the update branch was discarded."
+      update::discard_branch "$branch"
       exit 1
     fi
   fi
@@ -607,11 +636,12 @@ update::main() {
   local checks_ok=1
   if ! update::run_verify "$verify_output"; then
     checks_ok=0
+    update::discard_branch "$branch"
     update::report_failure "\`verify-machinery.sh\` failed after applying v${target_version}:
 
 $(cat "$verify_output")
 
-No PR was opened and no commit was made."
+No PR was opened and no commit was made; the update branch was discarded."
     exit 1
   fi
 

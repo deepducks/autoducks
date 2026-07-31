@@ -75,11 +75,49 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$REF" ]]; then
+  # Channel semantics are defined by the updater (agents/update/run.sh) and the
+  # updates reference: `stable` is the highest v<semver> tag, `edge` is the tip
+  # of the source repo's default branch. The installer had them crossed —
+  # `stable → main`, `edge → edge` — which broke both ways:
+  #
+  #   --channel edge  resolved to the literal ref "edge", which no repo has, so
+  #                   the tarball fetch 404'd and the run died in tar with an
+  #                   opaque "not in gzip format".
+  #   --channel stable installed main's tip but recorded `channel: stable`, so
+  #                   the first update resolved stable to an older *tag* and
+  #                   proposed moving backwards.
+  #
+  # Resolve the same way the updater does, and fall back to the default branch
+  # when no release has been cut yet (the bootstrap period), warning rather than
+  # failing so a fresh install still works before the first tag exists.
   case "$CHANNEL" in
-    stable) REF="main" ;;
-    edge) REF="edge" ;;
+    stable|edge) ;;
     *) echo "Unknown --channel: $CHANNEL (expected stable or edge)" >&2; exit 1 ;;
   esac
+
+  if [[ -n "${AUTODUCKS_SOURCE_DIR:-}" ]]; then
+    # Offline seam: the tree comes from disk, so there is nothing to resolve a
+    # ref against and no network to reach. Record the channel name itself, which
+    # is what the lockfile is asked for in that mode.
+    REF="$CHANNEL"
+  else
+    DEFAULT_BRANCH="$(curl -fsSL "https://api.github.com/repos/$SOURCE_REPO" 2>/dev/null \
+      | grep -m1 '"default_branch"' | sed 's/.*: *"\(.*\)".*/\1/')"
+    DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
+    if [[ "$CHANNEL" == "edge" ]]; then
+      REF="$DEFAULT_BRANCH"
+    else
+      REF="$(curl -fsSL "https://api.github.com/repos/$SOURCE_REPO/tags?per_page=100" 2>/dev/null \
+        | grep -o '"name": *"v[0-9]\+\.[0-9]\+\.[0-9]\+"' \
+        | sed 's/.*"v/v/;s/"$//' \
+        | sort -t. -k1.2,1n -k2,2n -k3,3n \
+        | tail -n1)"
+      if [[ -z "$REF" ]]; then
+        echo "⚠️  $SOURCE_REPO has cut no releases yet — installing from $DEFAULT_BRANCH (bootstrap period)." >&2
+        REF="$DEFAULT_BRANCH"
+      fi
+    fi
+  fi
 fi
 
 if [[ -n "$LOCK_NOTE" ]]; then
@@ -130,7 +168,15 @@ else
   TMP_DIR=$(mktemp -d)
   DOWNLOAD_REF="${RESOLVED_SHA:-$REF}"
   TARBALL_FILE="$(mktemp)"
-  curl -sL "https://api.github.com/repos/${SOURCE_REPO}/tarball/${DOWNLOAD_REF}" -o "$TARBALL_FILE"
+  # -f matters: without it a 404 writes GitHub's JSON error body into the file
+  # and the failure only surfaces several lines later as tar's "not in gzip
+  # format", which says nothing about the ref that could not be found.
+  if ! curl -fsSL "https://api.github.com/repos/${SOURCE_REPO}/tarball/${DOWNLOAD_REF}" -o "$TARBALL_FILE"; then
+    rm -f "$TARBALL_FILE"
+    echo "❌ Could not download ${SOURCE_REPO} at ref '${DOWNLOAD_REF}'." >&2
+    echo "   Check that the ref exists (a tag like v0.2.0, a branch, or a SHA)." >&2
+    exit 1
+  fi
   if [[ -z "$RESOLVED_SHA" ]]; then
     # gh unavailable: derive the sha from the tarball's top-level directory,
     # the same directory --strip-components=1 strips off below.
