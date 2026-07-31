@@ -71,5 +71,82 @@ echo "── release::infer_bump (no-flag inference across mixed subjects) ─�
   && pass "no commit subjects infers patch" || fail "empty inference wrong: $(release::infer_bump)"
 
 echo ""
+echo "── --dry-run works on a branch that cannot be pushed to ──"
+
+# The pushability guard exists because a refused push leaves a local release
+# commit and tag to unwind. --dry-run creates neither, so refusing it blocked the
+# one command that is always safe — you could not preview a release on exactly
+# the repos where you most want to look before cutting one.
+RSCRATCH="$(mktemp -d)"
+trap 'rm -rf "$RSCRATCH"' EXIT
+
+mkdir -p "$RSCRATCH/bin" "$RSCRATCH/repo/.autoducks"
+cat > "$RSCRATCH/bin/gh" <<'GH'
+#!/usr/bin/env bash
+case "$*" in
+  "repo view --json defaultBranchRef --jq .defaultBranchRef.name") echo "main" ;;
+  "repo view --json nameWithOwner --jq .nameWithOwner")            echo "acme/child" ;;
+  *branches/main/protection*)
+    # Protected AND enforced on admins: the state that makes a direct push fail.
+    echo '{"enforce_admins":{"enabled":true},"required_status_checks":{"contexts":["unit suite"]}}' ;;
+  *) exit 1 ;;
+esac
+GH
+chmod +x "$RSCRATCH/bin/gh"
+
+(
+  cd "$RSCRATCH/repo"
+  git init -q -b main .
+  git config user.email t@example.com
+  git config user.name Test
+  printf '0.1.0\n' > .autoducks/VERSION
+  printf '# Changelog\n' > .autoducks/CHANGELOG.md
+  git add -A && git commit -q -m "feat: initial"
+) >/dev/null 2>&1
+
+run_release() { # ARGS...
+  ( cd "$RSCRATCH/repo" \
+    && env PATH="$RSCRATCH/bin:$PATH" AUTODUCKS_ROOT=".autoducks" \
+         bash "$RELEASE_SH" "$@" ) 2>&1
+}
+
+rc=0
+out="$(run_release --dry-run --minor)" || rc=$?
+if [[ "$rc" -eq 0 && "$out" == *"Next version"* && "$out" == *"0.2.0"* ]]; then
+  pass "--dry-run previews the release despite enforce_admins"
+else
+  fail "--dry-run refused (rc=$rc): $(printf '%s' "$out" | head -2 | tr '\n' ' ')"
+fi
+if [[ "$out" == *"Dry run: nothing was written"* ]]; then
+  pass "--dry-run says plainly that it wrote nothing"
+else
+  fail "--dry-run did not report itself as a dry run"
+fi
+if [[ "$(cd "$RSCRATCH/repo" && cat .autoducks/VERSION)" == "0.1.0" ]]; then
+  pass "--dry-run left VERSION untouched"
+else
+  fail "--dry-run wrote VERSION"
+fi
+
+# The real run must still be refused — the guard has to keep working.
+rc=0
+out="$(run_release --minor)" || rc=$?
+if [[ "$rc" -ne 0 && "$out" == *"cannot be pushed directly"* ]]; then
+  pass "a real release is still refused on the same branch"
+else
+  fail "the guard stopped firing on a real release (rc=$rc)"
+fi
+if [[ "$out" == *"--pr --minor"* ]]; then
+  pass "the refusal names the bump flag it was called with"
+else
+  fail "the refusal lost the bump flag: $(printf '%s' "$out" | tr '\n' ' ' | head -c 160)"
+fi
+if [[ "$(cd "$RSCRATCH/repo" && git rev-list --count HEAD)" == "1" ]]; then
+  pass "the refusal left no release commit behind"
+else
+  fail "a release commit was created before the refusal"
+fi
+
+echo ""
 echo "═══ release: $PASS passed, $FAIL failed ═══"
 [[ "$FAIL" -eq 0 ]] || exit 1

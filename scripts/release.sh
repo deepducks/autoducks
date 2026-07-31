@@ -330,12 +330,6 @@ release::main() {
   git rev-parse -q --verify "refs/tags/$tag" >/dev/null 2>&1 && \
     release::die "refusing — tag '$tag' already exists; delete it or bump a different component"
 
-  # Step 5 commits, tags, and only then pushes the branch. If the branch push is
-  # going to be refused, finding out there leaves a local release commit and tag
-  # behind that the operator has to unwind by hand. Check first — unless --pr,
-  # which never pushes to the default branch at all.
-  [[ "$pr_mode" == "true" ]] || release::assert_branch_pushable "$default_branch" "$tag"
-
   local date
   date="$(date -u +%Y-%m-%d)"
   local section
@@ -353,6 +347,17 @@ release::main() {
     echo "Dry run: nothing was written."
     return 0
   fi
+
+  # Step 5 commits, tags, and only then pushes the branch. If the branch push is
+  # going to be refused, finding out there leaves a local release commit and tag
+  # behind that the operator has to unwind by hand. Check first.
+  #
+  # After the dry-run return, not before it: --dry-run mutates nothing, so
+  # refusing it on a protected branch blocked the one command that is always
+  # safe to run — you could not preview a release on exactly the repos where
+  # you most want to look before cutting one. Skipped for --pr too, which never
+  # pushes to the default branch at all.
+  [[ "$pr_mode" == "true" ]] || release::assert_branch_pushable "$default_branch" "$tag" "$kind"
 
   printf '%s\n' "$next" > "$AUTODUCKS_ROOT/VERSION"
   release::insert_changelog_section "$(changelog::_file)" "$section"
