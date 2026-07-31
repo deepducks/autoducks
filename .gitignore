@@ -21,3 +21,7 @@ Thumbs.db
 *.log
 npm-debug.log*
 __pycache__/
+
+# autoducks: the "agent" lane's resolved prompt is a runtime artifact,
+# never a commit-worthy file — see .autoducks/agents/agent/post.sh
+.autoducks/agents/agent/resolved-prompt.md
