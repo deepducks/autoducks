@@ -39,6 +39,9 @@ MODE="${MODE:-$AUTODUCKS_UPDATE_MODE}"
 [[ "$MODE" =~ ^(pr|commit|off)$ ]] || MODE="$AUTODUCKS_UPDATE_MODE"
 
 UPDATE_FAILURE_MARKER="<!-- autoducks:update-failure -->"
+# Identifies the "a newer version is available" note already posted on an open
+# update PR, per target SHA, so a weekly cycle does not repeat itself.
+UPDATE_AVAILABLE_MARKER="<!-- autoducks:update-available:"
 
 update::_strip_v() { printf '%s' "${1#v}"; }
 
@@ -595,7 +598,15 @@ update::main() {
   decision="$(update::decide "$installed_sha" "$installed_version" "$target_sha" "$target_version" "$PIN")"
   case "$decision" in
     up-to-date)
+      # A scheduled run has no ISSUE_NUM, so report_soft_stop was skipped and the
+      # cycle ended with no trace anywhere — "ran and found nothing" and "never
+      # ran" looked the same to anyone checking. The step summary is the one
+      # surface a scheduled run always has.
       [[ -n "$ISSUE_NUM" ]] && update::report_soft_stop "Already up to date at \`$target_sha\` (v${installed_version:-unversioned})."
+      echo "::notice::update: already up to date at ${target_sha:0:7} (v${installed_version:-unversioned}) — nothing to do."
+      [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] && \
+        printf '### Autoducks update\n\nAlready up to date at `%s` (v%s).\n' \
+          "${target_sha:0:7}" "${installed_version:-unversioned}" >>"$GITHUB_STEP_SUMMARY"
       exit 0
       ;;
     downgrade)
@@ -614,7 +625,18 @@ update::main() {
       exit 0
       ;;
     existing-pr)
-      its::comment_issue "$reason" "A newer version is now available: v${target_version} (\`$target_sha\`)." || true
+      # Only say it once per version. The scheduled cycle re-runs weekly while an
+      # update PR sits open, and this posted the same line every time — a PR left
+      # open for a quarter collected a dozen identical comments.
+      _seen=""
+      _seen="$(its::list_comments "$reason" 2>/dev/null \
+        | jq -r --arg m "$UPDATE_AVAILABLE_MARKER$target_sha" \
+            '[.[] | select((.body // "") | contains($m))] | length' 2>/dev/null || echo 0)"
+      if [[ "${_seen:-0}" == "0" ]]; then
+        its::comment_issue "$reason" "A newer version is now available: v${target_version} (\`$target_sha\`).
+
+${UPDATE_AVAILABLE_MARKER}${target_sha}" || true
+      fi
       update::report_soft_stop "An update PR is already open (#$reason) — commented the newly-available version there instead of opening a second one."
       exit 0
       ;;
@@ -737,10 +759,16 @@ No PR was opened and no commit was made; the update branch was discarded."
     its::add_label "$pr_number" "Autoducks:breaking" || true
   fi
 
+  # checks_ok is 1 at this point on every path that reaches here — the only
+  # assignment to 0 is followed by `exit 1` — so the gate inside
+  # auto_merge_eligible was dead and read as a live safety check. The real gate
+  # belongs to GitHub: arm auto-merge and let the repo's own required checks
+  # hold it. Step 6 already verified the machinery; this is about the consumer's
+  # CI, which had no say before.
   local merged="not merged"
   if update::auto_merge_eligible "$AUTODUCKS_UPDATE_AUTO_MERGE" "$bump_kind" "$has_breaking" "$has_drift" "$checks_ok"; then
-    if git::merge_pr "$pr_number"; then
-      merged="auto-merged"
+    if git::merge_pr "$pr_number" auto; then
+      merged="auto-merge armed"
     fi
   fi
 
