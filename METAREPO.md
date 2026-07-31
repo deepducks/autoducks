@@ -195,7 +195,7 @@ tip that a delivery merge commit kept perfectly reachable still conflicts the mo
 the base's gitlink moves — which is exactly how both parent PRs of the 2026-07-29
 incident flipped to `CONFLICTING/DIRTY` (#119).
 
-Two moments reconcile the pin, because neither alone is sufficient:
+Three moments reconcile the pin, because no one of them alone is sufficient:
 
 1. **At delivery**, `git::submodule_deliver` re-reads the child's default-branch tip
    after any *synchronous* merge and returns that, asking Maestro for a gitlink bump
@@ -207,6 +207,19 @@ Two moments reconcile the pin, because neither alone is sufficient:
    open PR. It runs from three places, covering every way a pin goes stale: the
    delivery poller (per PR), the `repin-siblings` job on any parent PR merge, and
    the `repin-on-base-push` job on any direct push to the default branch.
+3. **On the child's own cycle**, `sync-child-gitlinks.sh` runs the same reconcile
+   against the metarepo's default branch and every submodule declared in
+   `.gitmodules`. Every trigger in (2) fires when the *parent* moves; a child
+   advancing on its own cycle reached none of them, so the pin sat behind until a
+   human noticed — five hand re-pins in the 2026-07-29 session alone (#170). It runs
+   hourly by default (`metarepo.sync_schedule`) and again at the start of every agent
+   run, so no agent begins work against a stale child.
+
+   The pre-agent pass reconciles in a throwaway clone rather than in the agent's
+   workspace. The reconcile checks out the branch it is fixing, which would destroy
+   the tree of the two agents that check out something else — the resolver (a PR head
+   ref) and the developer (a wave base). It fast-forwards the agent's own workspace
+   only when that workspace is already sitting on the default branch.
 
 Reconciliation **only ever fast-forwards**. A pin that is *ahead* of the child's
 default branch means the delivery has not merged yet and is left alone; a *diverged*
@@ -259,6 +272,7 @@ same check assertion.
 |---|---|---|
 | `metarepo.enabled` | bool | Master switch; forces sequential orchestration. |
 | `metarepo.protected_submodule_strategy` | `auto_merge` \| `required_check` | How protected children merge. |
+| `metarepo.sync_schedule` | cron | How often the parent polls its children for advances (default `17 * * * *`). |
 | `metarepo.auth.mode` | `single_pat` \| `per_owner_pat` \| `github_app` | Credential resolution. |
 | `metarepo.submodules.<path>.protected` | bool \| null | `null` = detect at runtime; a bool overrides detection. |
 | `metarepo.check_recovery.assert_attempts` | int | Times delivery re-checks that a child PR has any check run (default 3). |

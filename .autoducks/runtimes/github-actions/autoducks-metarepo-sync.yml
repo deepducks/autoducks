@@ -1,0 +1,65 @@
+name: 'Autoducks: Metarepo Gitlink Sync'
+
+# Advance the parent's gitlinks when a child advanced on its own cycle (#170).
+#
+# The reconcile that already existed only fired when the *parent* moved — a
+# parent PR merging, or a direct push to the default branch (both in
+# autoducks-delivery-check.yml). A child advancing on its own reached neither,
+# so the pin sat behind until a human noticed and re-pinned by hand.
+#
+# The cron is baked from `metarepo.sync_schedule` by scripts/update-triggers.sh:
+# GitHub's `on.schedule` is static YAML and cannot read config at run time. The
+# same script removes the `schedule:` trigger entirely when metarepo.enabled is
+# not true, so a single-repo install carries no live timer for this.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write        # the reconcile pushes gitlink-only commits
+  id-token: write        # minting the app token
+
+# One reconcile at a time. Two concurrent runs would race on the same push;
+# the reconcile only fast-forwards so a race is benign, but queueing keeps the
+# logs readable and halves the wasted API calls.
+concurrency:
+  group: autoducks-metarepo-sync-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint app token
+        id: apptoken
+        shell: bash
+        env:
+          AUTODUCKS_APP: ${{ vars.AUTODUCKS_APP }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTODUCKS_APP:-}" ]; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BROKER="https://autoducks-api.gustavospgondim.workers.dev"
+          OIDC=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=autoducks-broker" | jq -r .value)
+          TOKEN=$(curl -sf -X POST -H "Authorization: Bearer $OIDC" \
+            "$BROKER/token" | jq -r .token)
+          echo "::add-mask::$TOKEN"
+          echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Snapshot machinery
+        id: snapshot
+        run: bash .autoducks/core/robustness/snapshot-machinery.sh
+
+      - name: Sync child gitlinks
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/orchestration/sync-child-gitlinks.sh"
+        env:
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
