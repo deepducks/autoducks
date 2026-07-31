@@ -150,7 +150,26 @@ handling) that the interface functions are relied upon to provide.
 **How to check it:** for new or changed code, look for direct `gh <cmd>`,
 `curl` to a known ITS/Git/LLM API host, or a vendor SDK import outside
 `.autoducks/providers/*/`. Flag any such call as a violation unless it lives
-inside a provider implementation file itself.
+inside a provider implementation file itself, or falls under one of the two
+carve-outs below.
+
+**Carve-outs.** Both are narrow and neither may carry caller-supplied data:
+
+1. **Fetching the machinery itself.** The update agent reads tags and
+   tarballs from its configured `source_repo` with direct `gh`/`curl`. The
+   providers it would otherwise call are part of the payload being fetched.
+
+2. **Workflow-level watchdogs.** A workflow step whose purpose is to report
+   that the agent script *failed to load or run* cannot route through the
+   providers — they are inside the tree that did not load. Such a step may
+   call the host API directly, provided it sends a fixed message and every
+   interpolated value is validated in the step first.
+   `autoducks-update.yml`'s failure notice and `autoducks-product.yml`'s
+   watchdog are the two instances; both validate their issue number with
+   `[[ =~ ^[0-9]+$ ]]` before it reaches the command.
+
+A watchdog that grows a caller-controlled message body is no longer a
+watchdog — move it into a provider.
 
 ---
 

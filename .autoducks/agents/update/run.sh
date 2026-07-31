@@ -481,13 +481,17 @@ update::pr_body() {
   printf '%s' "$body"
 }
 
-# update::auto_merge_eligible AUTO_MERGE_CFG BUMP_KIND HAS_BREAKING(0/1) HAS_DRIFT(0/1) CHECKS_OK(0/1)
+# update::auto_merge_eligible AUTO_MERGE_CFG BUMP_KIND HAS_BREAKING(0/1) HAS_DRIFT(0/1)
+#
+# Took a CHECKS_OK argument until it was removed: verify-machinery failure
+# discards the branch and exits, so the value was provably 1 at the only call
+# site and the gate read as a live safety check that could never fire. The real
+# gate is GitHub's — see the call site.
 update::auto_merge_eligible() {
-  local cfg="$1" bump="$2" has_breaking="$3" has_drift="$4" checks_ok="$5"
+  local cfg="$1" bump="$2" has_breaking="$3" has_drift="$4"
   [[ "$cfg" == "off" ]] && return 1
   [[ "$has_breaking" == "1" ]] && return 1
   [[ "$has_drift" == "1" ]] && return 1
-  [[ "$checks_ok" == "1" ]] || return 1
   case "$cfg" in
     patch) [[ "$bump" == "patch" ]] ;;
     minor) [[ "$bump" == "patch" || "$bump" == "minor" ]] ;;
@@ -647,7 +651,7 @@ update::main() {
       # Only say it once per version. The scheduled cycle re-runs weekly while an
       # update PR sits open, and this posted the same line every time — a PR left
       # open for a quarter collected a dozen identical comments.
-      _seen=""
+      local _seen=""
       _seen="$(its::list_comments "$reason" 2>/dev/null \
         | jq -r --arg m "$UPDATE_AVAILABLE_MARKER$target_sha" \
             '[.[] | select((.body // "") | contains($m))] | length' 2>/dev/null || echo 0)"
@@ -688,11 +692,15 @@ ${UPDATE_AVAILABLE_MARKER}${target_sha}" || true
     exit 1
   fi
 
-  local drift_paths drift_section drift_unknown=0
+  local drift_paths drift_section drift_unknown=0 drift_rc=0
   drift_paths="$(mktemp)"
-  update::detect_drift "$previous_sha" "$pre_update_dir" >"$drift_paths" || {
-    [[ "$?" -eq 2 ]] && drift_unknown=1
-  }
+  update::detect_drift "$previous_sha" "$pre_update_dir" >"$drift_paths" || drift_rc=$?
+  # Any non-zero means "could not determine". 2 is the documented signal, but an
+  # unexpected code has to fail closed as well: the previous form tested $? inside
+  # a `|| { ... }` group, so a third exit code made the group itself fail and
+  # set -e killed the run before any update::report_* call could fire — the exact
+  # silent failure the Observability constraint exists to prevent.
+  if [[ "$drift_rc" -ne 0 ]]; then drift_unknown=1; fi
 
   # "Could not determine" is not "none". Treated as none, a rate-limited fetch
   # would let on_drift=abort pass and auto-merge overwrite a consumer's local
@@ -724,9 +732,7 @@ ${UPDATE_AVAILABLE_MARKER}${target_sha}" || true
   fi
 
   local verify_output; verify_output="$(mktemp)"
-  local checks_ok=1
   if ! update::run_verify "$verify_output"; then
-    checks_ok=0
     update::discard_branch "$branch"
     update::report_failure "\`verify-machinery.sh\` failed after applying v${target_version}:
 
@@ -777,6 +783,11 @@ No PR was opened and no commit was made; the update branch was discarded."
     else
       update::deliver_commit "$branch" "$AUTODUCKS_BASE_BRANCH" "$target_version"
       git push origin "HEAD:refs/heads/$AUTODUCKS_BASE_BRANCH"
+      # deliver_commit pushes the branch because the PR path needs it; this path
+      # does not. Without this the branch outlives the cycle — apply_branch clears
+      # a stale ref on the next run, so it self-healed, but a commit-mode repo
+      # carried one visible orphan branch between cycles.
+      git::delete_branch "$branch" 2>/dev/null || true
       update::report_success "Pushed \`$title\` directly to \`$AUTODUCKS_BASE_BRANCH\` (mode: commit)."
       exit 0
     fi
@@ -791,14 +802,14 @@ No PR was opened and no commit was made; the update branch was discarded."
     its::add_label "$pr_number" "Autoducks:breaking" || true
   fi
 
-  # checks_ok is 1 at this point on every path that reaches here — the only
-  # assignment to 0 is followed by `exit 1` — so the gate inside
-  # auto_merge_eligible was dead and read as a live safety check. The real gate
-  # belongs to GitHub: arm auto-merge and let the repo's own required checks
-  # hold it. Step 6 already verified the machinery; this is about the consumer's
-  # CI, which had no say before.
+  # A verify-machinery failure discards the branch and exits, so there is no path
+  # here on which the machinery check failed — auto_merge_eligible used to take a
+  # checks_ok argument that was provably 1, a gate that read live but could never
+  # fire. The real gate belongs to GitHub: arm auto-merge and let the repo's own
+  # required checks hold it. Step 6 verified the machinery; this is about the
+  # consumer's CI, which had no say before.
   local merged="not merged"
-  if update::auto_merge_eligible "$AUTODUCKS_UPDATE_AUTO_MERGE" "$bump_kind" "$has_breaking" "$has_drift" "$checks_ok"; then
+  if update::auto_merge_eligible "$AUTODUCKS_UPDATE_AUTO_MERGE" "$bump_kind" "$has_breaking" "$has_drift"; then
     if git::merge_pr "$pr_number" auto; then
       merged="auto-merge armed"
     else

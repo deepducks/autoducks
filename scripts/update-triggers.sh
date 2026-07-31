@@ -439,6 +439,49 @@ patch_update_cron() {
   echo "  baked update schedule ($bn)"
 }
 
+# ── Bake metarepo.sync_schedule into autoducks-metarepo-sync.yml ────
+# Modeled line-for-line on patch_product_cron. Gated on `metarepo.enabled`
+# rather than an `enabled` key of its own: the poll only means anything in a
+# metarepo, and a single-repo install should not carry a live timer for it.
+patch_metarepo_sync_cron() {
+  local bn="autoducks-metarepo-sync.yml"
+  local runtime="$RUNTIME_DIR/$bn"
+  if [[ ! -f "$runtime" ]]; then
+    echo "update-triggers: missing $runtime" >&2
+    exit 1
+  fi
+  local enabled cron
+  # NOTE: jq's `//` alternative operator treats `false` like `null`, so this
+  # tests the value explicitly rather than leaning on `//`.
+  enabled="$(jq -r 'if .metarepo.enabled == true then "true" else "false" end' "$CONFIG")"
+  cron="$(jq -r '.metarepo.sync_schedule // "17 * * * *"' "$CONFIG")"
+  if [[ "$enabled" == "false" ]]; then
+    awk '
+      /^  schedule:$/ { getline; next }
+      { print }
+    ' "$runtime" > "$runtime.tmp"
+  elif grep -q '^  schedule:$' "$runtime"; then
+    local cron_line="    - cron: '${cron}'"
+    awk -v line="$cron_line" '
+      /^    - cron:/ { print line; next }
+      { print }
+    ' "$runtime" > "$runtime.tmp"
+  else
+    # Re-enabling after a prior disabled run: the `schedule:` trigger was
+    # removed outright, so reinsert it right after `on:` rather than only
+    # rewriting an existing cron line.
+    local cron_line="    - cron: '${cron}'"
+    awk -v line="$cron_line" '
+      /^on:$/ { print; print "  schedule:"; print line; next }
+      { print }
+    ' "$runtime" > "$runtime.tmp"
+  fi
+  mv "$runtime.tmp" "$runtime"
+  mkdir -p "$WORKFLOW_DIR"
+  cp "$runtime" "$WORKFLOW_DIR/$bn"
+  echo "  baked metarepo sync schedule ($bn)"
+}
+
 # ── Splice a rendered guard into a workflow file, then mirror it ─────
 apply_file() { # $1 = basename, $2.. = render function + args
   local bn="$1"; shift
@@ -478,5 +521,6 @@ apply_file autoducks-product.yml   render_product
 patch_product_cron
 apply_file autoducks-update.yml    render_update
 patch_update_cron
+patch_metarepo_sync_cron
 
 echo "Done. Commit the modified .github/workflows/ and .autoducks/runtimes/ files."

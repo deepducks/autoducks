@@ -6,7 +6,10 @@ set -euo pipefail
 #
 # Input:  COMMENT_BODY env var (or stdin)
 # Output: key=value lines to stdout
-#   command          — canonical verb: architect, engineer, execute, fix, revert, close, review, rework, defer, resolve
+#   command          — canonical verb: any name in agent-roster.sh's
+#                       AUTODUCKS_AGENTS (architect, engineer, execute, fix,
+#                       revert, close, review, rework, defer, resolve, triage,
+#                       merge, update)
 #   original_command — the raw verb the user typed, before alias normalization
 #   model            — claude-opus-5, claude-sonnet-5, claude-haiku-4-5, or empty
 #   effort           — off, low, medium, high, max, or empty
@@ -55,6 +58,12 @@ BODY="${COMMENT_BODY:-$(cat)}"
 
 _CONFIG_FILE="${AUTODUCKS_CONFIG:-.autoducks/autoducks.json}"
 
+# AUTODUCKS_AGENTS / AUTODUCKS_VERB_SYNONYMS — see agent-roster.sh. The
+# roster lives in one file so normalize_verb() and the install-time guard
+# generator cannot disagree about which agents exist.
+_PD_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_PD_SH_DIR/agent-roster.sh"
+
 # Command namespace (validated; falls back to empty — bare short forms — on
 # garbage). NAMESPACE = command with a single optional leading '/' stripped.
 NAMESPACE=""
@@ -93,15 +102,13 @@ TRAILING_BODY=""
 # Built-in synonyms → canonical verb. Custom aliases (config `triggers.<agent>[]`)
 # resolve through the same map keyed by config key.
 normalize_verb() {
-  local v="$1"
-  case "$v" in
-    design)   v="architect" ;;
-    tactics)  v="engineer"  ;;
-    run|work) v="execute"   ;;
-  esac
+  local v="$1" _syn
+  for _syn in "${AUTODUCKS_VERB_SYNONYMS[@]}"; do
+    if [[ "$v" == "${_syn%%:*}" ]]; then v="${_syn#*:}"; break; fi
+  done
   if [[ -f "$_CONFIG_FILE" ]] && command -v jq &>/dev/null; then
     local _agent _alias
-    for _agent in architect engineer execute fix revert close review rework defer resolve agent; do
+    for _agent in "${AUTODUCKS_AGENTS[@]}"; do
       while IFS= read -r _alias; do
         if [[ -n "$_alias" && "$v" == "$_alias" ]]; then
           v="$_agent"
@@ -115,10 +122,11 @@ normalize_verb() {
 }
 
 is_canonical_verb() {
-  case "$1" in
-    architect|engineer|execute|fix|revert|close|review|rework|defer|resolve) return 0 ;;
-    *) return 1 ;;
-  esac
+  local _agent
+  for _agent in "${AUTODUCKS_AGENTS[@]}"; do
+    if [[ "$1" == "$_agent" ]]; then return 0; fi
+  done
+  return 1
 }
 
 # Verbs that can appear in a #auto: chain: they MUST have a workflow_dispatch

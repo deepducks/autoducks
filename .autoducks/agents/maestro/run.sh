@@ -159,7 +159,7 @@ deliver_children() {
     [[ -n "${unresolved_modules[$m]:-}" ]] && continue
     slug="$(metarepo::slug_for_path "$m" 2>/dev/null || true)"
     [[ -n "$slug" ]] || continue
-    [[ "$(git::submodule_protection "$slug")" == "true" ]] || continue
+    [[ "$(metarepo::protected_for_path "$m")" == "true" ]] || continue
     tok="$(git::resolve_token "$slug")"
     pr="$(GH_TOKEN="$tok" gh pr list --repo "$slug" --head "$feature_branch" --state open --json number,url --jq '.[0].url // empty' 2>/dev/null || true)"
     [[ -n "$pr" ]] || continue
