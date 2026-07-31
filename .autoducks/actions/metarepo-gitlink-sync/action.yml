@@ -1,0 +1,81 @@
+name: 'Autoducks: metarepo gitlink sync'
+description: >-
+  Advance the parent's gitlinks to each child's default-branch tip before an
+  agent starts, so no agent works against a stale child. Inert outside metarepo
+  mode.
+
+inputs:
+  token:
+    description: 'Token with contents:write on the parent (app IAT, PAT, or GITHUB_TOKEN)'
+    required: true
+  repo:
+    description: 'owner/name of the parent repository'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Sync child gitlinks
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ inputs.repo }}
+      run: |
+        set -euo pipefail
+
+        # Cheap gate before anything is cloned. A single-repo install has no
+        # .gitmodules and pays one file test.
+        if [[ ! -f .gitmodules ]]; then
+          exit 0
+        fi
+        if [[ "$(jq -r 'if .metarepo.enabled == true then "true" else "false" end' \
+                   .autoducks/autoducks.json 2>/dev/null || echo false)" != "true" ]]; then
+          exit 0
+        fi
+
+        # The reconcile runs in a throwaway clone, never in this workspace.
+        #
+        # metarepo::reconcile_gitlinks does `git checkout -B "$branch"`, which
+        # would destroy the working tree of the two agent workflows that check
+        # out something other than the default branch — the resolver (the PR
+        # head ref) and the developer (inputs.base_branch). Cloning keeps this
+        # step safe no matter what the calling workflow checked out.
+        tmp="$(mktemp -d)"
+        trap 'rm -rf "$tmp"' EXIT
+
+        default_branch="$(gh api "repos/$REPO" --jq '.default_branch' 2>/dev/null || true)"
+        if [[ -z "$default_branch" ]]; then
+          echo "::warning::metarepo-gitlink-sync: cannot resolve the default branch of $REPO — skipping" >&2
+          exit 0
+        fi
+
+        if ! git clone --quiet --depth 1 --no-recurse-submodules \
+               --branch "$default_branch" \
+               "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$tmp/parent"; then
+          echo "::warning::metarepo-gitlink-sync: could not clone $REPO — skipping" >&2
+          exit 0
+        fi
+
+        # A failure here must never take the agent down with it: the worst case
+        # is that the agent runs against the same pin it would have had anyway.
+        if ! ( cd "$tmp/parent" && REPO="$REPO" \
+               bash .autoducks/core/orchestration/sync-child-gitlinks.sh ); then
+          echo "::warning::metarepo-gitlink-sync: reconcile failed — the agent continues on the current pin" >&2
+          exit 0
+        fi
+
+        # Pull the result into this workspace, but only when we are actually on
+        # the branch that just moved. The resolver sits on a PR head and the
+        # developer may sit on a wave base; resetting either to the default
+        # branch would silently retarget the agent.
+        current="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+        if [[ "$current" != "$default_branch" ]]; then
+          exit 0
+        fi
+        git fetch --quiet origin "$default_branch" 2>/dev/null || exit 0
+        before="$(git rev-parse HEAD 2>/dev/null || echo "")"
+        git reset --quiet --hard "origin/$default_branch" 2>/dev/null || exit 0
+        after="$(git rev-parse HEAD 2>/dev/null || echo "")"
+        if [[ -n "$before" && "$before" != "$after" ]]; then
+          echo "::notice::metarepo-gitlink-sync: workspace advanced $before → $after before the agent ran"
+        fi

@@ -41,6 +41,15 @@ jobs:
           echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
           echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
+      # Bring the parent's gitlinks up to each child's default-branch tip before
+      # the agent reads the tree (#170). The reconcile runs in a throwaway clone,
+      # so it is safe whichever ref this workflow checked out. Inert outside
+      # metarepo mode.
+      - name: Sync child gitlinks
+        uses: ./.autoducks/actions/metarepo-gitlink-sync
+        with:
+          token: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          repo: ${{ github.repository }}
       - name: Authorize
         id: authz
         run: bash .autoducks/core/security/authorize.sh

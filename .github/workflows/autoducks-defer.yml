@@ -84,6 +84,15 @@ jobs:
               github.event.issue.pull_request != null && format('refs/pull/{0}/head', github.event.issue.number) ||
               ''
             }}
+      # Bring the parent's gitlinks up to each child's default-branch tip before
+      # the agent reads the tree (#170). The reconcile runs in a throwaway clone,
+      # so it is safe whichever ref this workflow checked out. Inert outside
+      # metarepo mode.
+      - name: Sync child gitlinks
+        uses: ./.autoducks/actions/metarepo-gitlink-sync
+        with:
+          token: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          repo: ${{ github.repository }}
       # Pin the machinery to the pipeline's cut commit BEFORE the agent runs, so
       # an agent editing .autoducks on its own branch cannot corrupt the scripts
       # that run its build, and the machinery cannot drift across waves/reviews

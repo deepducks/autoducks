@@ -36,6 +36,7 @@
     "enabled": false,
     "serialize_per_module": false,
     "protected_submodule_strategy": "auto_merge",
+    "sync_schedule": "17 * * * *",
     "delivery_check": {
       "check_name": "Autoducks: Children delivered",
       "timeout_minutes": 45,
