@@ -45,6 +45,13 @@ a clean working tree and no existing tag for the target version.
   --major, --minor, --patch  Force the bump kind. Without one, the kind is
                               inferred from commit subjects since the last
                               v* tag and printed for confirmation.
+  --pr                       Put the bump on a release/vX branch and open a
+                              PR instead of pushing to the default branch.
+                              Required when the default branch enforces its
+                              checks on admins. Does not tag.
+  --tag                      Tag the current default-branch HEAD with
+                              v<VERSION> and push it. Run after the --pr
+                              pull request has merged.
   --dry-run                  Print the computed version, the changelog
                               section, and the tag; mutate nothing.
 EOF
@@ -79,13 +86,15 @@ release::assert_branch_pushable() {
     admins, so the release commit cannot be pushed directly and this would
     leave a local commit and tag behind.
 
-    Cut the release through a pull request instead:
+    Cut it through a pull request instead — two steps, both run from '$branch':
 
-      git checkout -b release/$2
-      # re-run: scripts/release.sh writes VERSION + CHANGELOG on this branch
-      gh pr create --fill && gh pr merge --squash --auto
+      scripts/release.sh --pr $([[ -n "${3:-}" ]] && printf -- '--%s' "$3")
+      # review and merge the PR it opens, then:
+      git pull --ff-only && scripts/release.sh --tag
 
-    then tag the merged commit on $branch and push the tag."
+    (An earlier version of this message told you to create the release branch
+    by hand and re-run the script on it. That could not work: the run refuses
+    on any branch but the default one.)"
 }
 
 # release::current_version — trimmed contents of $AUTODUCKS_ROOT/VERSION
@@ -243,7 +252,7 @@ release::insert_changelog_section() {
 }
 
 release::main() {
-  local kind="" dry_run=false
+  local kind="" dry_run=false pr_mode=false tag_only=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -253,8 +262,10 @@ release::main() {
         shift
         ;;
       --dry-run) dry_run=true; shift ;;
+      --pr) pr_mode=true; shift ;;
+      --tag) tag_only=true; shift ;;
       -h|--help) release::usage; return 0 ;;
-      *) release::die "unknown option: $1 (usage: release.sh [--major|--minor|--patch] [--dry-run])" ;;
+      *) release::die "unknown option: $1 (usage: release.sh [--major|--minor|--patch] [--pr|--tag] [--dry-run])" ;;
     esac
   done
 
@@ -270,6 +281,24 @@ release::main() {
 
   [[ -z "$(git status --porcelain)" ]] || \
     release::die "refusing — working tree is dirty; commit or stash your changes before releasing"
+
+  # --tag: the release PR has merged, VERSION on the default branch is already the
+  # new one, and all that is left is the tag. Tags are not branch-protected, so
+  # this half always works even when a direct branch push does not.
+  if [[ "$tag_only" == "true" ]]; then
+    local tag_version tag_name
+    tag_version="$(release::current_version)" || release::die "could not read a version from $AUTODUCKS_ROOT/VERSION"
+    tag_name="v$tag_version"
+    git rev-parse -q --verify "refs/tags/$tag_name" >/dev/null 2>&1 && \
+      release::die "refusing — tag '$tag_name' already exists"
+    git fetch -q origin "$default_branch" 2>/dev/null || true
+    [[ "$(git rev-parse HEAD)" == "$(git rev-parse "origin/$default_branch" 2>/dev/null)" ]] || \
+      release::die "refusing — local $default_branch is not at origin/$default_branch; pull first so the tag lands on the merged release commit"
+    git tag "$tag_name" || release::die "git tag failed"
+    git push origin "$tag_name" || release::die "git push of tag '$tag_name' failed"
+    echo "release: tagged $tag_name at $(git rev-parse --short HEAD)"
+    return 0
+  fi
 
   local current
   current="$(release::current_version)" || release::die "could not read a version from $AUTODUCKS_ROOT/VERSION"
@@ -303,8 +332,9 @@ release::main() {
 
   # Step 5 commits, tags, and only then pushes the branch. If the branch push is
   # going to be refused, finding out there leaves a local release commit and tag
-  # behind that the operator has to unwind by hand. Check first.
-  release::assert_branch_pushable "$default_branch" "$tag"
+  # behind that the operator has to unwind by hand. Check first — unless --pr,
+  # which never pushes to the default branch at all.
+  [[ "$pr_mode" == "true" ]] || release::assert_branch_pushable "$default_branch" "$tag"
 
   local date
   date="$(date -u +%Y-%m-%d)"
@@ -326,6 +356,30 @@ release::main() {
 
   printf '%s\n' "$next" > "$AUTODUCKS_ROOT/VERSION"
   release::insert_changelog_section "$(changelog::_file)" "$section"
+
+  # --pr: put the version bump on its own branch and open a PR instead of pushing
+  # to a protected default branch. The tag is NOT created here — it must land on
+  # the merged commit, which does not exist yet. Finish with `release.sh --tag`.
+  if [[ "$pr_mode" == "true" ]]; then
+    local rel_branch="release/$tag"
+    git checkout -q -b "$rel_branch" || release::die "could not create branch '$rel_branch'"
+    git add "$AUTODUCKS_ROOT/VERSION" "$(changelog::_file)" || release::die "git add failed"
+    git commit -q -m "chore(release): $tag" || release::die "git commit failed"
+    git push -q -u origin "$rel_branch" || release::die "git push of '$rel_branch' failed"
+    gh pr create --base "$default_branch" --head "$rel_branch" \
+      --title "chore(release): $tag" \
+      --body "Version bump and changelog for \`$tag\`.
+
+Cut with \`scripts/release.sh --pr\`, because the default branch enforces its
+required checks on admins and a release commit cannot be pushed to it directly.
+
+After this merges, run \`scripts/release.sh --tag\` on the default branch to
+create and push \`$tag\` at the merged commit." \
+      >&2 || release::die "gh pr create failed (branch '$rel_branch' is pushed; open the PR by hand)"
+    echo "release: opened the release PR for $tag on '$rel_branch'"
+    echo "release: merge it, then run 'scripts/release.sh --tag' on $default_branch"
+    return 0
+  fi
 
   git add "$AUTODUCKS_ROOT/VERSION" "$(changelog::_file)" || release::die "git add failed"
   git commit -q -m "chore(release): $tag" || release::die "git commit failed"
