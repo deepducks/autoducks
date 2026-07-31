@@ -51,8 +51,8 @@ the metarepo's own; the children keep their own `.autoducks` (or none).
   "protected_submodule_strategy": "auto_merge",   // or "required_check"
   "auth": { "mode": "single_pat" },                // single_pat | per_owner_pat | github_app
   "submodules": {
-    "child-a": { "external_cycle": true,  "protected": null },  // public, own cycle
-    "child-b": { "external_cycle": false, "protected": null }   // private, meta-only
+    "child-a": { "protected": null },   // key must match a .gitmodules path
+    "child-b": { "protected": null }
   }
 },
 "orchestrator": { "mode": "sequential" },
@@ -60,6 +60,9 @@ the metarepo's own; the children keep their own `.autoducks` (or none).
 ```
 
 - `protected: null` → detected at runtime from the child's branch protection.
+- Every key under `submodules` must name a path declared in `.gitmodules`.
+  `scripts/setup.sh` check 14 fails on a key with no submodule behind it, so a
+  retired child cannot leave live-looking config behind.
 - Enabling metarepo mode **forces `orchestrator.mode: sequential`** regardless of
   config (backpressured execution is mandatory — see "How it works").
 
@@ -254,7 +257,6 @@ same check assertion.
 | `metarepo.enabled` | bool | Master switch; forces sequential orchestration. |
 | `metarepo.protected_submodule_strategy` | `auto_merge` \| `required_check` | How protected children merge. |
 | `metarepo.auth.mode` | `single_pat` \| `per_owner_pat` \| `github_app` | Credential resolution. |
-| `metarepo.submodules.<path>.external_cycle` | bool | Child has its own feature cycle (public OSS). |
 | `metarepo.submodules.<path>.protected` | bool \| null | `null` = detect at runtime. |
 | `metarepo.check_recovery.assert_attempts` | int | Times delivery re-checks that a child PR has any check run (default 3). |
 | `metarepo.check_recovery.assert_interval_seconds` | int | Wait between those attempts (default 5). |

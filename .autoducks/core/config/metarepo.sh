@@ -348,6 +348,44 @@ metarepo::validate_modules() {
   return 0
 }
 
+# metarepo::stale_submodule_keys [CONFIG] → every `metarepo.submodules` key with
+# no matching path in .gitmodules, one per line. Exit 1 when any is found.
+#
+# `metarepo.submodules` is keyed by submodule path, but nothing tied the two
+# together, so a retired child left a key behind that read like live config
+# (`autoducks-cli` outlived its submodule by four months). .gitmodules is the
+# same source of truth validate_modules() uses.
+metarepo::stale_submodule_keys() {
+  local cfg="${1:-}"
+  [[ -z "$cfg" ]] && cfg="${AUTODUCKS_ROOT:-.autoducks}/autoducks.json"
+  local known stale=() k
+  known="$(metarepo::submodule_paths)"
+  while IFS= read -r k; do
+    [[ -z "$k" ]] && continue
+    grep -qxF "$k" <<< "$known" || stale+=("$k")
+  done < <(jq -r '.metarepo.submodules // {} | keys[]' "$cfg" 2>/dev/null)
+  [[ "${#stale[@]}" -eq 0 ]] && return 0
+  printf '%s\n' "${stale[@]}"
+  return 1
+}
+
+# metarepo::unconfigured_submodules [CONFIG] → every .gitmodules path with no
+# `metarepo.submodules` entry, one per line. Advisory: every key is optional and
+# defaults apply, but an explicit entry documents the child's delivery policy.
+metarepo::unconfigured_submodules() {
+  local cfg="${1:-}"
+  [[ -z "$cfg" ]] && cfg="${AUTODUCKS_ROOT:-.autoducks}/autoducks.json"
+  local configured p missing=()
+  configured="$(jq -r '.metarepo.submodules // {} | keys[]' "$cfg" 2>/dev/null || true)"
+  while IFS= read -r p; do
+    [[ -z "$p" ]] && continue
+    grep -qxF "$p" <<< "$configured" || missing+=("$p")
+  done < <(metarepo::submodule_paths)
+  [[ "${#missing[@]}" -eq 0 ]] && return 0
+  printf '%s\n' "${missing[@]}"
+  return 1
+}
+
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   case "${1:-}" in
     paths)  metarepo::submodule_paths ;;
@@ -355,8 +393,10 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     owner)  metarepo::owner_for_path "${2:?path required}" ;;
     modules) metarepo::modules_from_body "${2:-}" ;;
     delivered) metarepo::delivered_children_from_body "${2:-}" ;;
+    stale-keys)   metarepo::stale_submodule_keys "${2:-}" ;;
+    unconfigured) metarepo::unconfigured_submodules "${2:-}" ;;
     --help|*)
-      echo "Usage: metarepo.sh {paths|slug PATH|owner PATH}"
+      echo "Usage: metarepo.sh {paths|slug PATH|owner PATH|stale-keys [CONFIG]|unconfigured [CONFIG]}"
       echo "  Config helpers mapping a submodule path -> child repo slug via .gitmodules" ;;
   esac
 fi
