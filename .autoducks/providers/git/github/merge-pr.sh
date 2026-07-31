@@ -33,12 +33,26 @@ git::_resolve_merge_method() {
 #   2 — the resolved method is not allowed on the repo (configuration error;
 #       do NOT rebase-retry, it won't help)
 #   1 — any other failure (e.g. branch behind / conflict; rebase-retry may help)
+# An optional second argument "auto" arms GitHub's auto-merge instead of merging
+# now, so the repo's own required checks gate the merge. Callers that merge
+# machinery into a consumer repo want this: without it the merge lands before
+# any CI the repo configured has a chance to run.
 git::merge_pr() {
   local pr_number="$1"
+  local when="${2:-now}"
   local method
   method="$(git::_resolve_merge_method)"
 
-  if gh pr merge "$pr_number" --repo "$REPO" --"$method" >/dev/null 2>&1; then
+  local -a _auto=()
+  [[ "$when" == "auto" ]] && _auto=(--auto)
+
+  if gh pr merge "$pr_number" --repo "$REPO" --"$method" "${_auto[@]}" >/dev/null 2>&1; then
+    return 0
+  fi
+  # A repo with auto-merge disabled rejects --auto; fall through to an immediate
+  # merge rather than leaving the PR untouched with no explanation.
+  if [[ "$when" == "auto" ]] && gh pr merge "$pr_number" --repo "$REPO" --"$method" >/dev/null 2>&1; then
+    echo "::notice::merge_pr: auto-merge is not available on $REPO — merged #$pr_number immediately." >&2
     return 0
   fi
 

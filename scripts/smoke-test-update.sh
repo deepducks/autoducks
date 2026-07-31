@@ -19,15 +19,9 @@
 #      the documented contract (see autoducks-docs' reference/updates.mdx).
 #   4. Run it again against the same target and assert no second PR opens.
 #
-# NOTE — THIS EXERCISES A DOCUMENTED, NOT YET IMPLEMENTED, CONTRACT
-# -------------------------------------------------------------------
-# .autoducks/agents/update/run.sh does not exist yet (only defaults.json
-# does, unlike close/maestro/revert's run.sh siblings). Until it lands, this
-# script fails cleanly at the "Driving the updater" step with the observed
-# error, rather than faking success. It is written now, against the
-# documented contract (reference/updates.mdx, the Autoducks:update label in
-# setup.sh, and the update workflow's own env-var contract), so it goes
-# green the moment run.sh is implemented.
+# The update agent it drives (.autoducks/agents/update/run.sh) is implemented;
+# this header previously said it did not exist, which stopped being true and
+# was printed verbatim by --help.
 #
 # WARNING — CREATES A REAL GITHUB REPOSITORY
 # -------------------------------------------
@@ -63,9 +57,10 @@
 #     matching the target ref, and `previous` carrying the pre-update triple.
 #   - The locally edited `security-guidelines.md` survives untouched.
 #   - The stale `.github/workflows/autoducks-ghost.yml` mirror is pruned.
-#   - The locally edited vendored machinery file is reported in the PR
-#     body's drift section, and its local edit survives on the PR branch
-#     (on_drift default is "warn": proceed, call it out — not overwrite).
+#   - The locally edited vendored machinery file is replaced by the update and
+#     reported in the PR body's drift section. Resolving drift is out of scope
+#     by design: install.sh rewrites .autoducks/ wholesale, and on_drift "warn"
+#     means proceed and say so — not preserve the edit.
 #   - Running the updater again against the same target opens no second PR.
 # =============================================================================
 
