@@ -55,6 +55,39 @@ release::die() {
   exit 1
 }
 
+# release::assert_branch_pushable BRANCH TAG — die when a direct push to BRANCH will
+# be refused by branch protection.
+#
+# The release commit goes straight to the default branch. That works only while
+# admins can bypass protection; with enforce_admins on, the push is rejected and
+# the tag is already made locally by then. Advisory only: an unreadable
+# protection API (no admin scope, or no protection at all) is not a failure.
+release::assert_branch_pushable() {
+  local branch="$1" slug protection
+  slug="$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)"
+  [[ -n "$slug" ]] || return 0
+
+  protection="$(gh api "repos/$slug/branches/$branch/protection" 2>/dev/null || true)"
+  [[ -n "$protection" ]] || return 0
+
+  local enforced checks
+  enforced="$(printf '%s' "$protection" | jq -r '.enforce_admins.enabled // false')"
+  checks="$(printf '%s' "$protection" | jq -r '[.required_status_checks.contexts // []] | flatten | length')"
+  [[ "$enforced" == "true" && "${checks:-0}" -gt 0 ]] || return 0
+
+  release::die "refusing — '$branch' requires status checks and enforces them on
+    admins, so the release commit cannot be pushed directly and this would
+    leave a local commit and tag behind.
+
+    Cut the release through a pull request instead:
+
+      git checkout -b release/$2
+      # re-run: scripts/release.sh writes VERSION + CHANGELOG on this branch
+      gh pr create --fill && gh pr merge --squash --auto
+
+    then tag the merged commit on $branch and push the tag."
+}
+
 # release::current_version — trimmed contents of $AUTODUCKS_ROOT/VERSION
 release::current_version() {
   local f="$AUTODUCKS_ROOT/VERSION"
@@ -267,6 +300,11 @@ release::main() {
   local tag="v$next"
   git rev-parse -q --verify "refs/tags/$tag" >/dev/null 2>&1 && \
     release::die "refusing — tag '$tag' already exists; delete it or bump a different component"
+
+  # Step 5 commits, tags, and only then pushes the branch. If the branch push is
+  # going to be refused, finding out there leaves a local release commit and tag
+  # behind that the operator has to unwind by hand. Check first.
+  release::assert_branch_pushable "$default_branch" "$tag"
 
   local date
   date="$(date -u +%Y-%m-%d)"
