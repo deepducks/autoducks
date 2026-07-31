@@ -405,22 +405,14 @@ metarepo::stale_submodule_keys() {
   return 1
 }
 
-# metarepo::unconfigured_submodules [CONFIG] → every .gitmodules path with no
-# `metarepo.submodules` entry, one per line. Advisory: every key is optional and
-# defaults apply, but an explicit entry documents the child's delivery policy.
-metarepo::unconfigured_submodules() {
-  local cfg="${1:-}"
-  [[ -z "$cfg" ]] && cfg="${AUTODUCKS_ROOT:-.autoducks}/autoducks.json"
-  local configured p missing=()
-  configured="$(jq -r '.metarepo.submodules // {} | keys[]' "$cfg" 2>/dev/null || true)"
-  while IFS= read -r p; do
-    [[ -z "$p" ]] && continue
-    grep -qxF "$p" <<< "$configured" || missing+=("$p")
-  done < <(metarepo::submodule_paths)
-  [[ "${#missing[@]}" -eq 0 ]] && return 0
-  printf '%s\n' "${missing[@]}"
-  return 1
-}
+# NOTE: there is deliberately no "submodule declared in .gitmodules but absent
+# from metarepo.submodules" check. The set of children is read from .gitmodules
+# by every consumer that needs it (metarepo::submodule_paths — the access gate,
+# sync-child-gitlinks, submodule-list-changed, parse-plan.py). `metarepo.submodules`
+# is an *override map*, not a registry: the only key it carries is `protected`,
+# whose default `null` means "detect at runtime". So `{"child": {"protected": null}}`
+# states nothing that is not already true, and nudging operators to write it would
+# manufacture exactly the kind of inert config #120 was filed about.
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   case "${1:-}" in
@@ -430,10 +422,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     modules) metarepo::modules_from_body "${2:-}" ;;
     delivered) metarepo::delivered_children_from_body "${2:-}" ;;
     stale-keys)   metarepo::stale_submodule_keys "${2:-}" ;;
-    unconfigured) metarepo::unconfigured_submodules "${2:-}" ;;
     protected)    metarepo::protected_for_path "${2:?path required}" ;;
     --help|*)
-      echo "Usage: metarepo.sh {paths|slug PATH|owner PATH|protected PATH|stale-keys [CONFIG]|unconfigured [CONFIG]}"
+      echo "Usage: metarepo.sh {paths|slug PATH|owner PATH|protected PATH|stale-keys [CONFIG]}"
       echo "  Config helpers mapping a submodule path -> child repo slug via .gitmodules" ;;
   esac
 fi

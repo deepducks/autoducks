@@ -39,8 +39,9 @@
 #      .autoducks/VERSION; when enabled && mode != off, requires an identity
 #      capable of pushing workflow files (vars.AUTODUCKS_APP or AUTODUCKS_PAT)
 #  14. Metarepo submodule config — when metarepo.enabled=true, every
-#      metarepo.submodules key must name a path declared in .gitmodules; a key
-#      with no submodule behind it fails, a submodule with no key is advisory
+#      metarepo.submodules key must name a path declared in .gitmodules. There is
+#      no inverse check: the child set is read from .gitmodules, and this block is
+#      an override map, not a registry
 #  15. Custom agent discovery — runs discover-agents.sh list, prints the
 #      discovered agents, and fails on a non-empty errors[]
 # =============================================================================
@@ -730,11 +731,10 @@ else
     .gitmodules. Remove the stale key(s), or add the submodule back."
   fi
 
-  if ! MISSING=$(AUTODUCKS_ROOT=".autoducks" metarepo::unconfigured_submodules); then
-    manual "Submodule(s) in .gitmodules with no metarepo.submodules entry: $(printf '%s' "$MISSING" | tr '\n' ' ')
-    They still work — every key is optional and defaults apply — but an
-    explicit entry documents the child's delivery policy."
-  fi
+  # No inverse check on purpose. The child set comes from .gitmodules, not from
+  # here; metarepo.submodules is an override map whose only key, `protected`,
+  # defaults to "detect at runtime". Asking for an entry per submodule would ask
+  # for config that states nothing.
 fi
 echo ""
 
