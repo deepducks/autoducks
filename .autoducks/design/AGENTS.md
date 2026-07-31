@@ -16,6 +16,7 @@ This document is the canonical reference for the autoducks agent architecture: t
 - **`effort:`** — LLM effort override (`off`, `low`, `medium`, `high`, `max`). Bare aliases also work positionally. ("effort" follows the cross-provider convention — OpenAI `reasoning_effort`, Anthropic `output_config.effort`.)
 - **`turns:`** — `max_turns` override (1–1000). `turns=N`, `max-turns=N`, and `max_turns=N` are also accepted.
 - **`#auto:`** — agent chaining: `+`-separated verbs queued to run after this agent finishes, e.g. `/architect #auto:engineer+execute`. Verbs are deduplicated and capped at 5; a verb can appear at most once in a chain (loop protection).
+- **`/agent <name>`** — a positional, not a `model:`/`effort:`-style, capture: the token immediately after `agent` is always read as a custom agent name (`^[a-z0-9][a-z0-9-]{0,63}$`) and never parsed as one of the aliases above, so `/agent sonnet` looks for a custom agent definition literally named `sonnet`, not the `sonnet` model alias. `/agent` alone (no name), or a name that resolves to nothing, posts the catalog of discovered custom agents instead of invoking one — see [Agent Lane](#agent-lane).
 
 All parsing lives in [`core/config/parse-directive.sh`](../core/config/parse-directive.sh); every downstream consumer sees canonical verbs.
 
@@ -136,7 +137,7 @@ The Engineer is **pure ITS** — it never touches git (D7).
 
 ## Utility Agents
 
-Utility agents handle recovery, cleanup, and lifecycle operations. They are not part of the planning-to-execution pipeline and have no stage labels.
+Utility agents handle recovery, cleanup, and lifecycle operations. They are not part of the planning-to-execution pipeline; most have no stage labels — the Agent lane below is the exception, carrying `Agent:running` → `Agent:done`.
 
 ### Fix Agent
 
@@ -153,6 +154,21 @@ Utility agents handle recovery, cleanup, and lifecycle operations. They are not 
 ### Update Agent
 
 **Verb:** `update` — keeps the installed machinery current. Checks `update.source_repo` (default `deepducks/autoducks`) for a newer version on the configured `channel` (`stable`/`edge`), runs every migration under [`migrations/<version>/migrate.sh`](../migrations/README.md) for versions in `(installed, target]`, and delivers the result per `update.mode`: a pull request (`pr`, the default), a direct commit (`commit`), or no-op (`off`). Fires on `update.schedule` (baked into the workflow, like `product.schedule`), plus `workflow_dispatch` and `/update` unconditionally. Detects **drift** — local edits to vendored machinery outside the consumer-owned set ([`core/config/consumer-owned.sh`](../core/config/consumer-owned.sh)) — and either warns and proceeds or aborts, per `update.on_drift`. PR-only by default (`mode: pr`); like Revert/Close, it is not part of the planning-to-execution pipeline and carries no stage labels. Security default: `OWNER`, `MEMBER`.
+
+### Agent Lane
+
+**Verb:** `agent` — runs a user-authored custom agent definition inline against an issue or PR. `/agent <name>` resolves a custom agent literally named `<name>` (see the positional-name rule in [Command surface](#command-surface)); a bare `/agent`, or a name that doesn't resolve to a known definition, posts a **catalog** comment — a `name` / `description` / `source` table of every discovered, non-shadowed agent plus any discovery errors — without ever invoking the LLM. Custom agents can be disabled repo-wide via `custom_agents.enabled: false`, checked before any definition is opened.
+
+Discovery ([`core/config/discover-agents.sh`](../core/config/discover-agents.sh)) scans four roots, **highest precedence first** — the first match for a given name wins; later roots still appear in the catalog with `shadowed: true`:
+
+1. `.autoducks/custom/agents/<name>/agent.md`
+2. `.claude/agents/<name>.md`
+3. `.agents/<name>.md`
+4. `.github/agents/<name>.md`
+
+Any roots listed in `custom_agents.roots[]` (config) are appended after root 4, in order, scanned the same way as roots 2–4 (flat `<name>.md`). A definition's frontmatter (`name`, `description`, `model`, `effort`, `max_turns`, `surface`, `tools`, `context`, `labels`) is read by a small, `eval`-free scalar/array parser — never a YAML interpreter that could execute tags. `custom_agents.agents.<name>` in `.autoducks/autoducks.json` can override a definition: `tools` from config wins over frontmatter outright (no union/intersection); `model`/`effort`/`max_turns`/`context` from frontmatter win over config. A name must match `^[a-z0-9][a-z0-9-]{0,63}$` and can never shadow a built-in verb, synonym, or configured `triggers.<agent>[]` alias — a collision is a discovery error (`reserved-name`), not a silent skip, same treatment as an invalid name, an empty body, a symlink escaping the repo root, or a definition over 64KB.
+
+The LLM step itself is restricted to read-only `git`/`gh` exploration (`git log/show/diff/status/blame/rev-parse/branch --list`, `gh issue view/list`, `gh pr view/diff/list`, `gh issue comment`) plus a writable filesystem, and has exactly one output contract: write `/tmp/agent-response.md`. All mutation happens afterward, in `post.sh`: when the working tree is unchanged, the response is posted as an issue comment and nothing else happens; when the agent changed files, `post.sh` commits them onto a fresh `agent/<name>/<issue>-<slug>` branch (see [Branch Naming](#branch-naming)) and opens a PR. That PR is **not a pipeline deliverable** — it references the triggering issue (`Ref #N`, never a closing keyword) and is left open for human review rather than auto-merged. `Agent:running` → `Agent:done` (see [Labels](#labels)) brackets the run like the pipeline agents, even though the lane sits outside the planning-to-execution pipeline.
 
 ---
 
@@ -191,8 +207,9 @@ All branches follow a predictable convention rooted in issue IDs. The prefix enc
 | Bug pipeline branch | `fix/<number>-<slug>` | `fix/57-login-crash` |
 | Task under a pipeline branch | `<feature\|fix>/<parent>-issue-<task>-<epoch>` | `feature/42-issue-43-1751941200` |
 | Fix-utility retry branch | `<feature\|fix>/<parent>-issue-<task>-fix-<epoch>` | `feature/42-issue-43-fix-1751943000` |
+| Agent lane branch | `agent/<name>/<issue>-<slug>` | `agent/sonnet/42-user-auth` |
 
-The Maestro's PR-merged re-trigger listens on both `feature/*` and `fix/*`. The fix-utility `-fix-<epoch>` suffix is unrelated to the `fix/` prefix.
+The Maestro's PR-merged re-trigger listens on both `feature/*` and `fix/*`. The fix-utility `-fix-<epoch>` suffix is unrelated to the `fix/` prefix. The Agent lane's `agent/<name>/…` branches are outside the pipeline (see [Agent Lane](#agent-lane)) and are never watched by the Maestro.
 
 ---
 
@@ -261,6 +278,8 @@ Enabling metarepo mode **forces `orchestrator.mode = sequential`** (load-config)
 | `Work:orchestrating` | Maestro is coordinating waves on this issue |
 | `Work:coding` | Developer is implementing this task |
 | `Work:done` | Work complete (task merged, or all waves finished) |
+| `Agent:running` | Agent lane is running a custom agent definition |
+| `Agent:done` | Custom agent run complete (response posted, PR opened if the tree changed) |
 
 **Case-insensitivity.** Label matching across the bash/jq machinery is case-insensitive: routing compares label names without regard to case, so a label typed or created with different casing than the canonical taxonomy above is still recognized. `setup.sh` enforces this at source — when a required label collides case-insensitively with an existing GitHub default (e.g. a repo's stock `bug` colliding with the canonical `Bug`), it renames the existing label to the canonical casing via `gh label edit`, which preserves the label's issue associations rather than creating a duplicate. This auto-rename can be opted out of with `--no-rename` (or `AUTODUCKS_LABEL_AUTORENAME=0`), in which case setup reports the collision and leaves it for manual resolution. The GitHub Actions expression layer (the `if:` guards baked by `scripts/update-triggers.sh`) has its own, separate case-insensitivity guarantee — `contains()`, `startsWith()`/`endsWith()`, and `==` are documented as case-insensitive there too — but the bash layer does not inherit that guarantee from the Actions layer, or vice versa; the two are deliberately redundant, independent protections: normalization-at-source protects the Actions `if:` guards (which only ever test machinery-created label strings), and case-insensitive comparison protects everything running in bash.
 
@@ -288,11 +307,13 @@ Retired (cleaned up on sight by revert/close/engineer): `Spec:draft`, `Spec:plan
     revert/               # defaults.json + run.sh (no LLM)
     close/                # defaults.json + run.sh (no LLM)
     update/               # defaults.json + run.sh (no LLM)
+    agent/                # defaults.json + prompt.md + pre.sh/post.sh (custom agent lane)
   migrations/
     <version>/migrate.sh  # Consumer-owned config migrations, run in ascending semver order
   core/
     config/               # load-config, load-agent-defaults, parse-directive,
-                          # generate-trigger-conditions
+                          # generate-trigger-conditions, discover-agents,
+                          # interpolate-artifacts
     feedback/             # status-comment, progress-labels, react-to-comment,
                           # notify-failure, update-checkboxes
     orchestration/        # dispatch-chain, branch-prefix, parse-waves,
