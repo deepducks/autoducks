@@ -14,10 +14,12 @@ SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
 # Isolated repo copy: only what update-triggers touches/needs
-mkdir -p "$SCRATCH/.autoducks/core/config" "$SCRATCH/.autoducks/runtimes" \
+mkdir -p "$SCRATCH/.autoducks/core" "$SCRATCH/.autoducks/runtimes" \
          "$SCRATCH/.github" "$SCRATCH/scripts"
 cp "$REPO_ROOT/.autoducks/autoducks.json" "$SCRATCH/.autoducks/"
-cp "$REPO_ROOT/.autoducks/core/config/generate-trigger-conditions.sh" "$SCRATCH/.autoducks/core/config/"
+# Whole config dir: the generator sources siblings (agent-roster.sh), and a
+# hand-maintained file list here breaks the fixture as the tree grows.
+cp -R "$REPO_ROOT/.autoducks/core/config" "$SCRATCH/.autoducks/core/"
 cp -R "$REPO_ROOT/.autoducks/runtimes/github-actions" "$SCRATCH/.autoducks/runtimes/"
 cp -R "$REPO_ROOT/.github/workflows" "$SCRATCH/.github/"
 cp "$REPO_ROOT/scripts/update-triggers.sh" "$SCRATCH/scripts/"

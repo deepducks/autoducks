@@ -18,6 +18,12 @@ set -euo pipefail
 
 CONFIG="${AUTODUCKS_CONFIG:-.autoducks/autoducks.json}"
 
+# AUTODUCKS_AGENTS / AUTODUCKS_BUILTIN_VERBS — see agent-roster.sh. The
+# roster lives in one file so this validator and parse-directive.sh's
+# normalize_verb() cannot disagree about which agents exist.
+_GTC_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_GTC_SH_DIR/agent-roster.sh"
+
 if ! command -v jq &>/dev/null; then
   echo "generate-trigger-conditions: jq required but not installed" >&2
   exit 1
@@ -27,8 +33,8 @@ if [[ ! -f "$CONFIG" ]]; then
   exit 1
 fi
 
-AGENTS=(architect engineer execute fix revert close review rework defer resolve triage merge update)
-BUILTINS="architect design engineer tactics execute run work fix revert close review rework defer resolve triage merge update"
+AGENTS=("${AUTODUCKS_AGENTS[@]}")
+BUILTINS="$AUTODUCKS_BUILTIN_VERBS"
 
 # Command namespace (validated; falls back to empty — bare short forms — on
 # garbage). namespace = command with a single optional leading '/' stripped.

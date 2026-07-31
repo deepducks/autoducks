@@ -187,10 +187,12 @@ verify_machinery::check_idempotence() {
   local scratch before ok=0
   scratch="$(mktemp -d)"
   before="$(mktemp -d)"
-  mkdir -p "$scratch/.autoducks/core/config" "$scratch/.autoducks/runtimes" \
+  mkdir -p "$scratch/.autoducks/core" "$scratch/.autoducks/runtimes" \
            "$scratch/.github" "$scratch/scripts"
   cp "$AUTODUCKS_ROOT/autoducks.json" "$scratch/.autoducks/"
-  cp "$gen" "$scratch/.autoducks/core/config/"
+  # Whole directory, not just the generator: it sources siblings (agent-roster.sh),
+  # and a hand-maintained file list here silently breaks the check as one grows.
+  cp -R "$AUTODUCKS_ROOT/core/config" "$scratch/.autoducks/core/"
   cp -R "$RUNTIME_DIR" "$scratch/.autoducks/runtimes/"
   cp -R "$WORKFLOW_DIR" "$scratch/.github/"
   cp "$updater" "$scratch/scripts/"
