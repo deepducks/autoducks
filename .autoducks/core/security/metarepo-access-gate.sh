@@ -45,7 +45,7 @@ metarepo::_gate_probe_one() {
     [[ "$(printf '%s' "$perms" | jq -r '.merge_commit')" == "true" ]] && merge_commit="yes" || merge_commit="no"
     [[ "$(printf '%s' "$perms" | jq -r '.auto_merge')" == "true" ]] && auto_merge="yes" || auto_merge="no"
   fi
-  protected="$(git::submodule_protection "$slug" 2>/dev/null || echo "false")"
+  protected="$(metarepo::protected_for_path "$path" 2>/dev/null || echo "false")"
   [[ "$protected" == "true" ]] && protected="yes" || protected="no"
 
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$path" "$owner" "$slug" "$reachable" "$writable" "$protected" "$merge_commit" "$auto_merge"

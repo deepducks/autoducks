@@ -158,7 +158,7 @@ git::submodule_deliver() {
   local token; token="$(git::resolve_token "$slug")"
   local default_branch
   default_branch="$(GH_TOKEN="$token" gh api "repos/$slug" --jq '.default_branch' 2>/dev/null || echo "main")"
-  local protected; protected="$(git::submodule_protection "$slug")"
+  local protected; protected="$(metarepo::protected_for_path "$path")"
   local method; method="$(git::_child_delivery_method "$slug" "$token")"
 
   local feat_sha

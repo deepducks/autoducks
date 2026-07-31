@@ -60,6 +60,9 @@ the metarepo's own; the children keep their own `.autoducks` (or none).
 ```
 
 - `protected: null` → detected at runtime from the child's branch protection.
+  A bool overrides that detection: `true` makes the parent gate delivery as if
+  the child were protected (useful before the protection rule actually lands),
+  `false` skips the per-child API probe on a repo whose policy you already know.
 - Every key under `submodules` must name a path declared in `.gitmodules`.
   `scripts/setup.sh` check 14 fails on a key with no submodule behind it, so a
   retired child cannot leave live-looking config behind.
@@ -257,7 +260,7 @@ same check assertion.
 | `metarepo.enabled` | bool | Master switch; forces sequential orchestration. |
 | `metarepo.protected_submodule_strategy` | `auto_merge` \| `required_check` | How protected children merge. |
 | `metarepo.auth.mode` | `single_pat` \| `per_owner_pat` \| `github_app` | Credential resolution. |
-| `metarepo.submodules.<path>.protected` | bool \| null | `null` = detect at runtime. |
+| `metarepo.submodules.<path>.protected` | bool \| null | `null` = detect at runtime; a bool overrides detection. |
 | `metarepo.check_recovery.assert_attempts` | int | Times delivery re-checks that a child PR has any check run (default 3). |
 | `metarepo.check_recovery.assert_interval_seconds` | int | Wait between those attempts (default 5). |
 | `metarepo.check_recovery.poll_rounds` | int | Poll rounds with an empty rollup before the poller re-fires the check (default 2). |

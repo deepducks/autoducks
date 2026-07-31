@@ -98,7 +98,7 @@ for m in "${AFFECTED[@]}"; do
   [[ -z "$m" ]] && continue
   slug="$(metarepo::slug_for_path "$m" 2>/dev/null || true)"
   [[ -n "$slug" ]] || continue
-  [[ "$(git::submodule_protection "$slug")" == "true" ]] || continue
+  [[ "$(metarepo::protected_for_path "$m")" == "true" ]] || continue
   PROTECTED_PATHS+=("$m")
   CHILD_SLUG["$m"]="$slug"
 done

@@ -148,6 +148,76 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+echo "── protected: an explicit bool overrides runtime detection ──"
+
+# Stub the provider. If the override works, this is never called; the stub
+# returns a value neither test case expects, so a fall-through cannot pass.
+git::submodule_protection() { echo "STUB-CALLED"; }
+
+write_protected_config() { # VALUE (true|false|null)
+  jq -n --arg p "child-a" --argjson v "$1" \
+    '{metarepo: {enabled: true, submodules: {($p): {protected: $v}}}}' \
+    > .autoducks/autoducks.json
+}
+
+fixture_gitmodules child-a
+
+write_protected_config true
+got=$(metarepo::protected_for_path child-a)
+if [[ "$got" == "true" ]]; then
+  pass "protected: true overrides detection"
+else
+  fail "protected: true → '$got' (want 'true')"
+fi
+
+# The one that jq's `//` operator gets wrong: `false // "null"` is "null", so an
+# explicit false would fall through to detection and the override would work in
+# one direction only.
+write_protected_config false
+got=$(metarepo::protected_for_path child-a)
+if [[ "$got" == "false" ]]; then
+  pass "protected: false overrides detection (not swallowed by jq //)"
+elif [[ "$got" == "STUB-CALLED" ]]; then
+  fail "protected: false fell through to runtime detection — jq // pitfall"
+else
+  fail "protected: false → '$got' (want 'false')"
+fi
+
+write_protected_config null
+got=$(metarepo::protected_for_path child-a)
+if [[ "$got" == "STUB-CALLED" ]]; then
+  pass "protected: null falls through to runtime detection"
+else
+  fail "protected: null → '$got' (want the provider to be consulted)"
+fi
+
+echo '{"metarepo": {"enabled": true, "submodules": {"child-a": {}}}}' > .autoducks/autoducks.json
+got=$(metarepo::protected_for_path child-a)
+if [[ "$got" == "STUB-CALLED" ]]; then
+  pass "absent protected key falls through to runtime detection"
+else
+  fail "absent key → '$got' (want the provider to be consulted)"
+fi
+
+echo '{"metarepo": {"enabled": true}}' > .autoducks/autoducks.json
+got=$(metarepo::protected_for_path child-a)
+if [[ "$got" == "STUB-CALLED" ]]; then
+  pass "absent submodules block falls through to runtime detection"
+else
+  fail "absent block → '$got' (want the provider to be consulted)"
+fi
+
+# A path with no .gitmodules entry has no slug to probe — fail safe rather than
+# calling the provider with an empty argument.
+write_protected_config null
+got=$(metarepo::protected_for_path not-a-submodule)
+if [[ "$got" == "false" ]]; then
+  pass "unknown path with no slug → false, provider not called"
+else
+  fail "unknown path → '$got' (want 'false')"
+fi
+
+# ---------------------------------------------------------------------------
 echo
 echo "Passed: $PASS  Failed: $FAIL"
 [[ "$FAIL" -eq 0 ]]

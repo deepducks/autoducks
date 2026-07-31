@@ -348,6 +348,42 @@ metarepo::validate_modules() {
   return 0
 }
 
+# metarepo::protected_for_path PATH [CONFIG] → "true"/"false" for whether the
+# child's default branch requires a PR to advance.
+#
+# `metarepo.submodules.<path>.protected` is documented as `bool | null` where
+# null means "detect at runtime" — so a non-null value is an explicit override.
+# It was read by nothing: every caller went straight to
+# git::submodule_protection, which always queries the host. Config that reads
+# like a switch has to be one.
+#
+# An override is worth having in two directions. Setting `true` for a child that
+# is not protected yet makes the parent behave as if it were, so delivery is
+# gated before the protection lands rather than after. Setting `false` skips a
+# per-child API round trip on a repo whose policy you already know.
+metarepo::protected_for_path() {
+  local path="$1"
+  local cfg="${2:-}"
+  [[ -z "$cfg" ]] && cfg="${AUTODUCKS_ROOT:-.autoducks}/autoducks.json"
+
+  # Not `// "null"`: jq's alternative operator treats `false` as empty, so an
+  # explicit `protected: false` would fall through to runtime detection and the
+  # override would work in one direction only.
+  local configured
+  configured="$(jq -r --arg p "$path" \
+    '.metarepo.submodules[$p].protected | if . == null then "null" else tostring end' \
+    "$cfg" 2>/dev/null || echo "null")"
+  case "$configured" in
+    true|false) printf '%s\n' "$configured"; return 0 ;;
+  esac
+
+  # null, absent, or unreadable config — detect at runtime, as documented.
+  local slug
+  slug="$(metarepo::slug_for_path "$path" 2>/dev/null || true)"
+  [[ -n "$slug" ]] || { echo "false"; return 0; }
+  git::submodule_protection "$slug" 2>/dev/null || echo "false"
+}
+
 # metarepo::stale_submodule_keys [CONFIG] → every `metarepo.submodules` key with
 # no matching path in .gitmodules, one per line. Exit 1 when any is found.
 #
@@ -395,8 +431,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     delivered) metarepo::delivered_children_from_body "${2:-}" ;;
     stale-keys)   metarepo::stale_submodule_keys "${2:-}" ;;
     unconfigured) metarepo::unconfigured_submodules "${2:-}" ;;
+    protected)    metarepo::protected_for_path "${2:?path required}" ;;
     --help|*)
-      echo "Usage: metarepo.sh {paths|slug PATH|owner PATH|stale-keys [CONFIG]|unconfigured [CONFIG]}"
+      echo "Usage: metarepo.sh {paths|slug PATH|owner PATH|protected PATH|stale-keys [CONFIG]|unconfigured [CONFIG]}"
       echo "  Config helpers mapping a submodule path -> child repo slug via .gitmodules" ;;
   esac
 fi
