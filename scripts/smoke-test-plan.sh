@@ -124,11 +124,13 @@ warn() { echo "  ⚠️  $1"; WARN=$((WARN + 1)); }
 
 # Poll a comment's reactions for the terminal signal every workflow posts:
 #   +1       → success
+#   rocket   → handed off to a prerequisite agent (this run is over, the work is not)
 #   confused → failure
 # Scoped to the specific comment, so it's immune to GitHub's occasional
 # double-fire on issue_comment (the skipped duplicate never touches
 # reactions) and safe with parallel workflows on other issues (they
-# post on their own comments). Returns 0=success, 1=failure, 2=timeout.
+# post on their own comments). Returns 0=success, 1=failure, 2=timeout,
+# 3=delegated (see wait_for_plan_after_delegation).
 # NOTE: not usable for /revert or /close — those
 # workflows delete the triggering comment before completing. Use
 # wait_for_feature_unplanned / wait_for_feature_closed for those.
@@ -145,11 +147,37 @@ wait_for_reaction() {
     case ",$reactions," in
       *,+1,*)       return 0 ;;
       *,confused,*) return 1 ;;
+      # 🚀 = the Definition-of-Ready guard handed this run off to a prerequisite
+      # agent. This comment's run is over and no further reaction will land on it,
+      # but the work continues on the re-dispatched run's own comment. Reported as
+      # 3 so callers can keep waiting on the *issue* instead of on this comment —
+      # treating it as success would assert against a plan nobody has written yet.
+      *,rocket,*)   return 3 ;;
     esac
     sleep $interval
     waited=$((waited + interval))
     if [[ $((waited % 60)) -eq 0 ]]; then
       echo "  ... $label ${waited}/${timeout_s}s (reactions: ${reactions:-none})"
+    fi
+  done
+  return 2
+}
+
+# wait_for_plan_after_delegation FEATURE_NUM TIMEOUT_S LABEL
+# The DoR guard handed the run off, so no further reaction lands on the comment
+# we were watching. Wait on the outcome instead: the re-dispatched Engineer marks
+# the feature `Tactics:done` when the plan is written.
+wait_for_plan_after_delegation() {
+  local feature="$1" timeout_s="$2" label="$3"
+  local waited=0 interval=15 labels=""
+  echo "  🚀 handed off to a prerequisite agent — waiting on the outcome instead"
+  while [[ $waited -lt $timeout_s ]]; do
+    labels=$(gh issue view "$feature" $REPO_ARG --json labels --jq '[.labels[].name]|join(",")' 2>/dev/null || echo "")
+    case ",$labels," in *,Tactics:done,*) return 0 ;; esac
+    sleep $interval
+    waited=$((waited + interval))
+    if [[ $((waited % 60)) -eq 0 ]]; then
+      echo "  ... $label ${waited}/${timeout_s}s (labels: ${labels:-none})"
     fi
   done
   return 2
@@ -289,6 +317,11 @@ EOF
     0) pass "engineer-agent run completed successfully" ;;
     1) fail "engineer-agent run failed (😕 reaction on /engineer comment)"; exit 1 ;;
     2) fail "engineer-agent run did not complete within 10 min"; exit 1 ;;
+    3) if wait_for_plan_after_delegation "$FEATURE" 900 "engineer-agent (post-delegation)"; then
+         pass "engineer-agent completed after delegating to a prerequisite agent"
+       else
+         fail "no plan after the delegated handoff (15 min)"; exit 1
+       fi ;;
   esac
   echo ""
 
