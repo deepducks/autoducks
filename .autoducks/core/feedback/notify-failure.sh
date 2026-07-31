@@ -18,6 +18,10 @@ source "$NOTIFY_FAILURE_DIR/failure-reported.sh"
 #                              suggested `turns=<n>` retry hint (max_turns only)
 #   AUTODUCKS_CHECKS_MAX_ITERATIONS — number of check-fix iterations attempted
 #                              before giving up (check_failed only)
+#   AUTODUCKS_AGENT_NAME      — the repo-supplied custom agent's own name
+#                              (scope-missing, agent only)
+#   AUTODUCKS_AGENT_SOURCE    — path to the custom agent's definition file
+#                              (scope-missing, agent only)
 
 # Suggested `turns=<n>` for a max_turns retry: double the budget the failed run
 # used, capped at the parser's ceiling (1000). Falls back to the provider
@@ -75,6 +79,10 @@ notify_failure() {
         rework)
           diagnosis="The agent did not produce the expected rework task."
           retry="re-run \`$(autoducks_command_for rework)\`"
+          ;;
+        agent)
+          diagnosis="The custom agent finished without writing \`/tmp/agent-response.md\`; the definition at \`${AUTODUCKS_AGENT_SOURCE:-<unknown source>}\` may not state an output contract."
+          retry="re-run \`$(autoducks_command_for agent) ${AUTODUCKS_AGENT_NAME:-<name>}\`"
           ;;
         *)
           diagnosis="The agent did not produce the expected output file."

@@ -35,6 +35,9 @@ _resolve_context::available_parts() {
     reviewer)
       echo "issue_title issue_description issue_comments issue_metadata design.problem_statement design.proposed_solution design.technical_design design.dependencies design.constraints design.out_of_scope design.full plan task_criteria pr_diff pr_meta security_guidelines"
       ;;
+    agent)
+      echo "issue_title issue_description issue_comments issue_metadata task_title task_description task_criteria prior_feedback pr_diff pr_meta security_guidelines plan design.full"
+      ;;
   esac
 }
 
@@ -45,6 +48,7 @@ _resolve_context::default_parts() {
     engineer)  printf '%s\n' issue_title issue_description issue_comments design.full ;;
     developer) printf '%s\n' issue_title issue_description prior_feedback ;;
     reviewer)  printf '%s\n' issue_title issue_description task_criteria design.full pr_diff pr_meta security_guidelines ;;
+    agent)     printf '%s\n' issue_title issue_description issue_comments ;;
   esac
 }
 
@@ -294,14 +298,76 @@ _resolve_context::route_reviewer() {
   return 0
 }
 
+# Custom-agent ("agent") lane: the full catalog is available, so this route
+# combines every composition shape used by the built-in agents above rather
+# than picking one. Each part still lands on its established canonical
+# target so an interpolation pass (interpolate-artifacts.sh) or a direct
+# reader finds it in the same place a built-in agent would.
+_resolve_context::route_agent() {
+  local primary="$1" feature="$2"; shift 2
+  local -a sel=("$@")
+
+  local title_id="" desc_id=""
+  _resolve_context::has issue_title "${sel[@]}" && title_id="issue_title"
+  _resolve_context::has issue_description "${sel[@]}" && desc_id="issue_description"
+  if [[ -n "$title_id" || -n "$desc_id" ]]; then
+    _resolve_context::compose_hash_request "$primary" /tmp/issue-request.md /tmp/issue-body-raw.md "$title_id" "$desc_id"
+  fi
+
+  local task_title_id="" task_desc_id=""
+  _resolve_context::has task_title "${sel[@]}" && task_title_id="task_title"
+  _resolve_context::has task_description "${sel[@]}" && task_desc_id="task_description"
+  if [[ -n "$task_title_id" || -n "$task_desc_id" ]]; then
+    _resolve_context::compose_hash_request "$primary" /tmp/task-spec.md "" "$task_title_id" "$task_desc_id"
+  fi
+
+  _resolve_context::has issue_comments "${sel[@]}" && _resolve_context::materialize_simple issue_comments "$primary" /tmp/issue-comments.md
+  _resolve_context::has issue_metadata "${sel[@]}" && _resolve_context::materialize_simple issue_metadata "$primary" /tmp/issue-meta.md
+
+  if _resolve_context::has prior_feedback "${sel[@]}"; then
+    local fb_tmp
+    fb_tmp="$(mktemp)"
+    context_part::prior_feedback "$primary" "$fb_tmp"
+    cat "$fb_tmp" >> /tmp/task-spec.md
+    _resolve_context::record prior_feedback /tmp/task-spec.md "$(_resolve_context::bytes "$fb_tmp")"
+    rm -f "$fb_tmp"
+  fi
+
+  _resolve_context::has task_criteria "${sel[@]}" && _resolve_context::materialize_simple task_criteria "$feature" /tmp/task-criteria.md
+  _resolve_context::has pr_diff "${sel[@]}" && _resolve_context::materialize_simple pr_diff "$primary" /tmp/pr-diff.patch
+  _resolve_context::has pr_meta "${sel[@]}" && _resolve_context::materialize_simple pr_meta "$primary" /tmp/pr-meta.md
+  _resolve_context::has security_guidelines "${sel[@]}" && _resolve_context::materialize_simple security_guidelines "$primary" /tmp/security-guidelines.md
+
+  _resolve_context::route_design "$feature" "${sel[@]}"
+  return 0
+}
+
 # ── Entry point ──────────────────────────────────────────────────────────
+#
+#   resolve_context <agent> <primary_issue_num> [feature_issue_num] [caller_parts]
+#
+# <caller_parts> is a new, optional 4th positional: a space-separated part
+# list the caller (a custom agent's pre.sh) has already resolved from its
+# definition's frontmatter `context:` / `custom_agents.agents.<name>.context`
+# precedence chain, used INSTEAD of _resolve_context::read_manifest. Its
+# presence is detected via argument count, not string emptiness, so a caller
+# can pass a literal empty string to mean "select nothing" — a deliberate
+# choice, distinct from omitting the argument entirely (which still falls
+# back to the manifest/default parts).
+#
+# Invalid parts fail differently depending on where they came from: a
+# caller-supplied (frontmatter-sourced) part that's unknown/unavailable is
+# dropped with a ::warning:: and the run continues (the frontmatter isn't
+# the repo owner's config — don't let a stale/renamed id break the run);
+# a manifest-sourced (autoducks.json-sourced) one keeps the existing hard
+# `return 1` — that file is the repo owner's own config.
 resolve_context() {
   local agent="$1" primary="$2" feature="${3:-$2}"
 
   case "$agent" in
-    architect|engineer|developer|reviewer) ;;
+    architect|engineer|developer|reviewer|agent) ;;
     *)
-      echo "resolve_context: unknown agent '$agent' — expected one of: architect engineer developer reviewer." >&2
+      echo "resolve_context: unknown agent '$agent' — expected one of: architect engineer developer reviewer agent." >&2
       return 1
       ;;
   esac
@@ -309,24 +375,38 @@ resolve_context() {
   _RC_MANIFEST_PARTS=()
 
   local -a requested=()
-  mapfile -t requested < <(_resolve_context::read_manifest "$agent")
+  local caller_supplied=0
+  if (( $# >= 4 )); then
+    caller_supplied=1
+    local caller_parts="$4"
+    [[ -n "$caller_parts" ]] && read -ra requested <<< "$caller_parts"
+  else
+    mapfile -t requested < <(_resolve_context::read_manifest "$agent")
+  fi
 
   local available_str
   available_str=" $(_resolve_context::available_parts "$agent") "
+  local -a selected=()
   local part
   for part in "${requested[@]}"; do
     [[ -z "$part" ]] && continue
     if [[ "$available_str" != *" $part "* ]]; then
+      if (( caller_supplied == 1 )); then
+        echo "::warning::resolve_context: context part '$part' is unknown or not available to agent '$agent' — dropping it from the frontmatter-resolved selection." >&2
+        continue
+      fi
       echo "resolve_context: context part '$part' is unknown or not available to agent '$agent'. Fix: remove/replace it in \`.context.$agent.parts\` in \$AUTODUCKS_ROOT/autoducks.json — available parts for '$agent':$available_str" >&2
       return 1
     fi
+    selected+=("$part")
   done
 
   case "$agent" in
-    architect) _resolve_context::route_architect "$primary" "${requested[@]}" ;;
-    engineer)  _resolve_context::route_engineer  "$primary" "$feature" "${requested[@]}" ;;
-    developer) _resolve_context::route_developer "$primary" "$feature" "${requested[@]}" ;;
-    reviewer)  _resolve_context::route_reviewer  "$primary" "$feature" "${requested[@]}" ;;
+    architect) _resolve_context::route_architect "$primary" "${selected[@]}" ;;
+    engineer)  _resolve_context::route_engineer  "$primary" "$feature" "${selected[@]}" ;;
+    developer) _resolve_context::route_developer "$primary" "$feature" "${selected[@]}" ;;
+    reviewer)  _resolve_context::route_reviewer  "$primary" "$feature" "${selected[@]}" ;;
+    agent)     _resolve_context::route_agent     "$primary" "$feature" "${selected[@]}" ;;
   esac
 
   local manifest_json="[]"

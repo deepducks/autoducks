@@ -24,6 +24,14 @@ set -euo pipefail
 #                       token (colon form only); friendly synonyms fan-out/
 #                       fanout→waves and seq→sequential are also accepted.
 #                       Invalid values are ignored, not fatal.
+#   agent_name       — for `command=agent` only: the token immediately after
+#                       the verb, unconditionally (never parsed as a model/
+#                       effort alias), matching ^[a-z0-9][a-z0-9-]{0,63}$.
+#                       Empty when no token follows (catalog mode) or when
+#                       the token fails validation (see agent_name_error).
+#   agent_name_error — `invalid-name` when a token followed `/agent` but
+#                       didn't match the charset above (so agent_name is
+#                       emitted empty instead); empty otherwise.
 #   auto_chain       — `+`-separated canonical verbs to run after this agent
 #                       finishes, from a `#auto:<verb>[+<verb>...]` token.
 #                       Verbs are alias-normalized, deduplicated, capped at 5.
@@ -84,6 +92,8 @@ EFFORT=""
 MAX_TURNS=""
 MAX_ITERATIONS=""
 MODE=""
+AGENT_NAME=""
+AGENT_NAME_ERROR=""
 AUTO_CHAIN=""
 STEERING_LEFTOVER=()
 TRAILING_BODY=""
@@ -166,6 +176,21 @@ if [[ -n "$DIRECTIVE" ]]; then
   COMMAND=$(echo "$COMMAND" | tr '[:upper:]' '[:lower:]' | tr -d ',.!?:;')
   ORIGINAL_COMMAND="$COMMAND"
   COMMAND=$(normalize_verb "$COMMAND")
+
+  # ── /agent positional agent-name capture ─────────────────────────────
+  # Unconditional: the token right after `agent` is always the agent name,
+  # never parsed as a model/effort alias. Consumed here (ARG_START bumped)
+  # so neither the directive-token loop nor the steering-prompt loop below
+  # ever sees it.
+  if [[ "$COMMAND" == "agent" && -n "${TOKENS[$ARG_START]:-}" ]]; then
+    _agent_name_tok="${TOKENS[$ARG_START]}"
+    if [[ "$_agent_name_tok" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]]; then
+      AGENT_NAME="$_agent_name_tok"
+    else
+      AGENT_NAME_ERROR="invalid-name"
+    fi
+    ARG_START=$((ARG_START + 1))
+  fi
 
   for tok in "${TOKENS[@]:$ARG_START}"; do
     # Lowercase without stripping ':' or '#' first, so the colon syntaxes
@@ -305,5 +330,7 @@ echo "effort=$EFFORT"
 echo "max_turns=$MAX_TURNS"
 echo "max_iterations=$MAX_ITERATIONS"
 echo "mode=$MODE"
+echo "agent_name=$AGENT_NAME"
+echo "agent_name_error=$AGENT_NAME_ERROR"
 echo "auto_chain=$AUTO_CHAIN"
 echo "steering_prompt=$STEERING_PROMPT_B64"

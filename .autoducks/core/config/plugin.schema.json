@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://autoducks.dev/schemas/plugin.schema.json",
   "title": "autoducks plugin manifest (plugin.json)",
-  "description": "Contract for a plugin package's plugin.json manifest. There is no ajv/jsonschema tooling in this repo: this file is a machine-readable reference that the shell validators (core/config/load-config.sh, core/config/resolve-prompt.sh, setup.sh) check field-by-field with jq, plus a shared reference for the on-disk package layout every downstream task builds against:\n  hooks/<agent>-<stage>/action.yml        - one dir per hook point, see $defs.hookPoint for the 24 valid names\n  prompts/instructions.md                 - global prompt fragment, injected when prompts.global is true\n  prompts/agents/<agent>/instructions.md  - per-agent prompt fragment, injected when <agent> is listed in prompts.agents\n  claude/mcp.json                         - MCP server definitions; names referenced by mcpServers\n  claude/hooks.json                       - Claude Code hook definitions; events referenced by claudeHooks\n  claude/settings.patch.json              - settings merge patch applied on top of the base claude/settings",
+  "description": "Contract for a plugin package's plugin.json manifest. There is no ajv/jsonschema tooling in this repo: this file is a machine-readable reference that the shell validators (core/config/load-config.sh, core/config/resolve-prompt.sh, setup.sh) check field-by-field with jq, plus a shared reference for the on-disk package layout every downstream task builds against:\n  hooks/<agent>-<stage>/action.yml        - one dir per hook point, see $defs.hookPoint for the 26 valid names\n  prompts/instructions.md                 - global prompt fragment, injected when prompts.global is true\n  prompts/agents/<agent>/instructions.md  - per-agent prompt fragment, injected when <agent> is listed in prompts.agents\n  claude/mcp.json                         - MCP server definitions; names referenced by mcpServers\n  claude/hooks.json                       - Claude Code hook definitions; events referenced by claudeHooks\n  claude/settings.patch.json              - settings merge patch applied on top of the base claude/settings",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "name", "version"],
@@ -48,13 +48,13 @@
       "items": { "$ref": "#/$defs/llmAgent" },
       "minItems": 1,
       "uniqueItems": true,
-      "description": "Subset of the 9 LLM-backed agents (see $defs.llmAgent) this plugin scopes its claude/ + prompts/ contributions to. Omit this field entirely to target all 9 agents."
+      "description": "Subset of the 10 LLM-backed agents (see $defs.llmAgent) this plugin scopes its claude/ + prompts/ contributions to. Omit this field entirely to target all 10 agents."
     },
     "hooks": {
       "type": "array",
       "items": { "$ref": "#/$defs/hookPoint" },
       "uniqueItems": true,
-      "description": "Hook points this plugin contributes, each of which must have a matching hooks/<agent>-<stage>/action.yml directory in the package. Must be drawn from the 24 valid <agent>-<stage> names in $defs.hookPoint."
+      "description": "Hook points this plugin contributes, each of which must have a matching hooks/<agent>-<stage>/action.yml directory in the package. Must be drawn from the 26 valid <agent>-<stage> names in $defs.hookPoint."
     },
     "prompts": {
       "type": "object",
@@ -68,7 +68,7 @@
           "type": "array",
           "items": { "$ref": "#/$defs/llmAgent" },
           "uniqueItems": true,
-          "description": "Agents for which prompts/agents/<agent>/instructions.md is injected. Each entry must be one of the 9 LLM agents in $defs.llmAgent, and a corresponding prompts/agents/<agent>/instructions.md file must exist in the package."
+          "description": "Agents for which prompts/agents/<agent>/instructions.md is injected. Each entry must be one of the 10 LLM agents in $defs.llmAgent, and a corresponding prompts/agents/<agent>/instructions.md file must exist in the package."
         }
       },
       "description": "Prompt contributions. Both fields are optional; omit the whole object if the plugin contributes no prompt text."
@@ -114,13 +114,14 @@
   "$defs": {
     "llmAgent": {
       "type": "string",
-      "description": "One of the 9 LLM-backed agents: architect, engineer, developer, reviewer, fix, resolver, rework, defer, product. (The remaining pipeline/utility agents - close, close-guard, maestro, revert - are pure orchestration and never run an LLM step, so they are not valid targets/prompts.agents entries.)",
-      "enum": ["architect", "engineer", "developer", "reviewer", "fix", "resolver", "rework", "defer", "product"]
+      "description": "One of the 10 LLM-backed agents: architect, engineer, developer, reviewer, fix, resolver, rework, defer, product, agent. (The remaining pipeline/utility agents - close, close-guard, maestro, revert - are pure orchestration and never run an LLM step, so they are not valid targets/prompts.agents entries.)",
+      "enum": ["architect", "engineer", "developer", "reviewer", "fix", "resolver", "rework", "defer", "product", "agent"]
     },
     "hookPoint": {
       "type": "string",
-      "description": "One of the 24 valid <agent>-<stage> hook-point names: the 12 pipeline/utility agents (architect, close, defer, developer, engineer, fix, maestro, product, resolver, revert, reviewer, rework) each crossed with the 2 stages every agent workflow runs (pre, post - matching that agent's pre.sh/post.sh hand-off points, or the equivalent boundary in the agents that ship a single run.sh). close-guard is an internal guard step, not an addressable hook point.",
+      "description": "One of the 26 valid <agent>-<stage> hook-point names: the 13 pipeline/utility agents (agent, architect, close, defer, developer, engineer, fix, maestro, product, resolver, revert, reviewer, rework) each crossed with the 2 stages every agent workflow runs (pre, post - matching that agent's pre.sh/post.sh hand-off points, or the equivalent boundary in the agents that ship a single run.sh). close-guard is an internal guard step, not an addressable hook point.",
       "enum": [
+        "agent-pre", "agent-post",
         "architect-pre", "architect-post",
         "close-pre", "close-post",
         "defer-pre", "defer-post",

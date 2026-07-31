@@ -50,8 +50,16 @@ authz::audit() {
 # Backward-compatible baseline (applied when .security is absent or a key
 # is missing): trusted=OWNER,MEMBER,COLLABORATOR; codeowners=false;
 # revert/close/update default to trusted=OWNER,MEMBER.
+#
+# Optional 2nd arg (custom agent name, only meaningful when agent="agent"):
+# the repo-supplied custom agent's own name, e.g. "db-migration-reviewer".
+# Policy is always selected by the *lane* ("agent"), never by this name —
+# but custom_agents.agents.<name>.security.trusted_associations, if present,
+# is INTERSECTED with the lane's effective trusted set, so a definition file
+# can only narrow who may run it, never broaden it.
 authz::load_config() {
   local agent="$1"
+  local custom_name="${2:-}"
   # The Maestro and Developer are both faces of the `execute` command — they
   # share its per_agent security policy.
   case "$agent" in
@@ -76,7 +84,8 @@ authz::load_config() {
       "close":   { "trusted_associations": ["OWNER", "MEMBER"] },
       "product": { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
       "merge":   { "trusted_associations": ["OWNER", "MEMBER"] },
-      "update":  { "trusted_associations": ["OWNER", "MEMBER"] }
+      "update":  { "trusted_associations": ["OWNER", "MEMBER"] },
+      "agent":   { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] }
     }
   }'
 
@@ -97,7 +106,20 @@ authz::load_config() {
     <(printf '%s' "$merged_global") \
     <(printf '%s' "$per_agent") 2>/dev/null)" || return 1
 
-  AUTODUCKS_AUTHZ_TRUSTED="$(printf '%s' "$effective" | jq -r '.trusted_associations // [] | join(" ")')"
+  local trusted_json
+  trusted_json="$(printf '%s' "$effective" | jq -c '.trusted_associations // []')"
+
+  if [[ "$agent" == "agent" && -n "$custom_name" ]]; then
+    local custom_trusted
+    custom_trusted="$(jq -c --arg n "$custom_name" \
+      '.custom_agents.agents[$n].security.trusted_associations // empty' "$config" 2>/dev/null)" || custom_trusted=""
+    if [[ -n "$custom_trusted" && "$custom_trusted" != "null" ]]; then
+      trusted_json="$(jq -cn --argjson lane "$trusted_json" --argjson custom "$custom_trusted" \
+        '[$lane[] | select(. as $x | $custom | index($x) != null)]')"
+    fi
+  fi
+
+  AUTODUCKS_AUTHZ_TRUSTED="$(printf '%s' "$trusted_json" | jq -r 'join(" ")')"
   AUTODUCKS_AUTHZ_ALLOW="$(printf '%s' "$effective" | jq -r '.allow // [] | join(" ")')"
   AUTODUCKS_AUTHZ_DENY="$(printf '%s' "$effective" | jq -r '.deny // [] | join(" ")')"
   AUTODUCKS_AUTHZ_CODEOWNERS="$(printf '%s' "$effective" | jq -r '.codeowners // false')"
@@ -242,8 +264,10 @@ authz::main() {
     source "$AUTODUCKS_ROOT/providers/its/interface.sh" 2>/dev/null || true
   fi
 
-  # Fail-closed on unparseable config.
-  if ! authz::load_config "$AUTODUCKS_AGENT"; then
+  # Fail-closed on unparseable config. AUTODUCKS_AGENT_NAME (optional) is the
+  # repo-supplied custom agent's own name — only consulted, for narrowing,
+  # when AUTODUCKS_AGENT is the "agent" lane.
+  if ! authz::load_config "$AUTODUCKS_AGENT" "${AUTODUCKS_AGENT_NAME:-}"; then
     authz::audit "authz: DENY actor=${ACTOR} assoc=${AUTHOR_ASSOC:-} agent=${AUTODUCKS_AGENT} rule=unparseable_config"
     authz::send_denial_feedback
     exit 77

@@ -42,6 +42,8 @@
 #      metarepo.submodules key must name a path declared in .gitmodules. There is
 #      no inverse check: the child set is read from .gitmodules, and this block is
 #      an override map, not a registry
+#  15. Custom agent discovery — runs discover-agents.sh list, prints the
+#      discovered agents, and fails on a non-empty errors[]
 # =============================================================================
 
 set -euo pipefail
@@ -98,7 +100,7 @@ echo "=== Setup check for $REPO ==="
 echo ""
 
 # --- Check 1: gh CLI auth ---
-echo "[1/14] GitHub CLI authentication"
+echo "[1/15] GitHub CLI authentication"
 if gh auth status &>/dev/null; then
   pass "gh CLI is authenticated"
 else
@@ -108,7 +110,7 @@ fi
 echo ""
 
 # --- Check 2: Labels ---
-echo "[2/14] Required labels"
+echo "[2/15] Required labels"
 LABELS=("Feature|6F42C1|Orchestration feature issue"
         "Bug|D73A4A|Autoducks bug pipeline"
         "Task|1D76DB|Autoducks task issue"
@@ -163,7 +165,7 @@ done
 echo ""
 
 # --- Check 3: Secret ---
-echo "[3/14] Required secrets"
+echo "[3/15] Required secrets"
 REPO_SECRETS_OK=true
 SECRET_NAMES=$(gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null) \
   || { REPO_SECRETS_OK=false; SECRET_NAMES=""; }
@@ -381,7 +383,7 @@ fi
 echo ""
 
 # --- Check 4: Actions permissions ---
-echo "[4/14] Actions workflow permissions"
+echo "[4/15] Actions workflow permissions"
 PERMS=$(gh api "repos/$REPO/actions/permissions/workflow" --jq '.default_workflow_permissions + "|" + (.can_approve_pull_request_reviews | tostring)' 2>/dev/null || echo "")
 
 if [[ -z "$PERMS" ]]; then
@@ -397,7 +399,7 @@ fi
 echo ""
 
 # --- Check 5: Claude Code GitHub App ---
-echo "[5/14] Claude Code GitHub App"
+echo "[5/15] Claude Code GitHub App"
 # There is no public API to list installations on a repo without proper auth.
 # Best we can do is check if the workflows can authenticate — which only happens at runtime.
 manual "Verify the Claude Code GitHub App is installed on this repository
@@ -407,7 +409,7 @@ manual "Verify the Claude Code GitHub App is installed on this repository
 echo ""
 
 # --- Check 6: Sub-issues API availability ---
-echo "[6/14] Sub-issues API availability"
+echo "[6/15] Sub-issues API availability"
 # Probe against an arbitrary issue in the repo. If the repo has zero issues,
 # the check is inconclusive — report a soft manual item.
 FIRST_ISSUE=$(gh issue list $REPO_ARG --state all --limit 1 --json number \
@@ -437,7 +439,7 @@ echo ""
 # Issue types are an org-level feature. Workflows degrade gracefully if
 # types aren't configured — the type parameter is silently ignored by the
 # API. But without them, typed feature/task relationships don't render.
-echo "[7/14] Issue types (Feature, Task)"
+echo "[7/15] Issue types (Feature, Task)"
 if [[ -z "$TYPES_JSON" ]]; then
   manual "Could not list issue types for org '$ORG' (not an org, or no admin access).
       If '$ORG' is a user account, types are only available under organizations.
@@ -478,7 +480,7 @@ echo ""
 
 # --- Check 8: Public-repo security ---
 if [[ "$VISIBILITY" == "PUBLIC" ]]; then
-  echo "[8/14] Public-repo security posture"
+  echo "[8/15] Public-repo security posture"
   HAS_SEC=$(jq -r '.security != null' .autoducks/autoducks.json 2>/dev/null || echo "false")
   if [[ "$HAS_SEC" == "true" ]]; then
     pass "security block present in .autoducks/autoducks.json"
@@ -491,7 +493,7 @@ if [[ "$VISIBILITY" == "PUBLIC" ]]; then
 fi
 
 # --- Check 9: Runtime sync ---
-echo "[9/14] Runtime workflow sync"
+echo "[9/15] Runtime workflow sync"
 SYNC_OK=true
 while IFS=' ' read -r kind target runtime; do
   case "$kind" in
@@ -509,7 +511,7 @@ echo ""
 # Opt-in (reviewer.required_check=true). Requires the reviewer's Check-run on
 # the integration/base branch so a request-changes verdict blocks the merge.
 # Uses the operator's own gh admin credentials (no stored PAT) and is idempotent.
-echo "[10/14] Reviewer required-check ruleset"
+echo "[10/15] Reviewer required-check ruleset"
 REQUIRED_CHECK=$(jq -r '.reviewer.required_check // false' .autoducks/autoducks.json 2>/dev/null || echo "false")
 if [[ "$REQUIRED_CHECK" != "true" ]]; then
   pass "Reviewer required-check disabled (reviewer.required_check=false) — nothing to enforce"
@@ -559,7 +561,7 @@ echo ""
 # metarepo default branch so a parent PR can't merge until every protected child
 # has delivered. Uses the operator's own gh admin credentials (no stored PAT) and
 # is idempotent — mirrors Check 10's ruleset upsert exactly.
-echo "[11/14] Delivery required-check ruleset"
+echo "[11/15] Delivery required-check ruleset"
 METAREPO_ENABLED=$(jq -r 'if .metarepo.enabled == true then "true" else "false" end' .autoducks/autoducks.json 2>/dev/null || echo "false")
 METAREPO_STRATEGY=$(jq -r '.metarepo.protected_submodule_strategy // "auto_merge"' .autoducks/autoducks.json 2>/dev/null || echo "auto_merge")
 if [[ "$METAREPO_ENABLED" != "true" || "$METAREPO_STRATEGY" != "required_check" ]]; then
@@ -613,7 +615,7 @@ echo ""
 # merge-conflict/collision validation and dies with an actionable message on
 # any of those — we just surface that failure. requiresSecrets checklist
 # surfacing stays here since it's a setup-only concern.
-echo "[12/14] Plugin compilation sync"
+echo "[12/15] Plugin compilation sync"
 COMPILER=".autoducks/core/config/apply-plugins.sh"
 if [[ ! -f "$COMPILER" ]]; then
   manual "Plugin compiler not found at $COMPILER — skipping plugin compilation sync"
@@ -659,7 +661,7 @@ echo ""
 # when the update agent is enabled and not manual-only, some other identity
 # must be able to push the machinery PR/branch: either the autoducks GitHub
 # App (vars.AUTODUCKS_APP) or a repository AUTODUCKS_PAT secret.
-echo "[13/14] Update policy"
+echo "[13/15] Update policy"
 UPDATE_JSON=$(jq -c '.update // {}' .autoducks/autoducks.json 2>/dev/null || echo "{}")
 echo "  Effective update block: $UPDATE_JSON"
 
@@ -708,7 +710,7 @@ echo ""
 # when a key stopped matching `.gitmodules` — a child could be retired and its
 # key linger indefinitely, reading like live config. `.gitmodules` is the same
 # source of truth parse-plan.py validates `**Modules:**` against.
-echo "[14/14] Metarepo submodule config"
+echo "[14/15] Metarepo submodule config"
 METAREPO_ON=$(jq -r 'if .metarepo.enabled == true then "true" else "false" end' \
                 .autoducks/autoducks.json 2>/dev/null || echo "false")
 if [[ "$METAREPO_ON" != "true" ]]; then
@@ -733,6 +735,38 @@ else
   # here; metarepo.submodules is an override map whose only key, `protected`,
   # defaults to "detect at runtime". Asking for an entry per submodule would ask
   # for config that states nothing.
+fi
+echo ""
+
+# --- Check 15: Custom agent discovery ---
+# Runs the discover-agents.sh registry scan (precedence across
+# .autoducks/custom/agents, .claude/agents, .agents, .github/agents, and any
+# custom_agents.roots[]) and surfaces what it finds. A non-empty errors[]
+# means at least one definition was refused (bad name, reserved name,
+# oversized, empty body, or a symlink escaping the repo) — fail so the
+# operator fixes it before the definition is silently unusable at runtime.
+echo "[15/15] Custom agent discovery"
+DISCOVER_AGENTS="$SCRIPT_DIR/../.autoducks/core/config/discover-agents.sh"
+if [[ ! -f "$DISCOVER_AGENTS" ]]; then
+  manual "Custom agent discovery script not found at $DISCOVER_AGENTS — skipping"
+else
+  REGISTRY_JSON="$(bash "$DISCOVER_AGENTS" list 2>&1)" || true
+  if ! jq -e . >/dev/null 2>&1 <<<"$REGISTRY_JSON"; then
+    fail "discover-agents.sh list did not produce valid JSON: $REGISTRY_JSON"
+  else
+    AGENT_COUNT=$(jq '.agents | length' <<<"$REGISTRY_JSON")
+    ERROR_COUNT=$(jq '.errors | length' <<<"$REGISTRY_JSON")
+    if [[ "$AGENT_COUNT" -eq 0 ]]; then
+      pass "No custom agent definitions found"
+    else
+      pass "Discovered $AGENT_COUNT custom agent definition(s):"
+      jq -r '.agents[] | "      - \(.name) (\(.source))\(if .shadowed then " [shadowed]" else "" end)"' <<<"$REGISTRY_JSON"
+    fi
+    if [[ "$ERROR_COUNT" -gt 0 ]]; then
+      fail "$ERROR_COUNT custom agent definition(s) failed validation:"
+      jq -r '.errors[] | "      - \(.source): \(.reason)"' <<<"$REGISTRY_JSON"
+    fi
+  fi
 fi
 echo ""
 

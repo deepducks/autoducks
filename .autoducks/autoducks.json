@@ -88,7 +88,8 @@
     "resolve":   [],
     "triage":    [],
     "merge":     [],
-    "update":    []
+    "update":    [],
+    "agent":     []
   },
   "review": {
     "security_guidelines": ".autoducks/security-guidelines.md",
@@ -127,8 +128,14 @@
       "resolve":   { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
       "product":   { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] },
       "merge":     { "trusted_associations": ["OWNER", "MEMBER"] },
-      "update":    { "trusted_associations": ["OWNER", "MEMBER"] }
+      "update":    { "trusted_associations": ["OWNER", "MEMBER"] },
+      "agent":     { "trusted_associations": ["OWNER", "MEMBER", "COLLABORATOR"] }
     }
+  },
+  "custom_agents": {
+    "enabled": true,
+    "roots": [],
+    "agents": {}
   },
   "plugins": []
 }

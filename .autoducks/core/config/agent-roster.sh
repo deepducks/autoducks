@@ -13,7 +13,7 @@
 # Adding an agent means adding it here and nowhere else.
 
 # Canonical agent names — one per `triggers.<agent>[]` key in autoducks.json.
-AUTODUCKS_AGENTS=(architect engineer execute fix revert close review rework defer resolve triage merge update)
+AUTODUCKS_AGENTS=(architect engineer execute fix revert close review rework defer resolve triage merge update agent)
 
 # Built-in synonyms, `<synonym>:<canonical>`. normalize_verb() resolves
 # these before consulting the configured aliases.

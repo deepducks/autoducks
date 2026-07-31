@@ -1,0 +1,256 @@
+name: 'Autoducks: Custom Agent'
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      agent_name:
+        required: true
+        type: string
+      issue_number:
+        required: false
+        type: string
+        default: ''
+      pr_number:
+        required: false
+        type: string
+        default: ''
+      model:
+        required: false
+        type: string
+        default: ''
+      effort:
+        required: false
+        type: string
+        default: ''
+      turns:
+        required: false
+        type: string
+        default: ''
+      steering:
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+# Keyed on the PR-or-issue number AND the invocation itself (the dispatched
+# agent_name, or — for a comment trigger, where the name isn't parsed out
+# until pre.sh runs — the raw comment body it's embedded in). Two different
+# custom agents on the same issue run concurrently; a repeat invocation of
+# the *same* agent queues behind its predecessor rather than cancelling it —
+# a cancelled run can leave a pushed `agent/…` branch with no PR and no
+# response comment. Deliberately absent from the pipeline lanes'
+# concurrency groups (architect/engineer/maestro/…): this lane never
+# coordinates with them.
+concurrency:
+  group: >-
+    autoducks-agent-${{
+      github.event.issue.number || inputs.pr_number || inputs.issue_number
+    }}-${{
+      github.event_name == 'workflow_dispatch' && inputs.agent_name || github.event.comment.body
+    }}
+  cancel-in-progress: false
+
+jobs:
+  agent:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.comment.author_association != 'MANNEQUIN' &&
+       startsWith(github.event.comment.body, '/agent'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint app token
+        id: apptoken
+        shell: bash
+        env:
+          # Opt-in flag only (any non-empty value enables app mode). The broker
+          # URL is hardcoded below — if it ever moves, sync autoducks. Absent
+          # flag = skip before any network call, so PAT-only repos never reach
+          # the central broker.
+          AUTODUCKS_APP: ${{ vars.AUTODUCKS_APP }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTODUCKS_APP:-}" ]; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BROKER="https://autoducks-api.gustavospgondim.workers.dev"
+          OIDC=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=autoducks-broker" | jq -r .value)
+          TOKEN=$(curl -sf -X POST -H "Authorization: Bearer $OIDC" \
+            "$BROKER/token" | jq -r .token)
+          echo "::add-mask::$TOKEN"
+          echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+          ref: >-
+            ${{
+              github.event_name == 'workflow_dispatch' && inputs.pr_number != '' && format('refs/pull/{0}/head', inputs.pr_number) ||
+              github.event.issue.pull_request != null && format('refs/pull/{0}/head', github.event.issue.number) ||
+              ''
+            }}
+      # Pin the machinery to the pipeline's cut commit BEFORE the agent runs, so
+      # an agent editing .autoducks on its own branch cannot corrupt the scripts
+      # that run its build, and the machinery cannot drift across waves/reviews
+      # (bug #952). Every later step runs from "${AUTODUCKS_PINNED_ROOT}/.autoducks".
+      - name: Snapshot machinery
+        id: snapshot
+        run: bash .autoducks/core/robustness/snapshot-machinery.sh
+      - name: Authorize
+        id: authz
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/security/authorize.sh"
+        env:
+          AUTODUCKS_AGENT: agent
+          ACTOR: ${{ github.event.comment.user.login || github.event.sender.login }}
+          AUTHOR_ASSOC: ${{ github.event.comment.author_association || github.event.issue.author_association }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUM: ${{ github.event.issue.number || inputs.pr_number || inputs.issue_number }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Load agent defaults
+        id: agent
+        if: steps.authz.outcome == 'success'
+        run: AUTODUCKS_AGENT=agent bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/config/load-agent-defaults.sh" >> "$GITHUB_OUTPUT"
+      - name: Set context
+        id: ctx
+        if: steps.authz.outcome == 'success'
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ -n "${{ inputs.pr_number }}" ]]; then
+              echo "issue_num=${{ inputs.pr_number }}" >> "$GITHUB_OUTPUT"
+              echo "is_pr=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "issue_num=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
+              echo "is_pr=false" >> "$GITHUB_OUTPUT"
+            fi
+            echo "model=${{ inputs.model }}" >> "$GITHUB_OUTPUT"
+            echo "effort=${{ inputs.effort }}" >> "$GITHUB_OUTPUT"
+            echo "max_turns=${{ inputs.turns }}" >> "$GITHUB_OUTPUT"
+            echo "commenter=${{ github.actor }}" >> "$GITHUB_OUTPUT"
+            echo "agent_name=${{ inputs.agent_name }}" >> "$GITHUB_OUTPUT"
+            echo "agent_name_error=" >> "$GITHUB_OUTPUT"
+            echo "steering_prompt=$(printf '%s' "${{ inputs.steering }}" | base64 | tr -d '\n')" >> "$GITHUB_OUTPUT"
+            echo "command=" >> "$GITHUB_OUTPUT"
+          else
+            echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+            echo "is_pr=${{ github.event.issue.pull_request != null }}" >> "$GITHUB_OUTPUT"
+            echo "commenter=${{ github.event.comment.user.login }}" >> "$GITHUB_OUTPUT"
+            source "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/config/parse-directive.sh" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
+      - name: Pre-execution
+        id: pre
+        if: steps.authz.outcome == 'success'
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/agents/agent/pre.sh"
+        env:
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          IS_PR: ${{ steps.ctx.outputs.is_pr }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          AGENT_NAME: ${{ steps.ctx.outputs.agent_name }}
+          AGENT_NAME_ERROR: ${{ steps.ctx.outputs.agent_name_error }}
+          STEERING_PROMPT: ${{ steps.ctx.outputs.steering_prompt }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: User pre hook
+        if: >-
+          steps.authz.outcome == 'success' && steps.pre.outputs.skip != 'true' &&
+          hashFiles('.github/actions/autoducks/agent-pre/action.yml') != ''
+        uses: ./.github/actions/autoducks/agent-pre
+        env:
+          AUTODUCKS_AGENT: agent
+          AUTODUCKS_STAGE: pre
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          IS_PR: ${{ steps.ctx.outputs.is_pr }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: Run LLM agent
+        id: llm
+        if: steps.authz.outcome == 'success' && steps.pre.outputs.skip != 'true'
+        uses: ./.autoducks/providers/llm/claude
+        with:
+          prompt_file: .autoducks/agents/agent/resolved-prompt.md
+          allowed_tools: ${{ steps.pre.outputs.tools || steps.agent.outputs.tools }}
+          model: ${{ steps.ctx.outputs.model || steps.pre.outputs.model || steps.agent.outputs.model }}
+          effort: ${{ steps.ctx.outputs.effort || steps.pre.outputs.effort || steps.agent.outputs.effort }}
+          max_turns: ${{ steps.ctx.outputs.max_turns || steps.pre.outputs.max_turns || steps.agent.outputs.max_turns }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_base_url: ${{ secrets.ANTHROPIC_BASE_URL || vars.ANTHROPIC_BASE_URL }}
+          anthropic_auth_token: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          github_token: ${{ steps.apptoken.outputs.value }}
+      - name: User post hook
+        if: >-
+          always() && steps.authz.outcome == 'success' && steps.pre.outputs.skip != 'true' &&
+          hashFiles('.github/actions/autoducks/agent-post/action.yml') != ''
+        uses: ./.github/actions/autoducks/agent-post
+        env:
+          AUTODUCKS_AGENT: agent
+          AUTODUCKS_STAGE: post
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          IS_PR: ${{ steps.ctx.outputs.is_pr }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          AGENT_OUTCOME: ${{ steps.llm.outcome }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: Post-execution
+        id: post
+        if: always() && steps.authz.outcome == 'success'
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/agents/agent/post.sh"
+        env:
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id || '0' }}
+          RUN_ID: ${{ github.run_id }}
+          COMMENTER: ${{ steps.ctx.outputs.commenter }}
+          MODEL: ${{ steps.ctx.outputs.model || steps.pre.outputs.model || steps.agent.outputs.model }}
+          EFFORT: ${{ steps.ctx.outputs.effort || steps.pre.outputs.effort || steps.agent.outputs.effort }}
+          JOB_STATUS: ${{ job.status }}
+          LLM_SKIPPED: ${{ steps.llm.outputs.skipped }}
+          LLM_ERROR_SUBTYPE: ${{ steps.llm.outputs.error_subtype }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      # Last-resort backstop for a corrupted post.sh: a hook that dies (or exits
+      # 0) without telling the issue anything would otherwise freeze a wave
+      # silently (#952), so post a notice from pure YAML instead.
+      # Gated on whether the hook *reported*, not on whether it *succeeded*:
+      # every deliberate-failure path reports and then exits 1 on purpose, and
+      # keying off `post.outcome` alone made the watchdog contradict the accurate
+      # report it had just posted (#117). The reporting helpers set
+      # `reported=true` in $GITHUB_OUTPUT before that exit; a genuinely corrupted
+      # hook never reaches them, never sets it, and still trips the watchdog.
+      - name: Failure watchdog
+        if: >-
+          always() && steps.authz.outcome == 'success' &&
+          (steps.llm.outcome == 'failure' || steps.post.outcome != 'success') &&
+          steps.post.outputs.reported != 'true'
+        env:
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_num }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment "$ISSUE_NUM" --repo "$REPO" --body \
+            "⚠️ **Agent run failed and its post-execution hook did not report cleanly.** \
+          This is a last-resort watchdog notice — the run's own failure reporting was \
+          skipped or errored (possible corrupted \`post.sh\`). \
+          [View the run logs](https://github.com/$REPO/actions/runs/$RUN_ID). \
+          **Next:** re-run with a larger turn budget, or inspect the hook." || true
