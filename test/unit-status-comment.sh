@@ -160,6 +160,60 @@ fi
 
 rm -rf "$SCRATCH" /tmp/autoducks-local /tmp/autoducks-status-comment-id.55
 
+# ---------------------------------------------------------------------------
+echo ""
+echo "── delegate posts a terminal reaction (#180) ──"
+
+# Every delegation path exits right after this call without doing agent work, so
+# if delegate does not move the reaction, nothing does: the trigger comment stays
+# on the 👀 set at dispatch and every watcher of the 👀 → 👍/😕 contract reads a
+# finished run as hung. Seven call sites had forgotten it, which is why the
+# reaction lives in the shared function rather than in each of them.
+DLOG=$(mktemp)
+trap 'rm -f "$DLOG"' EXIT
+
+react_to_comment() { echo "REACT:$1:$2" >> "$DLOG"; }
+status_comment::_label() { echo "engineer"; }
+status_comment::_run_link() { echo "[run](x)"; }
+status_comment::_edit() { echo "EDIT:$2" >> "$DLOG"; }
+
+# shellcheck source=/dev/null
+COMMENT_ID=4242
+source "$REPO_ROOT/.autoducks/core/feedback/status-comment.sh" 2>/dev/null || true
+# Re-stub: sourcing the module redefines the internals above.
+status_comment::_label() { echo "engineer"; }
+status_comment::_run_link() { echo "[run](x)"; }
+status_comment::_edit() { echo "EDIT:$2" >> "$DLOG"; }
+
+: > "$DLOG"
+status_comment::delegate 42 "Architect dispatched first."
+
+if grep -q 'REACT:4242:+1' "$DLOG"; then
+  pass "delegate reacts +1 on the trigger comment"
+else
+  fail "delegate posted no terminal reaction: $(tr '\n' ' ' < "$DLOG")"
+fi
+if grep -q 'EDIT:.*delegated' "$DLOG"; then
+  pass "delegate still edits the status comment"
+else
+  fail "delegate stopped editing the status comment"
+fi
+
+# Must not explode where react_to_comment was never sourced — status-comment.sh
+# is loaded in contexts that do not pull the reaction helper.
+unset -f react_to_comment
+: > "$DLOG"
+if status_comment::delegate 42 "no reaction helper here" 2>/dev/null; then
+  pass "delegate survives without react_to_comment loaded"
+else
+  fail "delegate failed when react_to_comment was absent"
+fi
+if grep -q 'EDIT:.*delegated' "$DLOG"; then
+  pass "and still posts the status comment in that case"
+else
+  fail "the status comment was lost when react_to_comment was absent"
+fi
+
 echo ""
 echo "═══ status-comment: $PASS passed, $FAIL failed ═══"
 [[ "$FAIL" -eq 0 ]] || exit 1

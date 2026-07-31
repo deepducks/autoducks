@@ -139,6 +139,27 @@ status_comment::delegate() {
   label=$(status_comment::_label)
   link=$(status_comment::_run_link)
   status_comment::_edit "$issue_id" "🔁 **\`${label}\`**: not ready — delegated on ${link}" "$details"
+
+  # Terminal reaction here rather than at the call site, breaking this file's
+  # usual separation from reactions on purpose (#180).
+  #
+  # Every delegation path exits immediately afterwards without doing agent work,
+  # so nothing else ever posts one: the trigger comment stays on the 👀 set at
+  # dispatch, and everything honouring the documented 👀 → 👍/😕 contract reads
+  # the run as still going. On autoducks-staging#12 the Engineer delegated,
+  # the Architect ran, the Engineer re-ran and finished — and the watcher was
+  # still waiting eight minutes later, because the reaction never moved.
+  #
+  # There were seven call sites and all seven had forgotten it. Putting it in
+  # the one function they share means the eighth cannot.
+  #
+  # `+1` and not a new reaction: a third terminal state would have to be taught
+  # to every consumer of the contract, and the 🔁 status comment above already
+  # says a handoff happened. What the reaction has to communicate is only "stop
+  # waiting on this comment".
+  if declare -F react_to_comment >/dev/null 2>&1; then
+    react_to_comment "${COMMENT_ID:-}" "+1" 2>/dev/null || true
+  fi
 }
 
 # ── Persistent orchestrator status comment (survives fresh runners) ─
