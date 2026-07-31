@@ -192,10 +192,45 @@ if metarepo::enabled; then
     [[ -n "$_m" && -d "$_m" ]] || continue
     git::submodule_remote "$_m"
     git -C "$_m" fetch origin "$CHILD_BRANCH" 2>/dev/null || true
-    # Branch off the current pinned SHA (== child feature head in sequential mode).
-    git -C "$_m" checkout -B "$CHILD_BRANCH" 2>/dev/null \
-      || git -C "$_m" checkout -B "$CHILD_BRANCH" HEAD
+
+    # The recorded gitlink is *provisional*: submodule_deliver writes the child
+    # feature-branch tip because an async auto-merge cannot report the SHA it
+    # will produce, and reconcile_gitlinks only promotes it to the child's
+    # default-branch tip later. Branching a new task off that pin is therefore
+    # only correct while the pin is still the child's head.
+    #
+    # Once the child has been delivered and its feature branch deleted, the
+    # fetch above finds nothing and `checkout -B` lands on the pin — a commit
+    # that predates the delivery merge. New work is then built on a base
+    # missing everything that merged with it, and the suite goes red on code
+    # that is already correct upstream. Observed on the update-agent task: the
+    # branch was recreated at the pre-delivery tip and arrived without two
+    # already-merged fixes.
+    #
+    # So when the pinned SHA is already contained in the child's default branch,
+    # start from that branch's tip instead. That is strictly forward — the pin
+    # is an ancestor — and it is a no-op mid-feature, when the pin is the head
+    # of a live child branch and therefore not yet merged anywhere.
+    _base_ref=""
+    if ! git -C "$_m" rev-parse --verify -q "origin/$CHILD_BRANCH" >/dev/null 2>&1; then
+      _child_default="$(git -C "$_m" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+      _child_default="${_child_default:-origin/main}"
+      git -C "$_m" fetch -q origin "${_child_default#origin/}" 2>/dev/null || true
+      _pinned="$(git -C "$_m" rev-parse HEAD 2>/dev/null || true)"
+      if [[ -n "$_pinned" ]] && git -C "$_m" merge-base --is-ancestor "$_pinned" "$_child_default" 2>/dev/null; then
+        _base_ref="$_child_default"
+        echo "::notice::metarepo: '$_m' pin $(git -C "$_m" rev-parse --short HEAD) is already delivered — branching $CHILD_BRANCH from $_child_default instead of the stale pin." >&2
+      fi
+    fi
+
+    if [[ -n "$_base_ref" ]]; then
+      git -C "$_m" checkout -B "$CHILD_BRANCH" "$_base_ref"
+    else
+      git -C "$_m" checkout -B "$CHILD_BRANCH" 2>/dev/null \
+        || git -C "$_m" checkout -B "$CHILD_BRANCH" HEAD
+    fi
   done
+  unset _base_ref _child_default _pinned
 fi
 
 # Prepare task spec for the LLM. resolve_context reads .context.developer.parts
