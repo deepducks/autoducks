@@ -75,6 +75,6 @@ git::merge_pr() {
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   case "${1:-}" in
-    --help) echo "Usage: git::merge_pr PR_NUMBER"; echo "  Merge a pull request using the resolved merge method"; echo "  Method: AUTODUCKS_MERGE_METHOD (merge|squash|rebase|auto; default auto-detects)"; echo "  Requires: REPO env var"; exit 0 ;;
+    --help) echo "Usage: git::merge_pr PR_NUMBER [now|auto]"; echo "  Merge a pull request using the resolved merge method"; echo "  auto: arm host auto-merge so required checks gate it; returns 1 (PR left open) if unavailable"; echo "  Method: AUTODUCKS_MERGE_METHOD (merge|squash|rebase|auto; default auto-detects)"; echo "  Requires: REPO env var"; exit 0 ;;
   esac
 fi

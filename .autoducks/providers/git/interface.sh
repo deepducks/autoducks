@@ -27,7 +27,13 @@ done
 #   git::create_branch(base, name)
 #   git::branch_exists(name)                         → exit code 0/1
 #   git::create_pr(head, base, title, body, draft?)   → pr_number
-#   git::merge_pr(pr_number)                          → 0 ok / 2 method-not-allowed / 1 other
+#   git::merge_pr(pr_number, when?)                   → 0 ok / 2 method-not-allowed / 1 other
+#     when ∈ {now, auto}, default now. `auto` asks the host to hold the merge
+#     until the repo's own required checks pass, and MUST NOT fall back to
+#     merging immediately: callers pass it precisely so the consumer's CI gates
+#     the merge. A provider with no auto-merge equivalent must return 1 and
+#     leave the PR open, never merge now — silently merging would defeat the
+#     gate rather than degrade from it.
 #   git::close_pr(pr_number, comment)
 #   git::list_open_prs(base_branch?)                  → JSON array
 #   git::list_merged_prs(base_branch)                 → JSON array
