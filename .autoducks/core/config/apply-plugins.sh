@@ -129,9 +129,10 @@ sha256_of() { # content on stdin
 }
 
 # ── Valid enum sets (mirrors plugin.schema.json $defs) ──────────────────────
-ALL_AGENTS=(architect engineer developer reviewer fix resolver rework defer product)
+ALL_AGENTS=(architect engineer developer reviewer fix resolver rework defer product agent)
 ALL_AGENTS_SPACE="${ALL_AGENTS[*]}"
 HOOK_POINTS=(
+  agent-pre agent-post
   architect-pre architect-post
   close-pre close-post
   defer-pre defer-post

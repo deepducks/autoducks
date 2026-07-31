@@ -22,6 +22,8 @@ AUTODUCKS_PROGRESS_LABELS=(
   "Resolve:done|0E8A16|Conflicts resolved"
   "Resolve:conflict|D93F0B|Conflicts could not be auto-resolved"
   "auto-resolved|0052CC|Conflicts auto-resolved by the resolver agent"
+  "Agent:running|FBCA04|Custom agent is running"
+  "Agent:done|0E8A16|Custom agent finished"
 )
 
 # Sticky Mode:* labels indicating the orchestrator's execution mode. Distinct
