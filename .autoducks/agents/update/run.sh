@@ -188,7 +188,7 @@ update::snapshot_pre_update() {
 update::discard_branch() {
   local branch="${1:-}"
   [[ -n "$branch" ]] || return 0
-  gh api "repos/$REPO/git/refs/heads/$branch" -X DELETE --silent 2>/dev/null || true
+  git::delete_branch "$branch" 2>/dev/null || true
   echo "::notice::update: discarded $branch — the cycle did not reach a PR." >&2
 }
 
@@ -205,9 +205,14 @@ update::apply_branch() {
   # The autoducks/update-* namespace belongs to this agent: nothing else writes
   # it, and a stale one has no value because the target SHA is recomputed each
   # cycle. Clear it first, then create.
-  if gh api "repos/$REPO/git/refs/heads/$branch" --silent 2>/dev/null; then
+  # Through the frozen git:: interface, not `gh` directly: security-guidelines
+  # rule 4 confines host calls to providers/, and the design's carve-out for
+  # direct calls covers source_repo only. These target the consumer's own repo,
+  # so on a non-GitHub provider the inlined version would hard-fail and leave
+  # the stale ref that wedges the next cycle — the exact bug this block fixes.
+  if git::branch_exists "$branch" 2>/dev/null; then
     echo "::notice::update: $branch already exists from an earlier cycle — replacing it." >&2
-    gh api "repos/$REPO/git/refs/heads/$branch" -X DELETE --silent 2>/dev/null || true
+    git::delete_branch "$branch" 2>/dev/null || true
   fi
 
   git::create_branch "$base" "$branch"
@@ -744,10 +749,23 @@ No PR was opened and no commit was made; the update branch was discarded."
   local title="chore(autoducks): update machinery to v${target_version}"
 
   if [[ "$MODE" == "commit" ]]; then
-    update::deliver_commit "$branch" "$AUTODUCKS_BASE_BRANCH" "$target_version"
-    git push origin "HEAD:refs/heads/$AUTODUCKS_BASE_BRANCH"
-    update::report_success "Pushed \`$title\` directly to \`$AUTODUCKS_BASE_BRANCH\` (mode: commit)."
-    exit 0
+    # commit mode is a delivery *method*, not an exemption. The constraints say a
+    # major bump never merges unattended at any setting, and a drifted or
+    # unevaluated tree must be seen before it is overwritten — bump_kind,
+    # has_breaking and has_drift are all computed just above and were simply not
+    # consulted here, so `mode: commit` pushed a 2.0.0 straight to the default
+    # branch and dropped the drift report with it.
+    if [[ "$bump_kind" == "major" || "$has_breaking" == "1" || "$has_drift" == "1" ]]; then
+      local _why="a major bump"
+      [[ "$bump_kind" != "major" && "$has_breaking" == "1" ]] && _why="a breaking changelog entry"
+      [[ "$bump_kind" != "major" && "$has_breaking" != "1" ]] && _why="local machinery drift (or drift that could not be evaluated)"
+      echo "::notice::update: mode is 'commit' but this update carries $_why — opening a PR instead of pushing to $AUTODUCKS_BASE_BRANCH." >&2
+    else
+      update::deliver_commit "$branch" "$AUTODUCKS_BASE_BRANCH" "$target_version"
+      git push origin "HEAD:refs/heads/$AUTODUCKS_BASE_BRANCH"
+      update::report_success "Pushed \`$title\` directly to \`$AUTODUCKS_BASE_BRANCH\` (mode: commit)."
+      exit 0
+    fi
   fi
 
   update::deliver_commit "$branch" "$AUTODUCKS_BASE_BRANCH" "$target_version"
@@ -769,6 +787,8 @@ No PR was opened and no commit was made; the update branch was discarded."
   if update::auto_merge_eligible "$AUTODUCKS_UPDATE_AUTO_MERGE" "$bump_kind" "$has_breaking" "$has_drift" "$checks_ok"; then
     if git::merge_pr "$pr_number" auto; then
       merged="auto-merge armed"
+    else
+      merged="not merged (auto-merge unavailable — merge manually once checks pass)"
     fi
   fi
 
