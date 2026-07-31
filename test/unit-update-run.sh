@@ -249,23 +249,28 @@ OUT="$(env PATH="$D/bin:$PATH" AUTODUCKS_ROOT="$SCRATCH_ROOT" REPO="acme/consume
 echo ""
 echo "── Step 7: auto-merge eligibility matrix ──"
 D="$SCRATCH_ROOT/d7"; mk_gh "$D"
-check_auto_merge() { # label cfg bump breaking drift checks_ok expect(0=eligible,1=not)
-  local label="$1" cfg="$2" bump="$3" breaking="$4" drift="$5" checks="$6" expect="$7"
+# The signature dropped its CHECKS_OK argument: a verify-machinery failure
+# discards the branch and exits, so the value was provably 1 at the only call
+# site. Machinery verification is Step 6's job; the consumer's own required
+# checks are GitHub's, held by auto-merge.
+check_auto_merge() { # label cfg bump breaking drift expect(0=eligible,1=not)
+  local label="$1" cfg="$2" bump="$3" breaking="$4" drift="$5" expect="$6"
   local rc=0
   env PATH="$D/bin:$PATH" AUTODUCKS_ROOT="$SCRATCH_ROOT" REPO="acme/consumer" GITHUB_ACTIONS=true GH_TOKEN=t GH_LOG="$D/gh.log" \
-    bash -c 'source "$1"; update::auto_merge_eligible "$2" "$3" "$4" "$5" "$6"' _ "$RUN_SH" "$cfg" "$bump" "$breaking" "$drift" "$checks" || rc=$?
+    bash -c 'source "$1"; update::auto_merge_eligible "$2" "$3" "$4" "$5"' _ "$RUN_SH" "$cfg" "$bump" "$breaking" "$drift" || rc=$?
   if [[ "$rc" -eq "$expect" ]]; then pass "$label"; else fail "$label (rc=$rc, expected $expect)"; fi
 }
 
-check_auto_merge "off: never eligible even for a clean patch" "off" "patch" "0" "0" "1" 1
-check_auto_merge "patch cfg + patch bump, clean, checks green → eligible" "patch" "patch" "0" "0" "1" 0
-check_auto_merge "patch cfg + minor bump → not eligible" "patch" "minor" "0" "0" "1" 1
-check_auto_merge "minor cfg + patch bump, clean → eligible" "minor" "patch" "0" "0" "1" 0
-check_auto_merge "minor cfg + minor bump, clean → eligible" "minor" "minor" "0" "0" "1" 0
-check_auto_merge "minor cfg + major bump → NEVER eligible" "minor" "major" "0" "0" "1" 1
-check_auto_merge "minor cfg + minor bump but breaking notes → not eligible" "minor" "minor" "1" "0" "1" 1
-check_auto_merge "minor cfg + minor bump but drift present → not eligible" "minor" "minor" "0" "1" "1" 1
-check_auto_merge "minor cfg + minor bump but checks not green → not eligible" "minor" "minor" "0" "0" "0" 1
+check_auto_merge "off: never eligible even for a clean patch" "off" "patch" "0" "0" 1
+check_auto_merge "patch cfg + patch bump, clean → eligible" "patch" "patch" "0" "0" 0
+check_auto_merge "patch cfg + minor bump → not eligible" "patch" "minor" "0" "0" 1
+check_auto_merge "minor cfg + patch bump, clean → eligible" "minor" "patch" "0" "0" 0
+check_auto_merge "minor cfg + minor bump, clean → eligible" "minor" "minor" "0" "0" 0
+check_auto_merge "minor cfg + major bump → NEVER eligible" "minor" "major" "0" "0" 1
+check_auto_merge "minor cfg + minor bump but breaking notes → not eligible" "minor" "minor" "1" "0" 1
+check_auto_merge "minor cfg + minor bump but drift present → not eligible" "minor" "minor" "0" "1" 1
+check_auto_merge "major cfg is not a valid setting → never eligible" "major" "patch" "0" "0" 1
+check_auto_merge "unknown cfg value → never eligible" "banana" "patch" "0" "0" 1
 
 echo ""
 echo "═══ update-run: $PASS passed, $FAIL failed ═══"
