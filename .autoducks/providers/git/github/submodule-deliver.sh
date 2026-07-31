@@ -230,11 +230,29 @@ git::submodule_deliver() {
     local mergeable_state mergeable merge_state_status
     mergeable_state="$(git::_child_wait_for_mergeable "$slug" "$pr_num" "$token")"
     read -r mergeable merge_state_status <<< "$mergeable_state"
-    if [[ "$mergeable" == "CONFLICTING" || ( "$mergeable" == "UNKNOWN" && "$merge_state_status" == "BEHIND" ) ]]; then
-      echo "::warning::submodule_deliver: protected child PR #$pr_num on $slug is $mergeable/$merge_state_status — leaving it open for conflict resolution." >&2
+    # Arm auto-merge only on a definitive MERGEABLE. The guard used to admit
+    # anything that was not CONFLICTING-or-UNKNOWN/BEHIND, which meant a plain
+    # UNKNOWN/UNKNOWN passed — and that is precisely what a freshly-created PR
+    # reports while GitHub is still computing mergeability. _child_wait_for_mergeable
+    # gives up after its poll budget and returns whatever it last saw, so a
+    # genuinely conflicting PR could be armed during the computation window (#176).
+    #
+    # Undetermined is not safe. Leaving the PR open costs a resolver run; arming
+    # it wrongly cost the branch holding the work.
+    if [[ "$mergeable" != "MERGEABLE" ]]; then
+      echo "::warning::submodule_deliver: protected child PR #$pr_num on $slug is $mergeable/$merge_state_status — not arming auto-merge; leaving it open for conflict resolution." >&2
       echo "$feat_sha 0 1 $pr_num"; return 0
     fi
-    if GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --merge --auto --delete-branch 2>/dev/null; then
+    # NO --delete-branch here. `--auto` defers the merge until required checks
+    # pass, but gh's --delete-branch does not wait for that — it deletes as soon
+    # as the command returns. GitHub closes a PR whose head branch disappears, so
+    # the pairing armed auto-merge and then immediately closed the PR unmerged,
+    # cancelled the auto-merge, and destroyed the branch holding the work (#176:
+    # PR #1140 went auto_merge_enabled → closed/head_ref_deleted in 3 seconds,
+    # and the resolver dispatched afterwards died at checkout on a branch that no
+    # longer existed). The synchronous merges below keep --delete-branch, because
+    # there the merge has already happened by the time gh returns.
+    if GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --merge --auto 2>/dev/null; then
       echo "::notice::submodule_deliver: enabled auto-merge (merge commit) on protected child PR #$pr_num on $slug — merges when required checks pass." >&2
       # Auto-merge is only as good as the checks it waits on: verify they exist
       # rather than assuming the PR's creation event produced a run (#119c).
