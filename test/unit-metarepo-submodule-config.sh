@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unit tests for metarepo::stale_submodule_keys / metarepo::unconfigured_submodules
+# Unit tests for metarepo::stale_submodule_keys / metarepo::protected_for_path
 # Run: bash test/unit-metarepo-submodule-config.sh
 #
 # `metarepo.submodules` is keyed by submodule path but nothing tied the two
@@ -57,10 +57,12 @@ else
   fail "clean config reported stale keys: '$out'"
 fi
 
-if out=$(metarepo::unconfigured_submodules); then
-  pass "no unconfigured submodules reported, exit 0"
+# There is deliberately no inverse check — see the note in metarepo.sh. Assert
+# the helper stayed gone, so nobody reintroduces the nudge toward inert config.
+if ! declare -F metarepo::unconfigured_submodules >/dev/null; then
+  pass "no 'submodule without a config entry' helper exists"
 else
-  fail "clean config reported unconfigured submodules: '$out'"
+  fail "metarepo::unconfigured_submodules is back — it asks for config that states nothing"
 fi
 
 # ---------------------------------------------------------------------------
@@ -92,22 +94,23 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "── a submodule with no config entry is advisory, not stale ──"
+echo "── a submodule with no config entry needs no entry ──"
 
 fixture_gitmodules child-a child-b child-c
 fixture_config child-a child-b
 
 if out=$(metarepo::stale_submodule_keys); then
-  pass "an unconfigured submodule is not a stale key"
+  pass "a submodule with no config entry is not a stale key"
 else
-  fail "unconfigured submodule wrongly reported stale: '$out'"
+  fail "submodule without an entry wrongly reported stale: '$out'"
 fi
 
-out=$(metarepo::unconfigured_submodules) && fail "expected non-zero exit"
-if [[ "$out" == "child-c" ]]; then
-  pass "reports child-c as unconfigured"
+# And it must still resolve — an absent entry means "use the defaults", not
+# "unknown child".
+if [[ "$(metarepo::protected_for_path child-c)" != "" ]]; then
+  pass "a submodule with no config entry still resolves its protection"
 else
-  fail "wrong unconfigured output: '$out' (want 'child-c')"
+  fail "child-c with no entry resolved to nothing"
 fi
 
 # ---------------------------------------------------------------------------
