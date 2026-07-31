@@ -102,8 +102,29 @@ fi
 if [[ -z "$OLD_REF" || -z "$NEW_REF" ]]; then
   (cd "$SOURCE_ROOT" && git fetch origin main --quiet 2>/dev/null || true)
 fi
-[[ -z "$OLD_REF" ]] && OLD_REF=$(cd "$SOURCE_ROOT" && git merge-base HEAD origin/main)
+# OLD_REF must be a strict ancestor of NEW_REF, or the agent short-circuits on
+# "already up to date" and the run proves nothing. The previous default,
+# `git merge-base HEAD origin/main`, resolved to HEAD itself on any checkout
+# level with main — i.e. every time you run this straight after landing work.
+if [[ -z "$OLD_REF" ]]; then
+  OLD_REF=$(cd "$SOURCE_ROOT" && git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+fi
+if [[ -z "$OLD_REF" ]]; then
+  # No releases yet: any ancestor exercises the update path. Ten back if the
+  # history is that long, else the root commit.
+  OLD_REF=$(cd "$SOURCE_ROOT" && { git rev-parse "HEAD~10" 2>/dev/null \
+              || git rev-list --max-parents=0 HEAD | head -1; })
+fi
 [[ -z "$NEW_REF" ]] && NEW_REF=$(cd "$SOURCE_ROOT" && git rev-parse HEAD)
+
+OLD_RESOLVED=$(cd "$SOURCE_ROOT" && git rev-parse "$OLD_REF")
+NEW_RESOLVED=$(cd "$SOURCE_ROOT" && git rev-parse "$NEW_REF")
+if [[ "$OLD_RESOLVED" == "$NEW_RESOLVED" ]]; then
+  echo "smoke-test-update: --old-ref and --new-ref resolve to the same commit" >&2
+  echo "  ($OLD_RESOLVED). The update agent would report 'already up to date'" >&2
+  echo "  and no part of the delivery path would run. Pass an older --old-ref." >&2
+  exit 1
+fi
 
 SCRATCH_REPO_NAME="autoducks-smoke-update-${TIMESTAMP}"
 SCRATCH_REPO="${SCRATCH_OWNER:+$SCRATCH_OWNER/}${SCRATCH_REPO_NAME}"
@@ -163,8 +184,12 @@ pass "Worktrees ready (old=$OLD_VERSION@${OLD_SHA:0:7}, new=$NEW_VERSION@${NEW_S
 echo ""
 
 echo "[2/12] Creating scratch repo $SCRATCH_REPO..."
-gh repo create "$SCRATCH_REPO" --private --clone="$SCRATCH_DIR" >/dev/null
+# `gh repo create --clone` is a boolean that clones into the *current*
+# directory — passing it a path makes gh parse the path as a bool and abort.
+# Create, then clone explicitly to the destination we want.
+gh repo create "$SCRATCH_REPO" --private >/dev/null
 SCRATCH_CREATED=true
+gh repo clone "$SCRATCH_REPO" "$SCRATCH_DIR" -- --quiet 2>/dev/null
 pass "Scratch repo created and cloned to $SCRATCH_DIR"
 echo ""
 
@@ -234,13 +259,48 @@ echo "[7/12] Driving the update agent to $NEW_REF..."
 UPDATE_LOG="$WORK_DIR/update-run-1.log"
 COMMENTER=$(gh api user --jq '.login' 2>/dev/null || echo "smoke-test-update")
 GH_TOKEN_VALUE=$(gh auth token 2>/dev/null || echo "")
+
+# A machinery update always touches .github/workflows/, which the default
+# GITHUB_TOKEN cannot push. The agent's Step 2 pre-flight aborts with
+# `no-identity` unless AUTODUCKS_APP_TOKEN or AUTODUCKS_PAT is in its
+# environment — the workflow feeds the latter from the repository secret.
+# Fail here rather than 40 lines into the agent log.
+if ! gh auth status 2>&1 | grep -q "workflow"; then
+  echo "smoke-test-update: the authenticated gh token lacks the 'workflow' scope." >&2
+  echo "  The update agent cannot push .github/workflows/ without it, so the" >&2
+  echo "  delivery path this test exists to exercise would abort at Step 2." >&2
+  echo "  Run: gh auth refresh -s workflow" >&2
+  exit 1
+fi
+
+# drive_update_agent RUN_SUFFIX LOGFILE → run the agent exactly as
+# autoducks-update.yml does, returning its exit code.
+#
+# The workflow declares REF/MODE/DRY_RUN/REPO/RUN_ID/COMMENTER/GH_TOKEN and
+# inherits the rest from the runner. Reproducing only the declared half is not
+# the workflow's contract: providers/llm/claude/resolve-endpoint.sh aborts with
+# "GITHUB_OUTPUT must be set" before the agent does anything, so every run
+# failed at step 7 with no PR and steps 8-10 fell over behind it.
+drive_update_agent() {
+  local suffix="$1" logfile="$2" rc=0
+  local out="$WORK_DIR/github-output-$suffix.txt"
+  local env_file="$WORK_DIR/github-env-$suffix.txt"
+  local summary="$WORK_DIR/github-step-summary-$suffix.md"
+  : > "$out"; : > "$env_file"; : > "$summary"
+  (
+    cd "$SCRATCH_DIR"
+    REF="$NEW_REF" MODE="pr" DRY_RUN="false" REPO="$SCRATCH_REPO" \
+    RUN_ID="smoke-${TIMESTAMP}-${suffix}" COMMENTER="$COMMENTER" GH_TOKEN="$GH_TOKEN_VALUE" \
+    AUTODUCKS_PAT="$GH_TOKEN_VALUE" \
+    GITHUB_ACTIONS="true" GITHUB_OUTPUT="$out" GITHUB_ENV="$env_file" \
+    GITHUB_STEP_SUMMARY="$summary" GITHUB_WORKSPACE="$SCRATCH_DIR" \
+      bash "$NEW_WORKTREE/.autoducks/agents/update/run.sh"
+  ) > "$logfile" 2>&1 || rc=$?
+  return "$rc"
+}
+
 UPDATE_RC=0
-(
-  cd "$SCRATCH_DIR"
-  REF="$NEW_REF" MODE="pr" DRY_RUN="false" REPO="$SCRATCH_REPO" \
-  RUN_ID="smoke-${TIMESTAMP}-1" COMMENTER="$COMMENTER" GH_TOKEN="$GH_TOKEN_VALUE" \
-    bash "$NEW_WORKTREE/.autoducks/agents/update/run.sh"
-) > "$UPDATE_LOG" 2>&1 || UPDATE_RC=$?
+drive_update_agent 1 "$UPDATE_LOG" || UPDATE_RC=$?
 
 if [[ $UPDATE_RC -eq 0 ]]; then
   pass "update agent run completed (see $UPDATE_LOG)"
@@ -275,7 +335,10 @@ if [[ "$PR_COUNT" -eq 1 ]]; then
     fail "PR #$PR_NUMBER missing label Autoducks:update (labels: ${PR_LABELS:-none})"
   fi
 
-  if echo "$PR_BODY" | grep -qiE '^#+ .*drift'; then
+  # The heading is emitted verbatim by update::pr_body (run.sh:464) and does not
+  # contain the word "drift" — the previous `^#+ .*drift` pattern could never
+  # match, so this assertion failed against a PR body that was in fact correct.
+  if echo "$PR_BODY" | grep -qF '## ⚠️ Local machinery changes overwritten'; then
     pass "PR #$PR_NUMBER body has a drift section"
   else
     fail "PR #$PR_NUMBER body has no drift section (observed body:\n$PR_BODY)"
@@ -346,10 +409,14 @@ if [[ -n "$PR_BRANCH" ]]; then
     pass "locally edited $DRIFT_FILE was replaced by the update, as designed (reporting is asserted next)"
   fi
 
-  if echo "$PR_BODY" | grep -qF "$DRIFT_FILE"; then
-    pass "PR body's drift section names $DRIFT_FILE"
+  # update::drift_section (run.sh:400-407) lists paths relative to .autoducks/,
+  # because that is the tree drift is detected inside. Asserting on the
+  # repo-relative form failed against a body that named the file correctly.
+  DRIFT_FILE_REPORTED="${DRIFT_FILE#.autoducks/}"
+  if echo "$PR_BODY" | grep -qF "$DRIFT_FILE_REPORTED"; then
+    pass "PR body's drift section names $DRIFT_FILE_REPORTED"
   else
-    fail "PR body does not mention $DRIFT_FILE in its drift section (observed body:\n$PR_BODY)"
+    fail "PR body does not mention $DRIFT_FILE_REPORTED in its drift section (observed body:\n$PR_BODY)"
   fi
 else
   fail "no PR branch to inspect — skipping preservation/drift assertions"
@@ -359,12 +426,7 @@ echo ""
 echo "[11/12] Re-running the updater against the same target..."
 UPDATE_LOG_2="$WORK_DIR/update-run-2.log"
 UPDATE_RC_2=0
-(
-  cd "$SCRATCH_DIR"
-  REF="$NEW_REF" MODE="pr" DRY_RUN="false" REPO="$SCRATCH_REPO" \
-  RUN_ID="smoke-${TIMESTAMP}-2" COMMENTER="$COMMENTER" GH_TOKEN="$GH_TOKEN_VALUE" \
-    bash "$NEW_WORKTREE/.autoducks/agents/update/run.sh"
-) > "$UPDATE_LOG_2" 2>&1 || UPDATE_RC_2=$?
+drive_update_agent 2 "$UPDATE_LOG_2" || UPDATE_RC_2=$?
 
 PRS_JSON_2=$(gh pr list --repo "$SCRATCH_REPO" --state all --json number 2>/dev/null || echo "[]")
 PR_COUNT_2=$(echo "$PRS_JSON_2" | jq 'length')
