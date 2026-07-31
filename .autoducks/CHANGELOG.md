@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.3.0] - 2026-07-31
+
+### Added
+- feat(metarepo): sync the parent gitlink when a child advances (#1141)
+
+### Fixed
+- fix(release): give --pr and --tag, so the PR route actually exists (#1146)
+- fix(metarepo): stop auto-merge from deleting the branch it is waiting on (#1145)
+- fix(product,rework): pass bulk agent context to jq through files (#1144)
+- fix(metarepo): stop asking for a submodule entry that states nothing (#1142)
+- fix(release): refuse before mutating when main cannot be pushed directly (#1139)
+
+### Changed
+- Autoducks: deliver feature/82-custom-agents (#1143)
+- Merge remote-tracking branch 'origin/main' into HEAD
+- Merge origin/main into feature/82-custom-agents
+- Implement issue #163
+- Implement issue #162
+- Implement issue #161
+- Implement issue #160
+- Implement issue #159
+- Implement issue #158
+- Implement issue #157
+- Implement issue #156
+
 ## [0.2.0] - 2026-07-31
 
 ### Added
