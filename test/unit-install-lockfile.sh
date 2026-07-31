@@ -68,8 +68,18 @@ echo "$FRESH_OUT" | grep -q "Lockfile written" \
 [[ "$(jq -r '.schemaVersion' "$LOCKFILE")" == "1" ]] \
   && pass "lockfile: schemaVersion is 1" || fail "lockfile: schemaVersion wrong"
 
-[[ "$(jq -r '.ref' "$LOCKFILE")" == "main" ]] \
-  && pass "lockfile: ref recorded (main — the stable-channel default)" || fail "lockfile: ref wrong"
+# `stable` resolves to the highest v<semver> tag and `edge` to the default
+# branch — the semantics agents/update/run.sh and the updates reference define.
+# This assertion used to read `main`, encoding the installer's old inverted
+# mapping, under which a fresh install landed on main's tip while recording
+# `channel: stable`, so the first update resolved stable to an older tag and
+# proposed moving backwards.
+#
+# These tests drive the offline seam (AUTODUCKS_SOURCE_DIR), where the tree
+# comes from disk and there is no ref to resolve against, so the installer
+# records the channel name itself.
+[[ "$(jq -r '.ref' "$LOCKFILE")" == "stable" ]] \
+  && pass "lockfile: ref recorded (stable — the channel, offline seam)" || fail "lockfile: ref wrong"
 
 [[ "$(jq -r '.channel' "$LOCKFILE")" == "stable" ]] \
   && pass "lockfile: channel defaults to stable" || fail "lockfile: channel wrong"
