@@ -338,10 +338,28 @@ process_definition() {
     cfg="$(jq -c --arg n "$name" '.custom_agents.agents[$n] // {}' "$CONFIG" 2>/dev/null || echo '{}')"
   fi
 
+  # The tool grant is read from the BASE ref's autoducks.json, never the
+  # checked-out one. CONFIG resolves under $REPO_ROOT, which on a PR surface
+  # is the PR head — so a contributor who touches nothing but autoducks.json
+  # could add custom_agents.agents.<name>.tools = ["Bash"] for an already
+  # merged, unmodified definition. The definition-file clamp below would not
+  # fire (the file is byte-identical to base) and the escalation would land
+  # through the higher-precedence input instead. Everything else the config
+  # supplies (model, context, labels, …) is not a privilege and keeps reading
+  # the live file.
+  local cfg_tools_src="$cfg"
+  if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
+    local base_cfg
+    base_cfg="$(git -C "$REPO_ROOT" show "$AUTODUCKS_BASE_REF:.autoducks/autoducks.json" 2>/dev/null \
+      | jq -c --arg n "$name" '.custom_agents.agents[$n] // {}' 2>/dev/null || echo '{}')"
+    [[ -n "$base_cfg" ]] || base_cfg='{}'
+    cfg_tools_src="$base_cfg"
+  fi
+
   # tools: config wins over frontmatter
   local tools_declared_json tools_effective_json cfg_tools_json
   tools_declared_json="$(arr_to_json "${FM_TOOLS_ARR[@]}")"
-  cfg_tools_json="$(jq -c 'if has("tools") then (.tools | if type=="array" then . else (split(",") | map(gsub("^\\s+|\\s+$";""))) end) else empty end' <<<"$cfg" 2>/dev/null || echo "")"
+  cfg_tools_json="$(jq -c 'if has("tools") then (.tools | if type=="array" then . else (split(",") | map(gsub("^\\s+|\\s+$";""))) end) else empty end' <<<"$cfg_tools_src" 2>/dev/null || echo "")"
   if [[ -n "$cfg_tools_json" ]]; then
     tools_effective_json="$cfg_tools_json"
   else
@@ -373,10 +391,21 @@ process_definition() {
       verified="base"
     else
       verified="unverified"
+      # Clamp to a dedicated `unverified_tools` set, NOT to the lane default.
+      # The lane default is calibrated for definitions that have been through
+      # review; it includes Write, Edit, WebFetch and WebSearch. An unverified
+      # body is injected into the prompt verbatim, so clamping to that set
+      # would still let attacker-authored text read the repository and encode
+      # what it finds into a WebFetch URL. `unverified_tools` drops network
+      # egress and filesystem writes; what remains is read and inspect.
+      #
+      # Residual risk, stated so the next reader does not over-trust this:
+      # the definition BODY is still unreviewed content driving the prompt.
+      # Clamped is not contained — it is a smaller blast radius.
       local lane_defaults="${AUTODUCKS_ROOT:-$REPO_ROOT/.autoducks}/agents/agent/defaults.json"
       local lane_tools_json=""
       [[ -f "$lane_defaults" ]] &&
-        lane_tools_json="$(jq -c '.tools // []' "$lane_defaults" 2>/dev/null || echo "")"
+        lane_tools_json="$(jq -c '.unverified_tools // .tools // []' "$lane_defaults" 2>/dev/null || echo "")"
       [[ -n "$lane_tools_json" ]] || lane_tools_json='[]'
       if [[ "$tools_effective_json" != "$lane_tools_json" ]]; then
         echo "::warning::discover-agents: '$name' ($rel) differs from $AUTODUCKS_BASE_REF — tool grant clamped to the lane default." >&2

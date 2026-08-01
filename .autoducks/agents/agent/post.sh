@@ -112,12 +112,16 @@ if [[ -n "$(git status --porcelain)" ]]; then
         || git checkout -B "$AGENT_BRANCH" "$DEFAULT_BRANCH"
       if ! git stash pop >/dev/null 2>&1; then
         # Refused or conflicted. Either way the tree is not what the agent
-        # wrote, so stop before committing anything. The stash is left in
-        # place and named in the comment so the work is at least recoverable
-        # from the run, rather than silently discarded.
+        # wrote, so stop before committing anything: discard the half-merged
+        # tree and the stash entry, and tell the user plainly that the code
+        # changes are gone. Keeping the stash would be pointless — it dies
+        # with the runner either way, and naming it in the comment would only
+        # promise a recovery that is not possible.
+        #
+        # The run still exits 0: the agent did answer, and that answer is
+        # posted. Only the code delivery failed, and the comment says so.
         git checkout -- . 2>/dev/null || true
         git stash drop >/dev/null 2>&1 || true
-        export AUTODUCKS_FAIL_CATEGORY="merge-conflict"
         DELIVERY_NOTE=$'\n\n'"⚠️ The agent's edits conflict with \`${DEFAULT_BRANCH}\` and could not be replayed onto it, so no branch or pull request was created. The response above still stands; the code changes were discarded."
         AGENT_BRANCH=""
       fi
@@ -133,8 +137,10 @@ fi
 if [[ -n "${AGENT_BRANCH:-}" && -n "$(git status --porcelain)" ]]; then
   # A conflicted pop resolves nothing into the index; refuse to commit markers.
   if [[ -n "$(git diff --name-only --diff-filter=U)" ]]; then
+    # Belt-and-braces: the pop check above should already have caught this.
+    # No AUTODUCKS_FAIL_CATEGORY here — nothing downstream reads it on the
+    # success path, and the run does succeed: the response is still posted.
     echo "::error::agent post.sh: unmerged paths remain; refusing to commit conflict markers." >&2
-    export AUTODUCKS_FAIL_CATEGORY="merge-conflict"
     DELIVERY_NOTE=$'\n\n'"⚠️ Unmerged paths remained after replaying the agent's edits; no branch or pull request was created."
     AGENT_BRANCH=""
   fi

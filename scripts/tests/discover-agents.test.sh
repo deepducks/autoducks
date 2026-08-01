@@ -339,6 +339,51 @@ else
 fi
 
 fi
+
+# ── An escalated config on the PR head cannot lift an unmodified definition ──
+D="$(new_fixture)"
+git -C "$D" init -q -b main 2>/dev/null || git -C "$D" init -q 2>/dev/null
+git -C "$D" config user.email t@t
+git -C "$D" config user.name t
+git -C "$D" config commit.gpgsign false
+git -C "$D" config core.autocrlf false
+mkdir -p "$D/.claude/agents" "$D/.autoducks/agents/agent"
+cat > "$D/.autoducks/agents/agent/defaults.json" <<'JSON'
+{ "tools": ["Read", "Write"], "unverified_tools": ["Read"] }
+JSON
+printf -- '---\ntools: [Read]\n---\nbody\n' > "$D/.claude/agents/helper.md"
+echo '{}' > "$D/.autoducks/autoducks.json"
+git -C "$D" add -A >/dev/null 2>&1
+if ! git -C "$D" commit -qm base >/dev/null 2>&1 \
+   || ! git -C "$D" branch -f base-ref HEAD >/dev/null 2>&1; then
+  fail "fixture setup failed (config-bypass block)"
+else
+  # Definition untouched; only autoducks.json escalates it on the "PR head".
+  cat > "$D/.autoducks/autoducks.json" <<'JSON'
+{ "custom_agents": { "agents": { "helper": { "tools": ["Bash"] } } } }
+JSON
+  OUT="$(cd "$D" && GITHUB_WORKSPACE="$D" AUTODUCKS_ROOT="$D/.autoducks" \
+    AUTODUCKS_BASE_REF=base-ref bash "$DISCOVER" list 2>/dev/null)"
+  V="$(jq -r '.agents[] | select(.name=="helper") | .verified' <<<"$OUT")"
+  T="$(jq -c '.agents[] | select(.name=="helper") | .tools_effective' <<<"$OUT")"
+  if [[ "$V" == "base" && "$T" == '["Read"]' ]]; then
+    pass "an escalated PR-head config cannot lift an unmodified definition"
+  else
+    fail "config bypass not closed: verified=$V tools=$T (expected base + [\"Read\"])"
+  fi
+
+  # And an unverified definition clamps to unverified_tools, not .tools.
+  printf -- '---\ntools: [Bash]\n---\nchanged\n' > "$D/.claude/agents/helper.md"
+  OUT="$(cd "$D" && GITHUB_WORKSPACE="$D" AUTODUCKS_ROOT="$D/.autoducks" \
+    AUTODUCKS_BASE_REF=base-ref bash "$DISCOVER" list 2>/dev/null)"
+  T="$(jq -c '.agents[] | select(.name=="helper") | .tools_effective' <<<"$OUT")"
+  if [[ "$T" == '["Read"]' ]]; then
+    pass "unverified definition clamps to unverified_tools, not the lane default"
+  else
+    fail "unverified clamp used the wrong floor: $T"
+  fi
+fi
+
 # ── Finding 4: triggers.agent[] aliases are reserved ─────────────────────
 D="$(new_fixture)"
 cat > "$D/.autoducks/autoducks.json" <<'JSON'
