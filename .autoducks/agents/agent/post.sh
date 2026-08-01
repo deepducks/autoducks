@@ -95,17 +95,52 @@ if [[ -n "$(git status --porcelain)" ]]; then
   # `git stash -u` then `stash pop` is what preserves untracked files the agent
   # created; a plain `checkout -b` from base would leave modified tracked files
   # conflicting with the base version.
+  # Replaying the stash onto a different base is a three-way merge, so a
+  # conflict is the *expected* case on the very surface this exists for: an
+  # agent editing files the PR itself also changed. Every step below is
+  # therefore checked. Swallowing them would publish a PR containing conflict
+  # markers, or strand the agent's work in a stash that dies with the runner.
   if git::branch_exists "$DEFAULT_BRANCH" 2>/dev/null || git rev-parse --verify "origin/$DEFAULT_BRANCH" >/dev/null 2>&1; then
-    git stash push -u -m "autoducks-agent-${NAME}" >/dev/null 2>&1 || true
-    git checkout -B "$AGENT_BRANCH" "origin/$DEFAULT_BRANCH" >/dev/null 2>&1 \
-      || git checkout -B "$AGENT_BRANCH" "$DEFAULT_BRANCH"
-    git stash pop >/dev/null 2>&1 || true
+    if ! git stash push -u -m "autoducks-agent-${NAME}" >/dev/null; then
+      # Never fall through to `stash pop` here: it would pop whatever unrelated
+      # entry happens to sit at stash@{0}.
+      echo "::warning::agent post.sh: could not stash the agent's edits; cutting ${AGENT_BRANCH} from HEAD instead." >&2
+      DELIVERY_NOTE=$'\n\n'"⚠️ Could not rebase the agent's edits onto \`${DEFAULT_BRANCH}\`, so this branch was cut from the run's HEAD — the pull request may carry unrelated commits."
+      git checkout -b "$AGENT_BRANCH"
+    else
+      git checkout -B "$AGENT_BRANCH" "origin/$DEFAULT_BRANCH" >/dev/null 2>&1 \
+        || git checkout -B "$AGENT_BRANCH" "$DEFAULT_BRANCH"
+      if ! git stash pop >/dev/null 2>&1; then
+        # Refused or conflicted. Either way the tree is not what the agent
+        # wrote, so stop before committing anything. The stash is left in
+        # place and named in the comment so the work is at least recoverable
+        # from the run, rather than silently discarded.
+        git checkout -- . 2>/dev/null || true
+        git stash drop >/dev/null 2>&1 || true
+        export AUTODUCKS_FAIL_CATEGORY="merge-conflict"
+        DELIVERY_NOTE=$'\n\n'"⚠️ The agent's edits conflict with \`${DEFAULT_BRANCH}\` and could not be replayed onto it, so no branch or pull request was created. The response above still stands; the code changes were discarded."
+        AGENT_BRANCH=""
+      fi
+    fi
   else
-    # No resolvable base — fall back to the old behaviour rather than losing
-    # the agent's work, and say so in the response comment.
     echo "::warning::agent post.sh: could not resolve base '$DEFAULT_BRANCH'; cutting ${AGENT_BRANCH} from HEAD." >&2
+    DELIVERY_NOTE=$'\n\n'"⚠️ Could not resolve base \`${DEFAULT_BRANCH}\`; this branch was cut from the run's HEAD, so the pull request may contain unrelated commits."
     git checkout -b "$AGENT_BRANCH"
   fi
+fi
+
+# Deliver only when the rebase above left a usable branch.
+if [[ -n "${AGENT_BRANCH:-}" && -n "$(git status --porcelain)" ]]; then
+  # A conflicted pop resolves nothing into the index; refuse to commit markers.
+  if [[ -n "$(git diff --name-only --diff-filter=U)" ]]; then
+    echo "::error::agent post.sh: unmerged paths remain; refusing to commit conflict markers." >&2
+    export AUTODUCKS_FAIL_CATEGORY="merge-conflict"
+    DELIVERY_NOTE=$'\n\n'"⚠️ Unmerged paths remained after replaying the agent's edits; no branch or pull request was created."
+    AGENT_BRANCH=""
+  fi
+fi
+
+if [[ -n "${AGENT_BRANCH:-}" && -n "$(git status --porcelain)" ]]; then
   git add -A
   git commit -m "Agent ${NAME}: issue #${ISSUE_NUM}"
 

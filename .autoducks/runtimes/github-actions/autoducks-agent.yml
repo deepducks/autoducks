@@ -46,9 +46,14 @@ permissions:
 # `/agent foo` invocations that differ only in steering text run concurrently —
 # exactly what `cancel-in-progress: false` is meant to prevent.
 # So invocations on the same issue serialize, including different custom
-# agents. That is the deliberate trade: queueing two agents that could have
-# run in parallel costs latency, while letting the same agent run twice at
-# once races two pushes to the same `agent/<name>/…` branch.
+# agents. The trade is bigger than latency and worth stating plainly: GitHub
+# keeps at most ONE pending run per group, so a third `/agent …` on the same
+# issue while one run is executing and one is already queued cancels the
+# queued one. That cancellation happens before the first step, so there is no
+# 👀, no status comment and no failure notice — the command simply vanishes
+# and has to be re-issued. Accepted because the alternative, keying on
+# something derived from the body, is what let two runs of the same agent
+# race two pushes to the same `agent/<name>/…` branch.
 # A repeat invocation queues behind its predecessor rather than cancelling it —
 # a cancelled run can leave a pushed `agent/…` branch with no PR and no
 # response comment. Deliberately absent from the pipeline lanes' concurrency

@@ -273,8 +273,14 @@ fi
 # A definition that does not match AUTODUCKS_BASE_REF byte-for-byte (i.e. was
 # added or edited on a PR head) falls back to the lane's defaults.json grant.
 D="$(new_fixture)"
-git -C "$D" init -q 2>/dev/null
-git -C "$D" config user.email t@t; git -C "$D" config user.name t
+# Pin the fixture's git config: a developer with commit.gpgsign or
+# core.autocrlf set globally would otherwise get four confusing logic
+# failures instead of one clear setup failure.
+git -C "$D" init -q -b main 2>/dev/null || git -C "$D" init -q 2>/dev/null
+git -C "$D" config user.email t@t
+git -C "$D" config user.name t
+git -C "$D" config commit.gpgsign false
+git -C "$D" config core.autocrlf false
 mkdir -p "$D/.claude/agents"
 mkdir -p "$D/.autoducks/agents/agent"
 cat > "$D/.autoducks/agents/agent/defaults.json" <<'JSON'
@@ -282,8 +288,10 @@ cat > "$D/.autoducks/agents/agent/defaults.json" <<'JSON'
 JSON
 printf -- '---\ntools: [Read, Grep]\n---\nbody\n' > "$D/.claude/agents/verified-one.md"
 git -C "$D" add -A >/dev/null 2>&1
-git -C "$D" commit -qm base >/dev/null 2>&1
-git -C "$D" branch -f base-ref HEAD >/dev/null 2>&1
+if ! git -C "$D" commit -qm base >/dev/null 2>&1 \
+   || ! git -C "$D" branch -f base-ref HEAD >/dev/null 2>&1; then
+  fail "fixture setup failed (git commit/branch) - clamp assertions skipped"
+else
 
 # Untouched since base-ref -> keeps its declared grant.
 OUT="$(cd "$D" && GITHUB_WORKSPACE="$D" AUTODUCKS_ROOT="$D/.autoducks" \
@@ -330,6 +338,7 @@ else
   fail "unchecked path wrong: verified=$V tools=$T"
 fi
 
+fi
 # ── Finding 4: triggers.agent[] aliases are reserved ─────────────────────
 D="$(new_fixture)"
 cat > "$D/.autoducks/autoducks.json" <<'JSON'

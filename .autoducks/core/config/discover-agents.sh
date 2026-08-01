@@ -363,9 +363,13 @@ process_definition() {
   local verified="unchecked"
   if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
     local rel="$rel_source"
+    # `git diff` rather than comparing the raw blob against the working-tree
+    # file: git applies the same clean/smudge filters to both sides. A raw
+    # byte compare reports every file as changed in any repo using
+    # core.autocrlf or a `text=auto eol=crlf` .gitattributes, which would
+    # clamp every custom agent in that repo for no reason.
     if git -C "$REPO_ROOT" cat-file -e "$AUTODUCKS_BASE_REF:$rel" 2>/dev/null &&
-       git -C "$REPO_ROOT" show "$AUTODUCKS_BASE_REF:$rel" 2>/dev/null \
-         | cmp -s - "$REPO_ROOT/$rel"; then
+       git -C "$REPO_ROOT" diff --quiet "$AUTODUCKS_BASE_REF" -- "$rel" 2>/dev/null; then
       verified="base"
     else
       verified="unverified"
