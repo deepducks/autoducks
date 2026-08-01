@@ -169,6 +169,10 @@ echo "── delegate posts a terminal reaction (#180) ──"
 # on the 👀 set at dispatch and every watcher of the 👀 → 👍/😕 contract reads a
 # finished run as hung. Seven call sites had forgotten it, which is why the
 # reaction lives in the shared function rather than in each of them.
+#
+# 🚀 and not 👍: the first cut of this fix used +1 and smoke-test-plan.sh caught
+# it immediately, asserting a plan that nobody had written yet. A handoff is a
+# third terminal state for this comment — the run is over, the work is not.
 DLOG=$(mktemp)
 trap 'rm -f "$DLOG"' EXIT
 
@@ -188,10 +192,10 @@ status_comment::_edit() { echo "EDIT:$2" >> "$DLOG"; }
 : > "$DLOG"
 status_comment::delegate 42 "Architect dispatched first."
 
-if grep -q 'REACT:4242:+1' "$DLOG"; then
-  pass "delegate reacts +1 on the trigger comment"
+if grep -q 'REACT:4242:rocket' "$DLOG"; then
+  pass "delegate reacts 🚀 (handoff, not success) on the trigger comment"
 else
-  fail "delegate posted no terminal reaction: $(tr '\n' ' ' < "$DLOG")"
+  fail "delegate posted no handoff reaction: $(tr '\n' ' ' < "$DLOG")"
 fi
 if grep -q 'EDIT:.*delegated' "$DLOG"; then
   pass "delegate still edits the status comment"

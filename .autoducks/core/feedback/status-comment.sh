@@ -153,12 +153,22 @@ status_comment::delegate() {
   # There were seven call sites and all seven had forgotten it. Putting it in
   # the one function they share means the eighth cannot.
   #
-  # `+1` and not a new reaction: a third terminal state would have to be taught
-  # to every consumer of the contract, and the 🔁 status comment above already
-  # says a handoff happened. What the reaction has to communicate is only "stop
-  # waiting on this comment".
+  # `rocket`, deliberately NOT `+1`.
+  #
+  # The first version of this fix used `+1` on the reasoning that the 🔁 status
+  # comment already says a handoff happened. That was wrong in a way worth
+  # recording: whoever reads the reaction is not reading the comment. `+1` means
+  # "the agent finished its work", and on this path it has not — the Architect is
+  # still running and the Engineer will re-run afterwards. smoke-test-plan.sh
+  # immediately proved it, reporting `Feature body unchanged — engineer-agent did
+  # not write the plan` against an issue still sitting at `Design:draft`.
+  #
+  # That traded a hang for a false green, which is the worse failure: a hang gets
+  # investigated, a green does not. A handoff is genuinely a third terminal state
+  # for this comment — the run is over, the work is not — and it needs its own
+  # symbol rather than borrowing one that already means something else.
   if declare -F react_to_comment >/dev/null 2>&1; then
-    react_to_comment "${COMMENT_ID:-}" "+1" 2>/dev/null || true
+    react_to_comment "${COMMENT_ID:-}" "rocket" 2>/dev/null || true
   fi
 }
 
