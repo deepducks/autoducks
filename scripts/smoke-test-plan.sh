@@ -17,10 +17,11 @@
 #   6. The #164 stale-`Tactics:done` regression: rewriting the body to a fresh,
 #      marker-free design spec while `Tactics:done` lingers must not lose the
 #      rewritten design zone on the next /engineer run.
-#   7. The tactical-zone-preservation fix for /architect re-runs: an
-#      existing tactical zone (markers + YAML wave plan) must survive
-#      verbatim below a freshly-written design zone, and a markerless body
-#      must still get no tactical markers on the fallback path.
+#   7. The /architect re-run contract: an existing tactical zone is STRIPPED
+#      (with a warning comment, and its task issues closed) rather than
+#      preserved — the design changed, so the plan is stale by construction.
+#      A markerless body must still get no tactical markers on the fallback
+#      path.
 #
 # With --single, runs a separate variant instead: seeds a draft narrow
 # enough to yield exactly one task, and asserts the engineer-agent's
@@ -67,10 +68,9 @@
 #     rewritten design zone must survive verbatim with a fresh tactical
 #     zone appended below it (sentinel present, markers present, sentinel
 #     above the begin marker)
-#   - /architect re-run regression: an existing tactical zone (markers +
-#     YAML wave plan) must survive verbatim below a freshly-written design
-#     zone (markers present, tactical sentinel below the begin marker, fresh
-#     design-spec heading above it)
+#   - /architect re-run contract: an existing tactical zone is stripped, the
+#     removal is announced in a comment, and a fresh design spec is written
+#     in its place
 #   - /architect on a markerless body writes the design spec as the full
 #     body and introduces no tactical markers
 #
@@ -861,27 +861,36 @@ else
 fi
 echo ""
 
-# --- Reproduce the tactical-zone-preservation fix for /architect re-runs ---
+# --- Assert the /architect re-run contract (stale plan is torn down) ---
 # Companion to the #164 regression above, but for the *other* re-entrant
-# workflow: /architect re-run on a feature that already has a tactical
-# zone (markers + YAML wave plan) must preserve that zone verbatim while
-# rewriting only the design zone above it. Starts from the state this script
-# already reached above (the feature body has markers and a tactical zone from
-# the second /engineer run — single-task or multi-task, either is valid here).
-# Captures that zone verbatim, re-runs /architect, and asserts it comes back
-# byte-for-byte identical below a freshly-written design zone.
-echo "[7/9] Reproducing /architect re-run regression (tactical zone must survive)..."
+# workflow: /architect re-run on a feature that already has a tactical zone.
+# The contract is teardown, not preservation — the design is changing, so the
+# plan derived from the old design is stale by construction. Starts from the
+# state this script already reached above (the feature body has markers and a
+# tactical zone from the second /engineer run — single-task or multi-task,
+# either is valid here), re-runs /architect, and asserts the zone is gone, the
+# user was told, a fresh design spec took its place, and the orphaned task
+# issues were closed with it.
+echo "[7/9] Asserting the /architect re-run contract (tactical zone is stripped)..."
 if [[ "$REDEVISE_RC" -ne 0 ]]; then
   fail "Skipping design re-run assertions — second engineer-agent run did not complete"
 else
-  # The sentinel is the tactical zone itself, captured verbatim, rather than a
-  # task number lifted out of it. A task number only exists on the multi-task
-  # path, and the body this step starts from is the *rewritten* one from step 6
-  # — a smaller spec that legitimately plans as a single task, leaving no YAML
-  # and no numbers. That made this step fail with "no task numbers" even on a
-  # run whose plan was correct (#183 follow-up). Comparing the whole zone also
-  # asserts more than a number ever did: not "a token survived" but "the zone
-  # survived unchanged".
+  # This step used to assert the opposite of the shipped contract. It checked
+  # that the tactical zone survived an /architect re-run byte-for-byte, and it
+  # had never run — the task-number sentinel it keyed on only exists on the
+  # multi-task path, and the body step 6 rewrites plans as a single task. Once
+  # the sentinel was fixed and the step finally executed, it failed: the
+  # Architect strips the zone, deliberately.
+  #
+  # The user-facing contract says so in two places (guides/re-running-agents):
+  # "If a tactical zone is present, it is stripped (with a warning comment)
+  # rather than preserved — the design changed, so the old plan is treated as
+  # stale and re-planning is left to the Engineer", and the preserved/rewritten
+  # table lists the tactical zone under Rewritten. pre.sh and post.sh implement
+  # exactly that, down to closing the orphaned task issues.
+  #
+  # So the assertions below pin the real contract: the zone goes away, the user
+  # is told, and a fresh design zone takes its place.
   PRE_DESIGN_BODY=$(gh issue view $FEATURE $REPO_ARG --json body --jq '.body')
   PRE_DESIGN_TACTICAL=$(echo "$PRE_DESIGN_BODY" | awk '
     /^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$/ { flag=1; next }
@@ -914,39 +923,51 @@ else
   if [[ "$DESIGN_RC" -eq 0 ]]; then
     DESIGN_BODY=$(gh issue view $FEATURE $REPO_ARG --json body --jq '.body')
 
-    if echo "$DESIGN_BODY" | grep -qE '^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$' && \
-       echo "$DESIGN_BODY" | grep -qE '^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$'; then
-      pass "Tactical zone markers present after /architect re-run"
+    if echo "$DESIGN_BODY" | grep -qE '^[[:space:]]*<!-- autoducks:tactical:(begin|end) -->[[:space:]]*$'; then
+      fail "Tactical markers still present after /architect re-run — the stale plan was not stripped"
     else
-      fail "Tactical zone markers LOST after /architect re-run"
+      pass "Tactical zone stripped by the /architect re-run (design-only body republished)"
     fi
 
-    POST_DESIGN_TACTICAL=$(echo "$DESIGN_BODY" | awk '
-      /^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$/ { flag=1; next }
-      /^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$/   { flag=0 }
-      flag')
-
-    if [[ "$POST_DESIGN_TACTICAL" == "$PRE_DESIGN_TACTICAL" ]]; then
-      pass "Tactical zone survived the /architect re-run byte-for-byte"
+    # The stripped plan must not vanish silently: the contract is "stripped
+    # WITH a warning comment", because the user has to know their plan is gone
+    # and that re-planning is on them now.
+    if gh issue view $FEATURE $REPO_ARG --json comments \
+         --jq '[.comments[].body] | join("\n")' 2>/dev/null \
+         | grep -qiE 'previous tactical plan was removed|re-run .*engineer'; then
+      pass "Re-run warned that the previous tactical plan was removed"
     else
-      fail "Tactical zone CHANGED across the /architect re-run"
-      diff <(echo "$PRE_DESIGN_TACTICAL") <(echo "$POST_DESIGN_TACTICAL") | head -20 | sed 's/^/      /'
+      fail "Tactical plan was stripped with no warning comment — silent data loss for the user"
     fi
 
-    BEGIN_LINE=$(echo "$DESIGN_BODY" | grep -nE '^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$' | head -1 | cut -d: -f1 || echo "")
+    BEGIN_LINE=$(echo "$DESIGN_BODY" | wc -l | tr -d ' ')
 
     # "## Problem Statement" is a required section of every design spec the
     # architect-agent writes (.autoducks/agents/architect/prompt.md) — a stable,
     # LLM-independent sentinel that the design zone was actually rewritten,
     # not just left stale above the preserved tactical zone.
-    DESIGN_SENTINEL_LINE=$(echo "$DESIGN_BODY" | grep -nE '^## Problem Statement[[:space:]]*$' | head -1 | cut -d: -f1 || echo "")
-    if [[ -n "$DESIGN_SENTINEL_LINE" && -n "$BEGIN_LINE" && "$DESIGN_SENTINEL_LINE" -lt "$BEGIN_LINE" ]]; then
-      pass "Fresh design spec ('## Problem Statement') appears above the tactical:begin marker"
+    DESIGN_SENTINEL_LINE=$(echo "$DESIGN_BODY" | grep -cE '^## Problem Statement[[:space:]]*$' || true)
+    if [[ "$DESIGN_SENTINEL_LINE" -ge 1 ]]; then
+      pass "Fresh design spec written ('## Problem Statement' present)"
     else
-      fail "Fresh design spec heading missing or not above the tactical:begin marker"
+      fail "Fresh design spec heading missing after the /architect re-run"
+    fi
+
+    # The old plan's task issues are torn down with it — otherwise they linger
+    # as orphans pointing at a design that no longer exists.
+    STILL_OPEN=0
+    for t in "${TASK_NUMBERS[@]:-}"; do
+      [[ -z "$t" ]] && continue
+      st=$(gh issue view "$t" $REPO_ARG --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+      [[ "$st" == "OPEN" ]] && STILL_OPEN=$((STILL_OPEN + 1))
+    done
+    if [[ "$STILL_OPEN" -eq 0 ]]; then
+      pass "Task issues from the discarded plan were closed"
+    else
+      warn "$STILL_OPEN task issue(s) from the discarded plan are still open"
     fi
   else
-    fail "Skipping tactical-zone-survival assertions — architect-agent run did not complete"
+    fail "Skipping /architect re-run assertions — architect-agent run did not complete"
   fi
 fi
 echo ""
