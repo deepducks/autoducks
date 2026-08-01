@@ -49,7 +49,23 @@ for lbl in "${GATE_LABELS[@]}"; do
   fi
 done
 
-BOT_COMMENT_IDS=$(its::list_comments "$FEATURE" | jq -r '.[] | select(.author == "github-actions[bot]" or .author == "github-actions") | .id')
+# Machinery comments are recognised by their marker, not by author. The author
+# is whatever credential the install posts under — `github-actions[bot]` only
+# under the default GITHUB_TOKEN, the PAT owner's own account under
+# AUTODUCKS_PAT, `<app>[bot]` under an App. Matching the first of those three by
+# name meant that on a PAT install this selected nothing: revert stripped the
+# labels and deleted no comments at all, leaving an issue that looked reverted
+# and was not (#183).
+#
+# The author test is kept as a fallback for comments posted before the marker
+# existed, and only for the bot identity — never for a human account, which on a
+# PAT install is indistinguishable from the person running the pipeline.
+BOT_COMMENT_IDS=$(its::list_comments "$FEATURE" | jq -r --arg marker "$AUTODUCKS_COMMENT_MARKER" '
+  .[]
+  | select((.body // "" | contains($marker))
+           or .author == "github-actions[bot]"
+           or .author == "github-actions")
+  | .id')
 
 # Already reverted (or never automated): bail here, before the body-restore
 # step below picks the *last* non-bot edit as "the original" body. If a
@@ -73,9 +89,16 @@ for lbl in "${PROGRESS_LABELS[@]}"; do
 done
 
 # Restore original issue body via edit history
+# "The last edit that was not the machinery's" — decided structurally, not by
+# author, for the same reason as the comment selection above: under a PAT the
+# machinery edits the body as the human's own account, so an author test would
+# treat a machinery-written body as the original and restore the pipeline's own
+# output as if it were the pre-automation text (#183). Every body the machinery
+# writes carries the tactical-zone sentinel; a human's does not.
 EDIT_HISTORY=$(its::get_issue_edit_history "$FEATURE")
 ORIGINAL_BODY=$(echo "$EDIT_HISTORY" | jq -r '
   .data.repository.issue.userContentEdits.nodes
+  | map(select((.diff // "") | contains("<!-- autoducks:") | not))
   | map(select(.editor.login != "github-actions" and .editor.login != "github-actions[bot]"))
   | sort_by(.editedAt)
   | last
