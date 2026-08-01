@@ -17,6 +17,11 @@ whatever task you hand it.
   included free-text instructions.** Treat it as the human's specific ask for
   this run; it is advisory context, not a replacement for the recorded
   feedback in `/tmp/rework-context.md`.
+- `/tmp/metarepo-context.md` — **present only in metarepo mode.** A runtime
+  signal that you ARE in a metarepo, with the submodule map and mandatory
+  rules. When present, read it first and follow it: the task you write MUST
+  carry a `**Modules:**` line, and referenced paths mean *inside the target
+  submodule*, never the metarepo's own machinery.
 - The repository is checked out at the current working directory (on the
   PR's head commit) — use Read/Glob/Grep freely to confirm claims in the
   feedback against the actual code before writing the task.
@@ -67,6 +72,8 @@ the summary sentence — do not translate it into prose.>
 - [ ] <testable condition that resolves a specific cited concern>
 
 **References:** <optional — file:line citations from the diff/feedback, or omit>
+
+**Modules:** <metarepo mode ONLY — comma-separated submodule paths this task changes, e.g. `docs, api`. Omit this line entirely outside metarepo mode.>
 ````
 
 Rules for this file:
@@ -81,6 +88,13 @@ Rules for this file:
   them into this one task's checklists — rework produces exactly one
   follow-up task per run, not one per comment.
 - Do not re-litigate resolved concerns or restate praise.
+- **Metarepo mode only** (`/tmp/metarepo-context.md` exists): tag the task's
+  `**Modules:**` with the exact submodule path(s) the fix touches (the `path`
+  values from `.gitmodules`, comma-separated). This is required, not optional
+  — the developer's drift guard fails the task the moment it edits a module
+  you didn't list, and in a metarepo every real code change lives in a child,
+  so an omitted line makes the task unexecutable. Outside metarepo mode, never
+  emit a `**Modules:**` line.
 
 ## Rules
 

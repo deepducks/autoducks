@@ -322,6 +322,10 @@ EOF
        else
          fail "no plan after the delegated handoff (15 min)"; exit 1
        fi ;;
+    # An unhandled code used to fall straight through to the next step with no
+    # output at all, which is how a missing `3)` arm here went unnoticed for a
+    # whole run: the test asserted against a pipeline that had not started.
+    *) fail "unexpected wait_for_reaction code $PLAN_RC"; exit 1 ;;
   esac
   echo ""
 
@@ -555,6 +559,14 @@ case $PLAN_RC in
   0) pass "engineer-agent run completed successfully" ;;
   1) fail "engineer-agent run failed (😕 reaction on /engineer comment)"; exit 1 ;;
   2) fail "engineer-agent run did not complete within 10 min"; exit 1 ;;
+  3) if wait_for_plan_after_delegation "$FEATURE" 900 "engineer-agent (post-delegation)"; then
+       pass "engineer-agent completed after delegating to a prerequisite agent"
+     else
+       fail "no plan after the delegated handoff (15 min)"; exit 1
+     fi ;;
+  # See the note on the other case block: silence on an unknown code is how a
+  # missing arm turns into an assertion against a pipeline that never ran.
+  *) fail "unexpected wait_for_reaction code $PLAN_RC"; exit 1 ;;
 esac
 echo ""
 

@@ -132,6 +132,16 @@ FEATURE_COMMENTS_FILE="$(mktemp)"; printf '%s' "$FEATURE_COMMENTS_JSON" > "$FEAT
     '
 } > /tmp/rework-context.md
 
+# Metarepo runtime signal. Without it the agent has no way to know it must
+# declare the task's `**Modules:**`, and in a metarepo every real code change
+# lives in a child — so an untagged rework task is guaranteed to trip the
+# developer's drift guard on its first commit (#181). Removed first so a stale
+# file from an earlier run on a reused workspace can't fake metarepo mode.
+rm -f /tmp/metarepo-context.md
+if metarepo::enabled; then
+  metarepo::agent_context_block > /tmp/metarepo-context.md
+fi
+
 # Decode the steering prompt (free-text prose from the triggering comment,
 # base64-encoded by parse-directive.sh) to a stable file. Advisory only —
 # never interpolated into a shell command. Same convention as architect/pre.sh.
