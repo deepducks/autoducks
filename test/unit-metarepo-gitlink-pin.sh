@@ -340,10 +340,13 @@ for dir in ".autoducks/runtimes/github-actions" ".github/workflows"; do
   fi
   # Every job must state which event it belongs to, so a push event cannot fall
   # through to the poller (which would start a check-run with no PR to gate).
-  if [[ "$(grep -c "github.event_name == 'pull_request' &&" "$f")" -eq 2 ]]; then
-    pass "$dir: both pull_request jobs assert the event name"
+  # Three such jobs now: repin-siblings, cleanup-child-branches (#182), and the
+  # poller's own pull_request path.
+  _guards="$(grep -c "github.event_name == 'pull_request' &&" "$f")"
+  if [[ "$_guards" -eq 3 ]]; then
+    pass "$dir: all three pull_request jobs assert the event name"
   else
-    fail "$dir: expected 2 event_name guards, got $(grep -c "github.event_name == 'pull_request' &&" "$f")"
+    fail "$dir: expected 3 event_name guards, got $_guards"
   fi
 done
 

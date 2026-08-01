@@ -12,10 +12,15 @@ source "$AUTODUCKS_ROOT/core/orchestration/branch-prefix.sh"
 source "$AUTODUCKS_ROOT/core/feedback/progress-labels.sh"
 source "$AUTODUCKS_ROOT/core/feedback/handle-cancellation.sh"
 
-# Reconstruct state from git (pre.sh exports don't persist across GHA steps)
+# Reconstruct state from git (pre.sh exports don't persist across GHA steps).
+# `AUTODUCKS_RESOLVED_*` is pre.sh's handoff for the comment-triggered path,
+# where the workflow injects no BASE_BRANCH and the fallbacks below would name
+# the default branch — which is how the mirrored child branch used to resolve to
+# the child's trunk (#182). A step-level `env:` entry outranks $GITHUB_ENV for
+# the same name, hence the distinct one.
 TASK_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-PR_BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_INTEGRATION_BRANCH}"
-BASE_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
+PR_BASE_BRANCH="${AUTODUCKS_RESOLVED_PR_BASE_BRANCH:-${BASE_BRANCH:-$AUTODUCKS_INTEGRATION_BRANCH}}"
+BASE_BRANCH="${AUTODUCKS_RESOLVED_BASE_BRANCH:-${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}}"
 # Metarepo child branches mirror the pipeline feature branch.
 CHILD_BRANCH="$PR_BASE_BRANCH"
 FEATURE_NUM=""

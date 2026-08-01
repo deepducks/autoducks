@@ -211,19 +211,38 @@ metarepo::repin_gitlinks() {
 
   git commit -q -m "chore(metarepo): re-pin submodule gitlinks to delivered SHAs" 2>/dev/null || return 0
   if git push -q origin "HEAD:refs/heads/${feature_branch}" 2>/dev/null; then
-    echo "::notice::repin: re-pinned submodule gitlink(s) on $feature_branch" >&2
-    # The pre-merge SHAs are now unreferenced — delete the retained child branches.
-    for pair in "$@"; do
-      path="${pair%%=*}"
-      local slug ctok; slug="$(metarepo::slug_for_path "$path" 2>/dev/null || true)"
-      [[ -n "$slug" ]] || continue
-      ctok="$(git::resolve_token "$slug")"
-      GH_TOKEN="$ctok" gh api "repos/$slug/git/refs/heads/${feature_branch}" -X DELETE --silent 2>/dev/null || true
-    done
+    # The pre-merge SHAs are now unreferenced, so the child branches *could* be
+    # deleted here — and they used to be. They are not, because a successful
+    # re-pin says nothing about whether the parent is done: its PR is still open
+    # and its review loop can still dispatch rework rounds that need a child
+    # branch to commit onto. Deletion belongs to the parent's PR close, which is
+    # the moment the pipeline that created these branches actually ends (#182).
+    echo "::notice::repin: re-pinned submodule gitlink(s) on $feature_branch — child branches retained until the parent PR closes" >&2
   else
     echo "::warning::repin: failed to push re-pinned gitlinks to $feature_branch — child feature branches kept (pre-merge SHA still reachable)." >&2
     return 1
   fi
+}
+
+# metarepo::child_default_branch(path) → the child's default branch name.
+#
+# The host is authoritative (a child's default is not recorded anywhere in the
+# parent), but a runner that already has the submodule checked out can answer
+# offline, and that fallback is what keeps the push guard working when the API
+# is unreachable. Never returns empty: an empty answer would make the guard
+# compare against "" and wave everything through.
+metarepo::child_default_branch() {
+  local path="$1" slug token out=""
+  slug="$(metarepo::slug_for_path "$path" 2>/dev/null || true)"
+  if [[ -n "$slug" ]]; then
+    token="$(git::resolve_token "$slug" 2>/dev/null || true)"
+    out="$(GH_TOKEN="$token" gh api "repos/$slug" --jq '.default_branch' 2>/dev/null || true)"
+  fi
+  if [[ -z "$out" && -d "$path" ]]; then
+    out="$(git -C "$path" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+    out="${out#origin/}"
+  fi
+  printf '%s\n' "${out:-main}"
 }
 
 # metarepo::pin_relation(slug, pinned_sha, tip_sha) → one of
