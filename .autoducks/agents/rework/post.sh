@@ -107,6 +107,25 @@ TASK_LINE=$(head -1 /tmp/rework-task.jsonl)
 TASK_TITLE=$(echo "$TASK_LINE" | jq -r '.title')
 TASK_BODY=$(echo "$TASK_LINE" | jq -r '.body')
 
+# Metarepo mode: a task with no declared `**Modules:**` is knowably broken
+# before anyone runs it — every real code change in a metarepo lives in a
+# child, so the developer's drift guard rejects the first commit it makes.
+# Failing here costs one cheap re-run; failing in the developer's post phase
+# costs a whole implementation run that is then thrown away (#181).
+if metarepo::enabled && [[ -z "$(metarepo::modules_from_body "$TASK_BODY")" ]]; then
+  export AUTODUCKS_FAIL_CATEGORY="scope-missing" AUTODUCKS_FAIL_PHASE="post"
+  its::comment_issue "$ISSUE_NUM" "❌ **Rework task rejected:** it declares no \`**Modules:**\`.
+
+This repository is a **metarepo**, so all code lives in submodules ($(metarepo::submodule_paths | sed 's/^/`/; s/$/`/' | paste -sd, - | sed 's/,/, /g')). A task with an empty module set cannot legally change anything — the developer's drift guard would reject its first commit.
+
+**Next:** re-run \`$(autoducks_command_for rework)\` — the task spec must carry a \`**Modules:**\` line naming the submodule path(s) the fix touches." 2>/dev/null || true
+  echo "::error::rework: task spec declares no modules in metarepo mode" >&2
+  notify_failure "$ISSUE_NUM" "$RUN_ID" "${FEATURE_NUM:-}"
+  status_comment::fail "$ISSUE_NUM"
+  react_to_comment "${COMMENT_ID:-}" "confused"
+  exit 1
+fi
+
 # `since` records when this rework round was filed. There is no cheap way to
 # recover the previous round's merge timestamp from the ITS API, so each
 # marker just threads the moment it was (re)written — still a monotonically
