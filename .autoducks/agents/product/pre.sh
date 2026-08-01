@@ -75,7 +75,11 @@ BACKEND=$(its::priority_backend)
 # `//` can't be used here: jq's `//` treats a literal `false` the same as
 # `null` and falls through to the default, which would silently ignore an
 # explicit `"auto_merge_duplicates": false` in config.
-AUTO_MERGE_DUPLICATES=$(jq -r 'if .product.auto_merge_duplicates == null then true else .product.auto_merge_duplicates end' "$AUTODUCKS_ROOT/autoducks.json")
+# `flag_duplicates` is the current name; `auto_merge_duplicates` is the
+# original one and is still honoured, because the switch outlived its name:
+# the sweep no longer merges anything, it flags. An install that set the old
+# key to false meant "stay out of my backlog" and must keep meaning that.
+AUTO_MERGE_DUPLICATES=$(jq -r 'if .product.flag_duplicates != null then .product.flag_duplicates elif .product.auto_merge_duplicates != null then .product.auto_merge_duplicates else true end' "$AUTODUCKS_ROOT/autoducks.json")
 
 # Same explicit-`false`-honoring form as AUTO_MERGE_DUPLICATES above — read
 # again (not shared with post.sh) so each script fails independently if the

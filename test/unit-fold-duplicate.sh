@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
-# Unit tests for .autoducks/core/orchestration/fold-duplicate.sh —
-# fold_duplicate::close is the shared "fold DUP into CANONICAL" action
-# used by both merge.sh (/merge) and post.sh (triage dedup). Asserts the
+# Unit tests for .autoducks/core/orchestration/fold-duplicate.sh — the two
+# strengths of "N is a duplicate of M".
+#
+# fold_duplicate::close is the /merge path: a human named both issues, so it
+# closes. fold_duplicate::reference is the triage-sweep path: a scheduled job
+# acting on an LLM's opinion, so it flags and leaves the decision to a person.
+# The split is the point — a sweep that closes on a guess is cheap to run and
+# tedious to undo across a backlog.
+#
+# For fold_duplicate::close, asserts the
 # label-create → its::add_label → its::close_issue (not_planned) →
 # its::link_sub_issue ordering, and that a re-run on an already-closed
 # duplicate is a safe no-op. Driven with mocked gh/its::* calls — same
@@ -26,6 +33,8 @@ gh() { echo "GH:$*" >> "$LOG"; }
 its::add_label()    { echo "ADD:$1|$2" >> "$LOG"; }
 its::close_issue()  { echo "CLOSE:$1|$2|$3" >> "$LOG"; }
 its::link_sub_issue() { echo "LINK:$1|$2" >> "$LOG"; }
+its::comment_issue() { echo "COMMENT:$1|$2" >> "$LOG"; }
+autoducks_command_for() { echo "/$1"; }
 
 export REPO="x/y" RUN_ID="999" AUTODUCKS_AGENT="merge"
 
@@ -96,6 +105,8 @@ gh() { echo "GH:$*" >> "$LOG"; }
 its::add_label()    { echo "ADD:$1|$2" >> "$LOG"; }
 its::close_issue()  { echo "CLOSE:$1|$2|$3" >> "$LOG"; }
 its::link_sub_issue() { echo "LINK:$1|$2" >> "$LOG"; }
+its::comment_issue() { echo "COMMENT:$1|$2" >> "$LOG"; }
+autoducks_command_for() { echo "/$1"; }
 
 echo "── fold_duplicate::close: safe to re-run back-to-back (idempotent) ──"
 reset
@@ -112,6 +123,49 @@ else
 fi
 
 rm -f "$LOG"
+
+echo "── fold_duplicate::reference: flags without closing ──"
+reset
+fold_duplicate::reference "42" "7"
+
+if grep -q '^CLOSE:' "$LOG"; then
+  fail "reference closed the duplicate — the sweep must never close: $(cat "$LOG")"
+else
+  pass "no its::close_issue call"
+fi
+if grep -q '^ADD:42|Duplicate$' "$LOG"; then
+  pass "labels the duplicate"
+else
+  fail "no Duplicate label applied: $(cat "$LOG")"
+fi
+if grep -q '^COMMENT:42|' "$LOG" && grep -q '#7' "$LOG"; then
+  pass "cross-references the canonical from the duplicate"
+else
+  fail "no cross-reference comment naming #7: $(cat "$LOG")"
+fi
+if grep -qi 'left open' "$LOG"; then
+  pass "says the issue was left open on purpose"
+else
+  fail "does not explain why the issue is still open: $(cat "$LOG")"
+fi
+if grep -q '^LINK:' "$LOG"; then
+  fail "reference linked a sub-issue — that reparents an issue nobody agreed to fold"
+else
+  pass "does not reparent the duplicate as a sub-issue"
+fi
+
+echo "── the two paths stay distinct ──"
+reset
+fold_duplicate::close "42" "7"
+close_had_close=$(grep -c '^CLOSE:' "$LOG" || true)
+reset
+fold_duplicate::reference "42" "7"
+ref_had_close=$(grep -c '^CLOSE:' "$LOG" || true)
+if [[ "$close_had_close" -ge 1 && "$ref_had_close" -eq 0 ]]; then
+  pass "/merge closes, sweep does not (close=$close_had_close, reference=$ref_had_close)"
+else
+  fail "the two paths are not distinct (close=$close_had_close, reference=$ref_had_close)"
+fi
 
 echo ""
 echo "═══ fold-duplicate: $PASS passed, $FAIL failed ═══"
