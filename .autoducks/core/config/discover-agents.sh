@@ -57,15 +57,21 @@ REPO_ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
 CONFIG="${AUTODUCKS_CONFIG:-$REPO_ROOT/.autoducks/autoducks.json}"
 
-# ── Reserved names: built-in verbs/synonyms (mirrors generate-trigger-
-# conditions.sh's BUILTINS) plus every configured triggers.<agent>[] alias —
-# a definition called architect.md must never shadow /architect. ──────────
-BUILTINS="architect design engineer tactics execute run work fix revert close review rework defer resolve triage merge update"
-_TRIGGER_AGENTS="architect engineer execute fix revert close review rework defer resolve triage merge update"
+# ── Reserved names: built-in verbs/synonyms plus every configured
+# triggers.<agent>[] alias — a definition called architect.md must never
+# shadow /architect. Both lists come from agent-roster.sh ("adding an agent
+# means adding it here and nowhere else"); re-typing them here is what let
+# the previous copy drift, omitting `agent` from the trigger list so that a
+# configured triggers.agent[] alias never became reserved and a custom agent
+# could be named after it. ────────────────────────────────────────────────
+_DA_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_DA_SH_DIR/agent-roster.sh"
+
+BUILTINS="$AUTODUCKS_BUILTIN_VERBS"
 
 RESERVED_NAMES=" $BUILTINS "
 if [[ -f "$CONFIG" ]]; then
-  for _a in $_TRIGGER_AGENTS; do
+  for _a in "${AUTODUCKS_AGENTS[@]}"; do
     while IFS= read -r _alias; do
       [[ -z "$_alias" ]] && continue
       RESERVED_NAMES+="$_alias "
@@ -342,6 +348,39 @@ process_definition() {
     tools_effective_json="$tools_declared_json"
   fi
 
+  # ── Unverified definitions cannot grant themselves tools ──────────────
+  # The design's no-ceiling rule rests on definitions being merged, reviewed
+  # repo content. On a PR surface that premise does not hold: the checkout is
+  # refs/pull/N/head, so a contributor can ship `surface: pr` + `tools: [Bash]`
+  # and have a maintainer's routine `/agent <name>` run it with contents:write
+  # and the app token. Nothing about that content has been reviewed.
+  #
+  # So the grant is clamped to the lane's own defaults.json whenever the
+  # definition does not appear, byte-identical, on the base ref. A definition
+  # merged on the default branch is unaffected and keeps the full no-ceiling
+  # behaviour; a new or edited one still runs — which is what makes testing an
+  # agent from its own PR possible — just with the lane default tool set.
+  local verified="unchecked"
+  if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
+    local rel="$rel_source"
+    if git -C "$REPO_ROOT" cat-file -e "$AUTODUCKS_BASE_REF:$rel" 2>/dev/null &&
+       git -C "$REPO_ROOT" show "$AUTODUCKS_BASE_REF:$rel" 2>/dev/null \
+         | cmp -s - "$REPO_ROOT/$rel"; then
+      verified="base"
+    else
+      verified="unverified"
+      local lane_defaults="${AUTODUCKS_ROOT:-$REPO_ROOT/.autoducks}/agents/agent/defaults.json"
+      local lane_tools_json=""
+      [[ -f "$lane_defaults" ]] &&
+        lane_tools_json="$(jq -c '.tools // []' "$lane_defaults" 2>/dev/null || echo "")"
+      [[ -n "$lane_tools_json" ]] || lane_tools_json='[]'
+      if [[ "$tools_effective_json" != "$lane_tools_json" ]]; then
+        echo "::warning::discover-agents: '$name' ($rel) differs from $AUTODUCKS_BASE_REF — tool grant clamped to the lane default." >&2
+      fi
+      tools_effective_json="$lane_tools_json"
+    fi
+  fi
+
   # model: frontmatter wins over config, both alias-resolved
   local cfg_model_raw model_effective
   cfg_model_raw="$(jq -r '.model // empty' <<<"$cfg" 2>/dev/null || echo "")"
@@ -402,6 +441,7 @@ process_definition() {
     --argjson context "$context_json" \
     --arg surface "$surface_effective" \
     --argjson labels "$labels_json" \
+    --arg verified "$verified" \
     --argjson body_bytes "$body_bytes" \
     '{
       name: $name,
@@ -418,6 +458,7 @@ process_definition() {
       context: $context,
       surface: $surface,
       labels: $labels,
+      verified: $verified,
       body_bytes: $body_bytes
     }')"
 

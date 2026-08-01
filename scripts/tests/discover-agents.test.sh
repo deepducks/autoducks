@@ -269,6 +269,82 @@ else
 fi
 
 # -----------------------------------------------------------------------
+# ── Finding 2: an unverified definition cannot grant itself tools ────────
+# A definition that does not match AUTODUCKS_BASE_REF byte-for-byte (i.e. was
+# added or edited on a PR head) falls back to the lane's defaults.json grant.
+D="$(new_fixture)"
+git -C "$D" init -q 2>/dev/null
+git -C "$D" config user.email t@t; git -C "$D" config user.name t
+mkdir -p "$D/.claude/agents"
+mkdir -p "$D/.autoducks/agents/agent"
+cat > "$D/.autoducks/agents/agent/defaults.json" <<'JSON'
+{ "tools": ["Read", "Grep"] }
+JSON
+printf -- '---\ntools: [Read, Grep]\n---\nbody\n' > "$D/.claude/agents/verified-one.md"
+git -C "$D" add -A >/dev/null 2>&1
+git -C "$D" commit -qm base >/dev/null 2>&1
+git -C "$D" branch -f base-ref HEAD >/dev/null 2>&1
+
+# Untouched since base-ref -> keeps its declared grant.
+OUT="$(cd "$D" && GITHUB_WORKSPACE="$D" AUTODUCKS_ROOT="$D/.autoducks" \
+  AUTODUCKS_BASE_REF=base-ref bash "$DISCOVER" list 2>/dev/null)"
+V="$(jq -r '.agents[] | select(.name=="verified-one") | .verified' <<<"$OUT")"
+T="$(jq -c '.agents[] | select(.name=="verified-one") | .tools_effective' <<<"$OUT")"
+if [[ "$V" == "base" && "$T" == '["Read","Grep"]' ]]; then
+  pass "verified definition keeps its declared tool grant"
+else
+  fail "verified definition wrong: verified=$V tools=$T"
+fi
+
+# Now escalate it the way a PR-head contributor would.
+printf -- '---\ntools: [Bash, Write]\n---\nbody\n' > "$D/.claude/agents/verified-one.md"
+OUT="$(cd "$D" && GITHUB_WORKSPACE="$D" AUTODUCKS_ROOT="$D/.autoducks" \
+  AUTODUCKS_BASE_REF=base-ref bash "$DISCOVER" list 2>/dev/null)"
+V="$(jq -r '.agents[] | select(.name=="verified-one") | .verified' <<<"$OUT")"
+T="$(jq -c '.agents[] | select(.name=="verified-one") | .tools_effective' <<<"$OUT")"
+if [[ "$V" == "unverified" && "$T" == '["Read","Grep"]' ]]; then
+  pass "edited-on-PR-head definition is clamped to the lane default grant"
+else
+  fail "clamp failed: verified=$V tools=$T (expected unverified + lane default)"
+fi
+
+# A definition absent from base is unverified too.
+printf -- '---\ntools: [Bash]\n---\nbody\n' > "$D/.claude/agents/brand-new.md"
+OUT="$(cd "$D" && GITHUB_WORKSPACE="$D" AUTODUCKS_ROOT="$D/.autoducks" \
+  AUTODUCKS_BASE_REF=base-ref bash "$DISCOVER" list 2>/dev/null)"
+T="$(jq -c '.agents[] | select(.name=="brand-new") | .tools_effective' <<<"$OUT")"
+if [[ "$T" == '["Read","Grep"]' ]]; then
+  pass "definition absent from base is clamped too"
+else
+  fail "new-on-PR-head definition not clamped: $T"
+fi
+
+# Without AUTODUCKS_BASE_REF (local setup.sh run) nothing is clamped.
+OUT="$(cd "$D" && GITHUB_WORKSPACE="$D" AUTODUCKS_ROOT="$D/.autoducks" \
+  bash "$DISCOVER" list 2>/dev/null)"
+V="$(jq -r '.agents[] | select(.name=="brand-new") | .verified' <<<"$OUT")"
+T="$(jq -c '.agents[] | select(.name=="brand-new") | .tools_effective' <<<"$OUT")"
+if [[ "$V" == "unchecked" && "$T" == '["Bash"]' ]]; then
+  pass "no base ref configured -> no clamp, marked unchecked"
+else
+  fail "unchecked path wrong: verified=$V tools=$T"
+fi
+
+# ── Finding 4: triggers.agent[] aliases are reserved ─────────────────────
+D="$(new_fixture)"
+cat > "$D/.autoducks/autoducks.json" <<'JSON'
+{ "triggers": { "agent": ["ducky"] } }
+JSON
+mkdir -p "$D/.claude/agents"
+printf -- '---\n---\nbody\n' > "$D/.claude/agents/ducky.md"
+OUT="$(cd "$D" && GITHUB_WORKSPACE="$D" bash "$DISCOVER" list 2>/dev/null)"
+R="$(jq -r '.errors[] | select(.source | test("ducky")) | .reason' <<<"$OUT")"
+if [[ "$R" == "reserved-name" ]]; then
+  pass "a definition named after a triggers.agent[] alias is refused"
+else
+  fail "triggers.agent[] alias not reserved (reason=$R)"
+fi
+
 echo ""
 echo "=== discover-agents (offline): $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]] || exit 1

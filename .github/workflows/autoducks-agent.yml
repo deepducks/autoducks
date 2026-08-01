@@ -39,21 +39,24 @@ permissions:
   pull-requests: write
   id-token: write
 
-# Keyed on the PR-or-issue number AND the invocation itself (the dispatched
-# agent_name, or — for a comment trigger, where the name isn't parsed out
-# until pre.sh runs — the raw comment body it's embedded in). Two different
-# custom agents on the same issue run concurrently; a repeat invocation of
-# the *same* agent queues behind its predecessor rather than cancelling it —
+# Keyed on the PR-or-issue number alone. The agent name would be the natural
+# second component, but on a comment trigger it isn't available here: the
+# expression engine has no way to split `/agent <name> …` out of the body, and
+# keying on the body itself makes the group unbounded in length and lets two
+# `/agent foo` invocations that differ only in steering text run concurrently —
+# exactly what `cancel-in-progress: false` is meant to prevent.
+# So invocations on the same issue serialize, including different custom
+# agents. That is the deliberate trade: queueing two agents that could have
+# run in parallel costs latency, while letting the same agent run twice at
+# once races two pushes to the same `agent/<name>/…` branch.
+# A repeat invocation queues behind its predecessor rather than cancelling it —
 # a cancelled run can leave a pushed `agent/…` branch with no PR and no
-# response comment. Deliberately absent from the pipeline lanes'
-# concurrency groups (architect/engineer/maestro/…): this lane never
-# coordinates with them.
+# response comment. Deliberately absent from the pipeline lanes' concurrency
+# groups (architect/engineer/maestro/…): this lane never coordinates with them.
 concurrency:
   group: >-
     autoducks-agent-${{
       github.event.issue.number || inputs.pr_number || inputs.issue_number
-    }}-${{
-      github.event_name == 'workflow_dispatch' && inputs.agent_name || github.event.comment.body
     }}
   cancel-in-progress: false
 
@@ -107,11 +110,42 @@ jobs:
       - name: Snapshot machinery
         id: snapshot
         run: bash .autoducks/core/robustness/snapshot-machinery.sh
+      # Resolve the custom agent's name BEFORE the Authorization Gate, so that
+      # `custom_agents.agents.<name>.security.trusted_associations` can actually
+      # narrow the lane policy (authorize.sh:112-118). pre.sh exports
+      # AUTODUCKS_AGENT_NAME far too late — it runs after the gate, so without
+      # this step the narrowing is dead code.
+      #
+      # This is pure text parsing: no reaction, no comment, no API write, no
+      # definition file read. The "Authorization Gate is step 0 of observable
+      # behavior" rule in .autoducks/design/AGENTS.md is about side effects, and
+      # this step has none. An unparseable or malformed name yields an empty
+      # value, which authorize.sh treats as "no narrowing" — the lane policy
+      # applies unchanged and the run is refused later by pre.sh refusal 1.
+      - name: Resolve agent name
+        id: name
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            CANDIDATE="$INPUT_AGENT_NAME"
+          else
+            CANDIDATE="$(bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/config/parse-directive.sh" \
+              | sed -n 's/^agent_name=//p' | head -1)"
+          fi
+          if [[ "$CANDIDATE" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]]; then
+            echo "agent_name=$CANDIDATE" >> "$GITHUB_OUTPUT"
+          else
+            echo "agent_name=" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_AGENT_NAME: ${{ inputs.agent_name }}
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
       - name: Authorize
         id: authz
         run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/security/authorize.sh"
         env:
           AUTODUCKS_AGENT: agent
+          AUTODUCKS_AGENT_NAME: ${{ steps.name.outputs.agent_name }}
           ACTOR: ${{ github.event.comment.user.login || github.event.sender.login }}
           AUTHOR_ASSOC: ${{ github.event.comment.author_association || github.event.issue.author_association }}
           EVENT_NAME: ${{ github.event_name }}
@@ -127,29 +161,54 @@ jobs:
         id: ctx
         if: steps.authz.outcome == 'success'
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            if [[ -n "${{ inputs.pr_number }}" ]]; then
-              echo "issue_num=${{ inputs.pr_number }}" >> "$GITHUB_OUTPUT"
+          # Every dispatch-supplied value arrives through env:, never spliced
+          # into this script by the expression engine. A steering value holding
+          # a backtick, $( ), or a newline is inert here: it is base64-encoded
+          # before it reaches $GITHUB_OUTPUT and never evaluated as shell.
+          # model/effort/turns are stripped of newlines so a multi-line value
+          # cannot forge extra $GITHUB_OUTPUT lines; they are validated as
+          # enums downstream.
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ -n "$INPUT_PR_NUMBER" ]]; then
+              echo "issue_num=$INPUT_PR_NUMBER" >> "$GITHUB_OUTPUT"
               echo "is_pr=true" >> "$GITHUB_OUTPUT"
             else
-              echo "issue_num=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
+              echo "issue_num=$INPUT_ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
               echo "is_pr=false" >> "$GITHUB_OUTPUT"
             fi
-            echo "model=${{ inputs.model }}" >> "$GITHUB_OUTPUT"
-            echo "effort=${{ inputs.effort }}" >> "$GITHUB_OUTPUT"
-            echo "max_turns=${{ inputs.turns }}" >> "$GITHUB_OUTPUT"
-            echo "commenter=${{ github.actor }}" >> "$GITHUB_OUTPUT"
-            echo "agent_name=${{ inputs.agent_name }}" >> "$GITHUB_OUTPUT"
-            echo "agent_name_error=" >> "$GITHUB_OUTPUT"
-            echo "steering_prompt=$(printf '%s' "${{ inputs.steering }}" | base64 | tr -d '\n')" >> "$GITHUB_OUTPUT"
+            echo "model=$(printf '%s' "$INPUT_MODEL" | tr -d '\n\r')" >> "$GITHUB_OUTPUT"
+            echo "effort=$(printf '%s' "$INPUT_EFFORT" | tr -d '\n\r')" >> "$GITHUB_OUTPUT"
+            echo "max_turns=$(printf '%s' "$INPUT_TURNS" | tr -d '\n\r')" >> "$GITHUB_OUTPUT"
+            echo "commenter=$GITHUB_ACTOR" >> "$GITHUB_OUTPUT"
+            # Same charset rule parse-directive.sh applies on the comment path;
+            # without it the dispatch path reached the filesystem unvalidated.
+            if [[ "$INPUT_AGENT_NAME" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]]; then
+              echo "agent_name=$INPUT_AGENT_NAME" >> "$GITHUB_OUTPUT"
+              echo "agent_name_error=" >> "$GITHUB_OUTPUT"
+            else
+              echo "agent_name=" >> "$GITHUB_OUTPUT"
+              echo "agent_name_error=invalid-name" >> "$GITHUB_OUTPUT"
+            fi
+            echo "steering_prompt=$(printf '%s' "$INPUT_STEERING" | base64 | tr -d '\n')" >> "$GITHUB_OUTPUT"
             echo "command=" >> "$GITHUB_OUTPUT"
           else
-            echo "issue_num=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
-            echo "is_pr=${{ github.event.issue.pull_request != null }}" >> "$GITHUB_OUTPUT"
-            echo "commenter=${{ github.event.comment.user.login }}" >> "$GITHUB_OUTPUT"
+            echo "issue_num=$EVENT_ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "is_pr=$EVENT_IS_PR" >> "$GITHUB_OUTPUT"
+            echo "commenter=$EVENT_COMMENTER" >> "$GITHUB_OUTPUT"
             source "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/config/parse-directive.sh" >> "$GITHUB_OUTPUT"
           fi
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          INPUT_ISSUE_NUMBER: ${{ inputs.issue_number }}
+          INPUT_MODEL: ${{ inputs.model }}
+          INPUT_EFFORT: ${{ inputs.effort }}
+          INPUT_TURNS: ${{ inputs.turns }}
+          INPUT_AGENT_NAME: ${{ inputs.agent_name }}
+          INPUT_STEERING: ${{ inputs.steering }}
+          EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
+          EVENT_IS_PR: ${{ github.event.issue.pull_request != null }}
+          EVENT_COMMENTER: ${{ github.event.comment.user.login }}
           COMMENT_BODY: ${{ github.event.comment.body || '' }}
       - name: Pre-execution
         id: pre
@@ -165,6 +224,12 @@ jobs:
           AGENT_NAME: ${{ steps.ctx.outputs.agent_name }}
           AGENT_NAME_ERROR: ${{ steps.ctx.outputs.agent_name_error }}
           STEERING_PROMPT: ${{ steps.ctx.outputs.steering_prompt }}
+          # Definitions are only trusted with their declared tool grant when
+          # they match this ref byte-for-byte. On an issue comment the checkout
+          # already IS this ref, so nothing is clamped; on a PR the checkout is
+          # refs/pull/N/head and any added or edited definition falls back to
+          # the lane default set. See discover-agents.sh's `verified` field.
+          AUTODUCKS_BASE_REF: origin/${{ github.event.repository.default_branch }}
           GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: User pre hook
         if: >-

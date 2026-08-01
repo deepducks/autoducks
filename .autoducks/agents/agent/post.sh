@@ -85,7 +85,27 @@ if [[ -n "$(git status --porcelain)" ]]; then
   AGENT_BRANCH="agent/${NAME}/$(git::generate_slug "$ISSUE_NUM" "$ISSUE_TITLE")"
   DEFAULT_BRANCH="${BASE_BRANCH:-$AUTODUCKS_BASE_BRANCH}"
 
-  git checkout -b "$AGENT_BRANCH"
+  # Branch from the base, not from HEAD. On a PR surface HEAD is
+  # refs/pull/N/head, so cutting from it would produce an `agent/…` PR against
+  # the default branch carrying the contributor's entire unmerged branch on top
+  # of the agent's own edits — a diff nobody can review and a merge nobody
+  # intended. Carry the working tree across with `checkout --no-overlay`-style
+  # semantics: stash the agent's edits, land on the base, restore them.
+  #
+  # `git stash -u` then `stash pop` is what preserves untracked files the agent
+  # created; a plain `checkout -b` from base would leave modified tracked files
+  # conflicting with the base version.
+  if git::branch_exists "$DEFAULT_BRANCH" 2>/dev/null || git rev-parse --verify "origin/$DEFAULT_BRANCH" >/dev/null 2>&1; then
+    git stash push -u -m "autoducks-agent-${NAME}" >/dev/null 2>&1 || true
+    git checkout -B "$AGENT_BRANCH" "origin/$DEFAULT_BRANCH" >/dev/null 2>&1 \
+      || git checkout -B "$AGENT_BRANCH" "$DEFAULT_BRANCH"
+    git stash pop >/dev/null 2>&1 || true
+  else
+    # No resolvable base — fall back to the old behaviour rather than losing
+    # the agent's work, and say so in the response comment.
+    echo "::warning::agent post.sh: could not resolve base '$DEFAULT_BRANCH'; cutting ${AGENT_BRANCH} from HEAD." >&2
+    git checkout -b "$AGENT_BRANCH"
+  fi
   git add -A
   git commit -m "Agent ${NAME}: issue #${ISSUE_NUM}"
 
