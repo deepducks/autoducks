@@ -201,8 +201,12 @@ wait_for_feature_unplanned() {
   while [[ $waited -lt $timeout_s ]]; do
     labels=$(gh api "repos/$REPO/issues/$issue" \
       --jq '[.labels[].name] | join(",")' 2>/dev/null || echo "?")
+    # Machinery comments only. The trigger comments this script posts (/engineer,
+    # /revert) are the human's, and revert deliberately leaves human comments
+    # alone — asserting on the raw count demanded more than revert promises and
+    # could never pass (#183).
     comments=$(gh api "repos/$REPO/issues/$issue/comments" \
-      --jq '. | length' 2>/dev/null || echo "?")
+      --jq '[.[] | select((.body // "") | contains("<!-- autoducks:comment -->"))] | length' 2>/dev/null || echo "?")
     local labels_clean=1
     case ",$labels," in
       *,Tactics:done,*|*,draft,*) labels_clean=0 ;;
@@ -404,7 +408,7 @@ EOF
   echo "  Revert comment posted (id: ${REVERT_COMMENT_ID:-unknown})"
 
   REVERT_RC=0
-  wait_for_feature_unplanned "$FEATURE" 120 || REVERT_RC=$?
+  wait_for_feature_unplanned "$FEATURE" 600 || REVERT_RC=$?
   case $REVERT_RC in
     0) pass "revert completed (labels stripped + comments deleted on #$FEATURE)" ;;
     2) fail "revert did not reach terminal state within 2 min" ;;
@@ -424,11 +428,11 @@ EOF
     fail "Label 'Tactics:done' still present (got: $FINAL_LABELS)"
   fi
 
-  COMMENT_COUNT=$(gh api "repos/$REPO/issues/$FEATURE/comments" --jq '. | length' 2>/dev/null || echo "999")
+  COMMENT_COUNT=$(gh api "repos/$REPO/issues/$FEATURE/comments" --jq "[.[] | select((.body // \"\") | contains(\"<!-- autoducks:comment -->\"))] | length" 2>/dev/null || echo "999")
   if [[ "$COMMENT_COUNT" -eq 0 ]]; then
-    pass "All comments deleted from #$FEATURE"
+    pass "All machinery comments deleted from #$FEATURE"
   else
-    fail "$COMMENT_COUNT comment(s) still present on #$FEATURE (expected 0)"
+    fail "$COMMENT_COUNT machinery comment(s) still present on #$FEATURE (expected 0)"
   fi
 
   POST_REVERT_BODY=$(gh issue view $FEATURE $REPO_ARG --json body --jq '.body')
@@ -461,47 +465,77 @@ fi
 # --- Create the seed issue with a narrow, decomposable draft ---
 # The draft is intentionally specific (explicit file paths, exact signatures)
 # so the engineer-agent goes straight to Plan Mode without asking questions.
+#
+# It also has to be unambiguously MULTI-task, which the previous seed was not:
+# two three-line scripts with no relationship between them are one cohesive
+# change, and a plan that says so is correct — the run that reported an "empty
+# splitter" had simply taken the legitimate single-task fast path (#183). The
+# multi-task path is what this variant exists to cover, so the work is layered
+# instead: the operations, then a dispatcher that cannot be written before them,
+# then a runner that cannot be written before the dispatcher. The dependencies
+# are stated as facts about the code, not as instructions about how to plan.
 echo "[2/9] Creating seed feature issue..."
 SEED_BODY=$(cat <<EOF
 # Plan smoke test — ${TIMESTAMP}
 
-Add two tiny utility modules under \`scripts/smoke-plan-${TIMESTAMP}/\`, each
-with a documented signature. This is a synthetic test — no real
-implementation is needed, the goal is just to exercise the /engineer
-pipeline end-to-end.
+Build a tiny calculator CLI under \`scripts/smoke-plan-${TIMESTAMP}/\`, in three
+layers: the operations, a dispatcher that routes to them, and a test runner that
+exercises the dispatcher. This is a synthetic test — no real implementation is
+needed, the goal is just to exercise the /engineer pipeline end-to-end.
 
-## Files to create
+## Layer 1 — operations
 
 ### \`scripts/smoke-plan-${TIMESTAMP}/add.sh\`
 
-A bash function that sums two integers from positional args and echoes
-the result.
+Sums two integers from positional args and echoes the result.
 
 \`\`\`bash
 #!/usr/bin/env bash
 # Usage: ./add.sh <a> <b>
-# Echoes: a + b
 set -euo pipefail
 echo \$((\${1:-0} + \${2:-0}))
 \`\`\`
 
 ### \`scripts/smoke-plan-${TIMESTAMP}/subtract.sh\`
 
-A bash function that subtracts two integers from positional args.
+Subtracts two integers from positional args.
 
 \`\`\`bash
 #!/usr/bin/env bash
 # Usage: ./subtract.sh <a> <b>
-# Echoes: a - b
 set -euo pipefail
 echo \$((\${1:-0} - \${2:-0}))
 \`\`\`
 
+## Layer 2 — dispatcher
+
+### \`scripts/smoke-plan-${TIMESTAMP}/calc.sh\`
+
+Takes an operation name and two integers, and delegates to the matching script
+from layer 1. Exits 2 with a usage message on an unknown operation. It invokes
+\`add.sh\` and \`subtract.sh\` by path, so it cannot be written or exercised until
+both exist.
+
+\`\`\`bash
+# Usage: ./calc.sh <add|subtract> <a> <b>
+\`\`\`
+
+## Layer 3 — test runner
+
+### \`scripts/smoke-plan-${TIMESTAMP}/run-tests.sh\`
+
+Calls \`calc.sh\` for each supported operation, compares the output against the
+expected value, prints one line per case, and exits non-zero if any case fails.
+It drives the dispatcher rather than the operation scripts, so it depends on
+layer 2 being in place.
+
 ## Acceptance Criteria
 
-- Both files exist and are executable
-- \`./add.sh 2 3\` echoes \`5\`
-- \`./subtract.sh 5 3\` echoes \`2\`
+- All four files exist and are executable
+- \`./add.sh 2 3\` echoes \`5\` and \`./subtract.sh 5 3\` echoes \`2\`
+- \`./calc.sh add 2 3\` echoes \`5\` and \`./calc.sh subtract 5 3\` echoes \`2\`
+- \`./calc.sh multiply 2 3\` exits 2 and prints a usage message
+- \`./run-tests.sh\` exits 0 and prints one line per case
 
 ## Notes
 
@@ -613,10 +647,35 @@ if [[ -n "$YAML_BLOCK" ]]; then
   done < <(echo "$YAML_BLOCK" | grep -oE 'tasks:[[:space:]]*\[[^]]*\]' | grep -oE '[0-9]+' || true)
 fi
 
+# The shape check below has to look at the tactical zone alone, not the whole
+# body: the design zone above it is the seed text, preserved verbatim, and the
+# seed carries its own `## Acceptance Criteria`. Matching against the full body
+# would find the seed's headings and call every failure a fast path.
+TACTICAL_ZONE=$(echo "$CURRENT_BODY" | awk '
+  /^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$/ { flag=1; next }
+  /^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$/   { flag=0 }
+  flag')
+
+# Three outcomes, not two. "No task numbers" used to be reported as an empty
+# splitter, but it is also the documented shape of a legitimate single-task
+# plan: the fast path writes no waves YAML, no Progress checklist and no label
+# at all, because the Maestro detects that case structurally by the absence of a
+# waves plan (engineer/post.sh, D12). Conflating the two meant a passing run
+# reported a defect, and a real splitter failure would have looked identical
+# (#183). Discriminated the same way the Maestro does — by shape.
 if [[ ${#TASK_NUMBERS[@]} -ge 1 ]]; then
   pass "Plan YAML contains ${#TASK_NUMBERS[@]} task number(s): ${TASK_NUMBERS[*]}"
+elif [[ -z "$YAML_BLOCK" ]] && grep -qE '^## (Summary|Tasks)' <<< "$TACTICAL_ZONE"; then
+  # No waves block, but the tactical zone is a task body: the single-task fast
+  # path. Legitimate here, though it means this run did not exercise the
+  # multi-task splitter the default seed is meant to reach — worth surfacing,
+  # not worth failing on.
+  warn "Engineer took the single-task fast path (no waves plan) — the multi-task assertions below are skipped. If this recurs on the default seed, the seed is no longer unambiguously multi-task."
+  TASK_NUMBERS=()
+elif [[ -n "$YAML_BLOCK" ]]; then
+  fail "Plan YAML block is present but carries no task numbers — splitter output empty"
 else
-  fail "Plan YAML has no task numbers — splitter output empty?"
+  fail "Plan has neither a waves YAML block nor a single-task body — engineer wrote no usable tactical zone"
 fi
 
 if [[ ${#TASK_NUMBERS[@]} -eq 0 ]]; then
@@ -949,7 +1008,7 @@ echo "  Revert comment posted (id: ${REVERT_COMMENT_ID:-unknown})"
 # stripped from the feature issue. Issue-scoped, so parallel reverts
 # on other features don't cross-talk.
 REVERT_RC=0
-wait_for_feature_unplanned "$FEATURE" 120 || REVERT_RC=$?
+wait_for_feature_unplanned "$FEATURE" 600 || REVERT_RC=$?
 case $REVERT_RC in
   0) pass "revert completed (labels stripped + comments deleted on #$FEATURE)" ;;
   2) fail "revert did not reach terminal state within 2 min" ;;
@@ -983,12 +1042,12 @@ else
   fail "Label 'draft' still present"
 fi
 
-# All comments deleted (should be 0)
-COMMENT_COUNT=$(gh api "repos/$REPO/issues/$FEATURE/comments" --jq '. | length' 2>/dev/null || echo "999")
+# Machinery comments deleted (the human trigger comments are left alone).
+COMMENT_COUNT=$(gh api "repos/$REPO/issues/$FEATURE/comments" --jq "[.[] | select((.body // \"\") | contains(\"<!-- autoducks:comment -->\"))] | length" 2>/dev/null || echo "999")
 if [[ "$COMMENT_COUNT" -eq 0 ]]; then
-  pass "All comments deleted from #$FEATURE"
+  pass "All machinery comments deleted from #$FEATURE"
 else
-  fail "$COMMENT_COUNT comment(s) still present on #$FEATURE (expected 0)"
+  fail "$COMMENT_COUNT machinery comment(s) still present on #$FEATURE (expected 0)"
 fi
 
 # Body restored — soft assertion (depends on userContentEdits coverage)

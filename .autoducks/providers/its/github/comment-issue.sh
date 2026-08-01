@@ -4,6 +4,12 @@ set -euo pipefail
 its::comment_issue() {
   local issue_id="$1"
   local body="$2"
+  # Stamped so revert can recognise it later regardless of which credential
+  # posted it (#183). Degrades to an unstamped comment if the marker helper is
+  # not loaded, rather than failing the post.
+  if declare -F comment_marker::stamp >/dev/null 2>&1; then
+    body="$(comment_marker::stamp "$body")"
+  fi
   gh issue comment "$issue_id" --repo "$REPO" --body "$body"
 }
 
