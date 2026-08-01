@@ -147,7 +147,7 @@ metarepo::delivered_children_marker() {
 # after posting a clear issue comment.
 metarepo::commit_task() {
   local issue_num="$1" child_branch="$2" msg="$3"
-  local declared changed c d ok body
+  local declared changed c d ok body diagnosis remedy
   body="$(its::get_issue "$issue_num" | jq -r '.body' 2>/dev/null || true)"
   declared="$(metarepo::modules_from_body "$body" | tr '\n' ' ')"
   changed="$(git::submodule_list_changed | tr '\n' ' ')"
@@ -156,9 +156,28 @@ metarepo::commit_task() {
     for d in $declared; do [[ "$c" == "$d" ]] && { ok=true; break; }; done
     if [[ "$ok" != true ]]; then
       export AUTODUCKS_FAIL_CATEGORY="module_drift" AUTODUCKS_FAIL_PHASE="post"
-      its::comment_issue "$issue_num" "🚧 **Drift guard:** this task changed submodule \`$c\`, which is **not** in its declared \`**Modules:**\` (\`${declared:-none}\`). Metarepo tasks may only touch declared modules so cross-module dependency ordering stays correct.
 
-**Fix:** re-run \`$(autoducks_command_for engineer)\` to add \`$c\` to this task's modules, or restrict the change to the declared module(s)." 2>/dev/null || true
+      # The remedy depends on *why* the declaration is wrong, and naming a
+      # re-plan unconditionally has been actively harmful: on a rework task it
+      # would re-plan (and re-reconcile) the whole parent feature, tasks
+      # already executed and delivered included. The task's own
+      # `**Modules:**` field is the correct target in every case (#181).
+      if [[ -z "$declared" ]]; then
+        diagnosis="this task changed submodule \`$c\`, but it declares **no** \`**Modules:**\` at all. In a metarepo every code change lives in a child, so an empty declaration means no change can ever be legal."
+      else
+        diagnosis="this task changed submodule \`$c\`, which is **not** in its declared \`**Modules:**\` (\`$declared\`). Metarepo tasks may only touch declared modules so cross-module dependency ordering stays correct."
+      fi
+
+      remedy="add \`$c\` to this task's \`## Modules\` section (and its \`<!-- autoducks:modules: ... -->\` marker), or restrict the change to the declared module(s)"
+      if ! grep -qF '<!-- autoducks:rework:' <<< "$body"; then
+        # A plan-derived task: re-planning the parent feature is a legitimate
+        # second option, because the plan is where its modules were decided.
+        remedy+=". If the *plan* is what's wrong, re-run \`$(autoducks_command_for engineer)\` on the parent feature to re-declare it"
+      fi
+
+      its::comment_issue "$issue_num" "🚧 **Drift guard:** $diagnosis
+
+**Fix:** $remedy." 2>/dev/null || true
       echo "::error::metarepo drift guard: task #$issue_num changed undeclared module '$c' (declared: ${declared:-none})" >&2
       return 1
     fi
@@ -328,7 +347,7 @@ metarepo::agent_context_block() {
   echo "- All work for a child happens **inside its submodule directory** (e.g. \`autoducks/.autoducks/...\`), **never** the metarepo's own root \`.autoducks/\` or \`.github/\`."
   echo "- The metarepo's OWN \`.autoducks/\`, \`.github/\`, and root files are the metarepo's machinery — **never edit them for a feature**."
   echo "- A design that references a path like \`.autoducks/runtimes/...\` means that path **inside the target submodule** (\`<module>/.autoducks/runtimes/...\`)."
-  echo "- **Engineer:** tag every task's \`**Modules:**\` with the submodule path(s) it changes (e.g. \`autoducks\`). This is required, not optional."
+  echo "- **Engineer / Rework (any agent that writes a task spec):** tag every task's \`**Modules:**\` with the submodule path(s) it changes (e.g. \`autoducks\`). This is required, not optional — an untagged task is rejected before it is filed."
   echo "- **Developer:** only edit files under the task's declared module directories; if the task needs a file outside them, stop rather than editing the metarepo root."
 }
 

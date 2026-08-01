@@ -322,6 +322,10 @@ EOF
        else
          fail "no plan after the delegated handoff (15 min)"; exit 1
        fi ;;
+    # An unhandled code used to fall straight through to the next step with no
+    # output at all, which is how a missing `3)` arm here went unnoticed for a
+    # whole run: the test asserted against a pipeline that had not started.
+    *) fail "unexpected wait_for_reaction code $PLAN_RC"; exit 1 ;;
   esac
   echo ""
 
@@ -555,6 +559,14 @@ case $PLAN_RC in
   0) pass "engineer-agent run completed successfully" ;;
   1) fail "engineer-agent run failed (😕 reaction on /engineer comment)"; exit 1 ;;
   2) fail "engineer-agent run did not complete within 10 min"; exit 1 ;;
+  3) if wait_for_plan_after_delegation "$FEATURE" 900 "engineer-agent (post-delegation)"; then
+       pass "engineer-agent completed after delegating to a prerequisite agent"
+     else
+       fail "no plan after the delegated handoff (15 min)"; exit 1
+     fi ;;
+  # See the note on the other case block: silence on an unknown code is how a
+  # missing arm turns into an assertion against a pipeline that never ran.
+  *) fail "unexpected wait_for_reaction code $PLAN_RC"; exit 1 ;;
 esac
 echo ""
 
@@ -565,7 +577,16 @@ echo "[5/9] Asserting plan pipeline state..."
 if [[ -n "$PLAN_COMMENT_ID" ]]; then
   REACTIONS=$(gh api "repos/$REPO/issues/comments/$PLAN_COMMENT_ID/reactions" --jq '[.[].content]' 2>/dev/null || echo "[]")
   if echo "$REACTIONS" | grep -q "eyes"; then pass "👀 reaction on /engineer comment"; else warn "👀 reaction missing on /engineer comment"; fi
-  if echo "$REACTIONS" | grep -q "+1";   then pass "👍 reaction on /engineer comment"; else warn "👍 reaction missing on /engineer comment"; fi
+  # 👍 or 🚀 — both are terminal for this comment. On a delegated run the
+  # Definition-of-Ready guard reacts 🚀 and the work continues on the
+  # re-dispatched Engineer's own comment, which never gets a 👍 here. Warning
+  # only on 👍 would fire on every fresh feature, since a fresh feature has no
+  # Design:done and therefore always delegates.
+  if echo "$REACTIONS" | grep -qE '"(\+1|rocket)"'; then
+    pass "terminal reaction (👍 or 🚀) on /engineer comment"
+  else
+    warn "no terminal reaction on /engineer comment (got: $(echo "$REACTIONS" | tr -d '\n'))"
+  fi
 fi
 
 # Labels
@@ -592,13 +613,13 @@ if [[ -n "$YAML_BLOCK" ]]; then
   done < <(echo "$YAML_BLOCK" | grep -oE 'tasks:[[:space:]]*\[[^]]*\]' | grep -oE '[0-9]+' || true)
 fi
 
-if [[ ${#TASK_NUMBERS[@]:-0} -ge 1 ]]; then
+if [[ ${#TASK_NUMBERS[@]} -ge 1 ]]; then
   pass "Plan YAML contains ${#TASK_NUMBERS[@]} task number(s): ${TASK_NUMBERS[*]}"
 else
   fail "Plan YAML has no task numbers — splitter output empty?"
 fi
 
-if [[ ${#TASK_NUMBERS[@]:-0} -eq 0 ]]; then
+if [[ ${#TASK_NUMBERS[@]} -eq 0 ]]; then
   echo "[!] No tasks to assert on — skipping per-task checks"
   TASK_NUMBERS=()
 fi
@@ -644,7 +665,7 @@ if [[ "$PROBE_STATUS" =~ ^2 ]]; then
       MATCHED=$((MATCHED + 1))
     fi
   done
-  if [[ $MATCHED -eq ${#TASK_NUMBERS[@]:-0} ]]; then
+  if [[ $MATCHED -eq ${#TASK_NUMBERS[@]} ]]; then
     pass "All ${#TASK_NUMBERS[@]} tasks linked as sub-issues of #$FEATURE"
   else
     fail "Sub-issues API is available but only $MATCHED/${#TASK_NUMBERS[@]} tasks are linked to #$FEATURE"
@@ -779,7 +800,7 @@ echo ""
 echo "[7/9] Reproducing /architect re-run regression (tactical zone must survive)..."
 if [[ "$REDEVISE_RC" -ne 0 ]]; then
   fail "Skipping design re-run assertions — second engineer-agent run did not complete"
-elif [[ ${#TASK_NUMBERS[@]:-0} -eq 0 ]]; then
+elif [[ ${#TASK_NUMBERS[@]} -eq 0 ]]; then
   fail "Skipping design re-run assertions — no task numbers to use as a tactical sentinel"
 else
   DESIGN_TACTICAL_SENTINEL="#${TASK_NUMBERS[0]}"
