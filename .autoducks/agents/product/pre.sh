@@ -105,6 +105,22 @@ if [[ "$SCOPE" == "single" ]]; then
 else
   RAW_ISSUES=$(its::list_issues open "$MAX_ISSUES")
 
+  # Pipeline-created tasks are not backlog. The Engineer files them with the
+  # `Task` label and native type, and nothing in the triage predicates below
+  # recognised that: `already_classified` only accepts feature/bug, so every
+  # task looked untriaged and the sweep classified it. Observed on a staging
+  # run — a task was filed at 20:28:13 and the sweep added `Priority:Low` and
+  # `Feature` to it 48s later, leaving an issue that is both Task and Feature
+  # (#183 follow-up). On any repo with the schedule enabled that happens to
+  # every task the Engineer creates.
+  #
+  # Sweep scope only. An explicit `/triage` on a task issue is a human asking
+  # for it by number, and that still works.
+  RAW_ISSUES=$(echo "$RAW_ISSUES" | jq -c '[.[] | select(
+    (((.type // "") | ascii_downcase) != "task")
+    and ((.labels // []) | any(ascii_downcase == "task") | not)
+  )]')
+
   # Truncation check: is there more open backlog than we pulled? Cheap
   # over-fetch (bounded, not unbounded) rather than a second full listing.
   TOTAL_OPEN=$(gh issue list --repo "$REPO" --state open --limit "$((MAX_ISSUES + 1))" --json number --jq 'length' 2>/dev/null || echo 0)

@@ -683,14 +683,28 @@ if [[ ${#TASK_NUMBERS[@]} -eq 0 ]]; then
   TASK_NUMBERS=()
 fi
 
-# Each task has priority:P* label
+# Each task carries the Task label.
+#
+# This used to assert `priority:P*` on every task, and had never actually run:
+# the per-task loop was reached for the first time once the seed reliably
+# produced a multi-task plan, and it failed on all four. `priority:P0..P3` is a
+# *retired* taxonomy — design/AGENTS.md lists it under "Retired (cleaned up on
+# sight by revert/close/engineer)" and parse-plan.py calls the suffixes retired
+# by D14. The Engineer files tasks with `labels: ["Task"]` and nothing else, so
+# the assertion was demanding a label the machinery deliberately stopped
+# applying. Asserting the label it does apply is the check that has meaning.
 for t in "${TASK_NUMBERS[@]:-}"; do
   [[ -z "$t" ]] && continue
   TLABELS=$(gh issue view $t $REPO_ARG --json labels --jq '[.labels[].name] | join(",")')
-  if echo "$TLABELS" | grep -qE "priority:P"; then
-    pass "Task #$t has priority label ($TLABELS)"
+  if echo "$TLABELS" | grep -qE '(^|,)Task(,|$)'; then
+    pass "Task #$t carries the Task label ($TLABELS)"
   else
-    fail "Task #$t missing priority label"
+    fail "Task #$t missing the Task label (got: ${TLABELS:-none})"
+  fi
+  # A task that also carries Feature means something re-classified a
+  # pipeline-created issue — the triage sweep used to do exactly that.
+  if echo "$TLABELS" | grep -qE '(^|,)Feature(,|$)'; then
+    fail "Task #$t is also labelled Feature — something re-classified a pipeline task ($TLABELS)"
   fi
 done
 
@@ -852,23 +866,32 @@ echo ""
 # workflow: /architect re-run on a feature that already has a tactical
 # zone (markers + YAML wave plan) must preserve that zone verbatim while
 # rewriting only the design zone above it. Starts from the state this script
-# already reached above (the feature body has markers and a real YAML wave
-# plan from the second /engineer run). Captures a task-number sentinel
-# from the tactical zone, re-runs /architect, and asserts the tactical
-# zone survives verbatim below a freshly-written design zone.
+# already reached above (the feature body has markers and a tactical zone from
+# the second /engineer run — single-task or multi-task, either is valid here).
+# Captures that zone verbatim, re-runs /architect, and asserts it comes back
+# byte-for-byte identical below a freshly-written design zone.
 echo "[7/9] Reproducing /architect re-run regression (tactical zone must survive)..."
 if [[ "$REDEVISE_RC" -ne 0 ]]; then
   fail "Skipping design re-run assertions — second engineer-agent run did not complete"
-elif [[ ${#TASK_NUMBERS[@]} -eq 0 ]]; then
-  fail "Skipping design re-run assertions — no task numbers to use as a tactical sentinel"
 else
-  DESIGN_TACTICAL_SENTINEL="#${TASK_NUMBERS[0]}"
+  # The sentinel is the tactical zone itself, captured verbatim, rather than a
+  # task number lifted out of it. A task number only exists on the multi-task
+  # path, and the body this step starts from is the *rewritten* one from step 6
+  # — a smaller spec that legitimately plans as a single task, leaving no YAML
+  # and no numbers. That made this step fail with "no task numbers" even on a
+  # run whose plan was correct (#183 follow-up). Comparing the whole zone also
+  # asserts more than a number ever did: not "a token survived" but "the zone
+  # survived unchanged".
   PRE_DESIGN_BODY=$(gh issue view $FEATURE $REPO_ARG --json body --jq '.body')
+  PRE_DESIGN_TACTICAL=$(echo "$PRE_DESIGN_BODY" | awk '
+    /^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$/ { flag=1; next }
+    /^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$/   { flag=0 }
+    flag')
 
-  if echo "$PRE_DESIGN_BODY" | grep -qF "$DESIGN_TACTICAL_SENTINEL"; then
-    pass "Tactical sentinel ($DESIGN_TACTICAL_SENTINEL) present before /architect re-run"
+  if [[ -n "$PRE_DESIGN_TACTICAL" ]]; then
+    pass "Tactical zone captured before /architect re-run ($(wc -l <<< "$PRE_DESIGN_TACTICAL" | tr -d ' ') lines)"
   else
-    fail "Tactical sentinel ($DESIGN_TACTICAL_SENTINEL) missing before /architect re-run — cannot set up the test"
+    fail "No tactical zone present before /architect re-run — cannot set up the test"
   fi
 
   DESIGN_COMMENT_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/architect sonnet low")
@@ -898,19 +921,19 @@ else
       fail "Tactical zone markers LOST after /architect re-run"
     fi
 
-    if echo "$DESIGN_BODY" | grep -qF "$DESIGN_TACTICAL_SENTINEL"; then
-      pass "Tactical sentinel ($DESIGN_TACTICAL_SENTINEL) survived the /architect re-run"
+    POST_DESIGN_TACTICAL=$(echo "$DESIGN_BODY" | awk '
+      /^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$/ { flag=1; next }
+      /^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$/   { flag=0 }
+      flag')
+
+    if [[ "$POST_DESIGN_TACTICAL" == "$PRE_DESIGN_TACTICAL" ]]; then
+      pass "Tactical zone survived the /architect re-run byte-for-byte"
     else
-      fail "Tactical sentinel ($DESIGN_TACTICAL_SENTINEL) LOST after /architect re-run"
+      fail "Tactical zone CHANGED across the /architect re-run"
+      diff <(echo "$PRE_DESIGN_TACTICAL") <(echo "$POST_DESIGN_TACTICAL") | head -20 | sed 's/^/      /'
     fi
 
     BEGIN_LINE=$(echo "$DESIGN_BODY" | grep -nE '^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$' | head -1 | cut -d: -f1 || echo "")
-    SENTINEL_LINE=$(echo "$DESIGN_BODY" | grep -nF "$DESIGN_TACTICAL_SENTINEL" | head -1 | cut -d: -f1 || echo "")
-    if [[ -n "$SENTINEL_LINE" && -n "$BEGIN_LINE" && "$SENTINEL_LINE" -gt "$BEGIN_LINE" ]]; then
-      pass "Tactical sentinel appears below the tactical:begin marker (tactical zone preserved in place)"
-    else
-      fail "Tactical sentinel does not appear below the tactical:begin marker (tactical zone corrupted or misplaced)"
-    fi
 
     # "## Problem Statement" is a required section of every design spec the
     # architect-agent writes (.autoducks/agents/architect/prompt.md) — a stable,
