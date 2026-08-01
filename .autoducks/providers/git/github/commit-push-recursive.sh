@@ -28,6 +28,21 @@ git::commit_push_recursive() {
     fi
 
     git::submodule_remote "$p"
+
+    # Never push task work onto a child's default branch. The mirrored branch
+    # name is resolved upstream from the parent's pipeline branch, and when that
+    # resolution falls back to the integration branch the name that arrives here
+    # is literally `main` — so this push would land task commits directly on the
+    # child's trunk. On a protected child that costs the whole agent run (the
+    # rejection happens after the work is done, with nothing checkpointed); on an
+    # unprotected child it silently succeeds, which is worse (#182).
+    local _default
+    _default="$(metarepo::child_default_branch "$p")"
+    if [[ "$child_branch" == "$_default" ]]; then
+      echo "::error::metarepo: refusing to push '$p' onto its default branch '$_default' — the task's mirrored branch never resolved to a feature branch. This is a branch-resolution failure upstream of the push, not something to retry as-is." >&2
+      return 1
+    fi
+
     git -C "$p" push origin "HEAD:refs/heads/${child_branch}"
   done < <(git::submodule_list_changed)
 

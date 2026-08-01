@@ -250,8 +250,13 @@ git::submodule_deliver() {
     # cancelled the auto-merge, and destroyed the branch holding the work (#176:
     # PR #1140 went auto_merge_enabled → closed/head_ref_deleted in 3 seconds,
     # and the resolver dispatched afterwards died at checkout on a branch that no
-    # longer existed). The synchronous merges below keep --delete-branch, because
-    # there the merge has already happened by the time gh returns.
+    # longer existed).
+    #
+    # The synchronous merges below no longer delete either, for a different
+    # reason: delivery does not own the child branch's lifetime. The parent's
+    # pipeline created it and the parent's PR close deletes it (#182) — deleting
+    # it here retires it while the parent PR is still open and its review loop
+    # can still dispatch rework rounds that need somewhere to commit.
     if GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --merge --auto 2>/dev/null; then
       echo "::notice::submodule_deliver: enabled auto-merge (merge commit) on protected child PR #$pr_num on $slug — merges when required checks pass." >&2
       # Auto-merge is only as good as the checks it waits on: verify they exist
@@ -261,7 +266,7 @@ git::submodule_deliver() {
     fi
     # Repo may disallow auto-merge — try an immediate merge commit (works when no
     # required checks are pending). That merge IS synchronous, so pin its result.
-    if GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --merge --delete-branch 2>/dev/null; then
+    if GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --merge 2>/dev/null; then
       read -r pin repin <<< "$(git::_child_pin_after_merge "$slug" "$default_branch" "$token" "$feat_sha")"
       echo "::notice::submodule_deliver: merged protected child PR #$pr_num on $slug via merge commit — pinned $default_branch tip $pin." >&2
       echo "$pin $repin 0 "; return 0
@@ -281,7 +286,7 @@ git::submodule_deliver() {
   case "$method" in
     merge)
       # (Unprotected + merge was already handled by the FF/merges-API path above.)
-      if GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --merge --delete-branch 2>/dev/null; then
+      if GH_TOKEN="$token" gh pr merge "$pr_num" --repo "$slug" --merge 2>/dev/null; then
         read -r pin repin <<< "$(git::_child_pin_after_merge "$slug" "$default_branch" "$token" "$feat_sha")"
         echo "::notice::submodule_deliver: merged child PR #$pr_num on $slug via merge commit — pinned $default_branch tip $pin." >&2
         echo "$pin $repin 0 "; return 0
