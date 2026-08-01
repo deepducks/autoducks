@@ -130,12 +130,23 @@ release::last_tag() {
 
 # release::commit_subjects_since TAG — one commit subject per line, from TAG
 # (exclusive) to HEAD; every commit reachable from HEAD when TAG is empty.
+#
+# `--first-parent`, because every PR lands as a merge commit and therefore
+# contributes its subject twice: once from the branch commit and once from the
+# merge, the latter with ` (#1234)` appended by GitHub. Walking every commit
+# put both in the changelog, so the v0.5.0 draft listed all five changes
+# twice. Following only the first parent gives exactly one entry per merged
+# PR — and it is the merge subject, which is the one carrying the PR number.
+#
+# A repo that squash-merges or pushes straight to the default branch is
+# unaffected: those produce a single linear commit each, which is its own
+# first parent.
 release::commit_subjects_since() {
   local tag="$1"
   if [[ -n "$tag" ]]; then
-    git log --format='%s' "$tag"..HEAD 2>/dev/null || true
+    git log --first-parent --format='%s' "$tag"..HEAD 2>/dev/null || true
   else
-    git log --format='%s' HEAD 2>/dev/null || true
+    git log --first-parent --format='%s' HEAD 2>/dev/null || true
   fi
 }
 
