@@ -25,3 +25,8 @@ __pycache__/
 # autoducks: the "agent" lane's resolved prompt is a runtime artifact,
 # never a commit-worthy file — see .autoducks/agents/agent/post.sh
 .autoducks/agents/agent/resolved-prompt.md
+
+# Claude Code worktrees — created per-session under .claude/worktrees/, never
+# committed. Left untracked they make `git status --porcelain` non-empty, which
+# release.sh reads as a dirty tree and refuses to cut a release on.
+.claude/

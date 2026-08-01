@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0] - 2026-08-01
+
+### Fixed
+- fix(smoke): repair the plan test's array length checks and 👍 assertion (#1152)
+- fix(smoke): handle the delegated code in both plan-test call sites (#1151)
+- fix(feedback): a delegation is a handoff, not a success (#1150)
+- fix(feedback): react on delegation, so a handoff stops looking like a hang (#1149)
+- fix(release): let --dry-run run on a branch it cannot push to (#1148)
+
+### Changed
+- chore: ignore .claude/ so worktrees do not block a release (#1153)
+
 ## [0.3.0] - 2026-07-31
 
 ### Added
