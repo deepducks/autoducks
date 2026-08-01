@@ -58,7 +58,7 @@
     "priority_backend": "auto",
     "project_number": null,
     "priority_field": "Priority",
-    "auto_merge_duplicates": true,
+    "flag_duplicates": true,
     "max_closes_per_run": 5,
     "confidence_threshold": "high",
     "max_issues_per_run": 100,

@@ -6,7 +6,7 @@
 # Before the fix, each of the three apply loops (priorities, duplicates,
 # classifications) built its result array with:
 #   RESULT=$(jq -s '.' < <( while ...; do ...mutating calls...; jq -n '{...}'; done ))
-# Several of the mutating calls (`gh label create`, `fold_duplicate::close`,
+# Several of the mutating calls (`gh label create`, `fold_duplicate::reference`,
 # `classify_label::apply`) were not fully redirected to /dev/null, so any
 # stdout they produced (an issue URL, a "✓ Label ... created" line — exactly
 # what `gh` prints on a real mutation) landed in the same stream as the
@@ -23,7 +23,7 @@
 # Style follows test/unit-idempotency.sh and test/unit-classify-label.sh:
 # PASS/FAIL counters, mktemp -d scratch, trap ... EXIT, an isolated marker
 # dir via RUNNER_TEMP/GITHUB_RUN_ID, no network. One deliberate deviation:
-# post.sh never persists APPLIED_PRIORITIES_JSON / CLOSED_DUPLICATES_JSON /
+# post.sh never persists APPLIED_PRIORITIES_JSON / FLAGGED_DUPLICATES_JSON /
 # APPLIED_CLASSIFICATIONS_JSON anywhere external (no GITHUB_OUTPUT, no file),
 # and it `exit`s on every path (success and the ERR trap alike) — so instead
 # of running it as an opaque subprocess, this test `source`s it inside an
@@ -80,12 +80,12 @@ classify_label::apply() {
 }
 EOF
 
-# fold_duplicate::close stub — leaks the same shape of output the real
+# fold_duplicate::reference stub — leaks the same shape of output the real
 # fold-duplicate.sh produces via `gh label create` + its::add_label +
 # its::close_issue when unredirected.
 cat > "$SCRATCH_ROOT/core/orchestration/fold-duplicate.sh" <<'EOF'
 #!/usr/bin/env bash
-fold_duplicate::close() {
+fold_duplicate::reference() {
   local dup="$1" canonical="$2"
   echo "✓ Label \"Duplicate\" created"
   its::add_label "$dup" "Duplicate"
@@ -200,10 +200,10 @@ run_post() {
       local rc="${1:-0}"
       printf '%s' "$rc" > "$out_dir/rc"
       printf '%s' "${APPLIED_PRIORITIES_JSON:-}" > "$out_dir/applied_priorities.json"
-      printf '%s' "${CLOSED_DUPLICATES_JSON:-}" > "$out_dir/closed_duplicates.json"
+      printf '%s' "${FLAGGED_DUPLICATES_JSON:-}" > "$out_dir/flagged_duplicates.json"
       printf '%s' "${APPLIED_CLASSIFICATIONS_JSON:-}" > "$out_dir/applied_classifications.json"
       printf '%s' "${APPLIED_PRIORITY_COUNT:-}" > "$out_dir/applied_priority_count"
-      printf '%s' "${CLOSED_COUNT:-}" > "$out_dir/closed_count"
+      printf '%s' "${FLAGGED_COUNT:-}" > "$out_dir/flagged_count"
       printf '%s' "${APPLIED_CLASSIFICATION_COUNT:-}" > "$out_dir/applied_classification_count"
       builtin exit "$rc"
     }
@@ -225,10 +225,10 @@ run_post "$OUT" || RC=$?
 read_out() { cat "$OUT/$1" 2>/dev/null || echo ""; }
 
 APPLIED_PRIORITIES=$(read_out applied_priorities.json)
-CLOSED_DUPLICATES=$(read_out closed_duplicates.json)
+FLAGGED_DUPLICATES=$(read_out flagged_duplicates.json)
 APPLIED_CLASSIFICATIONS=$(read_out applied_classifications.json)
 
-for pair in "applied_priorities.json:$APPLIED_PRIORITIES" "closed_duplicates.json:$CLOSED_DUPLICATES" "applied_classifications.json:$APPLIED_CLASSIFICATIONS"; do
+for pair in "applied_priorities.json:$APPLIED_PRIORITIES" "flagged_duplicates.json:$FLAGGED_DUPLICATES" "applied_classifications.json:$APPLIED_CLASSIFICATIONS"; do
   name="${pair%%:*}"
   content="${pair#*:}"
   if echo "$content" | grep -qE 'https://github\.com|✓ Label'; then
@@ -247,13 +247,13 @@ else
   fail "APPLIED_PRIORITIES_JSON is not valid JSON: $APPLIED_PRIORITIES"
 fi
 
-if jq -e '.' >/dev/null 2>&1 <<<"$CLOSED_DUPLICATES"; then
-  pass "CLOSED_DUPLICATES_JSON is valid JSON"
-  [[ "$(jq -c '.' <<<"$CLOSED_DUPLICATES")" == '[{"canonical":201,"duplicate":202}]' ]] \
-    && pass "CLOSED_DUPLICATES_JSON contains exactly the intended entry" \
-    || fail "CLOSED_DUPLICATES_JSON unexpected content: $CLOSED_DUPLICATES"
+if jq -e '.' >/dev/null 2>&1 <<<"$FLAGGED_DUPLICATES"; then
+  pass "FLAGGED_DUPLICATES_JSON is valid JSON"
+  [[ "$(jq -c '.' <<<"$FLAGGED_DUPLICATES")" == '[{"canonical":201,"duplicate":202}]' ]] \
+    && pass "FLAGGED_DUPLICATES_JSON contains exactly the intended entry" \
+    || fail "FLAGGED_DUPLICATES_JSON unexpected content: $FLAGGED_DUPLICATES"
 else
-  fail "CLOSED_DUPLICATES_JSON is not valid JSON: $CLOSED_DUPLICATES"
+  fail "FLAGGED_DUPLICATES_JSON is not valid JSON: $FLAGGED_DUPLICATES"
 fi
 
 if jq -e '.' >/dev/null 2>&1 <<<"$APPLIED_CLASSIFICATIONS"; then
@@ -266,13 +266,13 @@ else
 fi
 
 APPLIED_PRIORITY_COUNT=$(read_out applied_priority_count)
-CLOSED_COUNT=$(read_out closed_count)
+FLAGGED_COUNT=$(read_out flagged_count)
 APPLIED_CLASSIFICATION_COUNT=$(read_out applied_classification_count)
 
 [[ "$APPLIED_PRIORITY_COUNT" == "1" ]] \
   && pass "APPLIED_PRIORITY_COUNT == 1" || fail "APPLIED_PRIORITY_COUNT: '$APPLIED_PRIORITY_COUNT'"
-[[ "$CLOSED_COUNT" == "1" ]] \
-  && pass "CLOSED_COUNT == 1 (DUPLICATE_GROUP_COUNT > 0 path exercised)" || fail "CLOSED_COUNT: '$CLOSED_COUNT'"
+[[ "$FLAGGED_COUNT" == "1" ]] \
+  && pass "FLAGGED_COUNT == 1 (DUPLICATE_GROUP_COUNT > 0 path exercised)" || fail "FLAGGED_COUNT: '$FLAGGED_COUNT'"
 [[ "$APPLIED_CLASSIFICATION_COUNT" == "1" ]] \
   && pass "APPLIED_CLASSIFICATION_COUNT == 1" || fail "APPLIED_CLASSIFICATION_COUNT: '$APPLIED_CLASSIFICATION_COUNT'"
 
