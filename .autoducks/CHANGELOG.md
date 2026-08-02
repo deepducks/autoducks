@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.2] - 2026-08-02
+
+### Fixed
+- fix(metarepo): fail the delivery check on a gitlink nothing can reach (#1166)
+- fix(agent): land the custom-agent lane review rounds on top of v0.5.1 (#1165)
+
 ## [0.5.1] - 2026-08-02
 
 ### Fixed
