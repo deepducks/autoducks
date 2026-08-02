@@ -45,10 +45,37 @@ fi
 # ── Refusal #2: custom agents disabled repo-wide (never opens a definition) ─
 AGENT_REPO_ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
 AGENT_LIVE_CONFIG="${AUTODUCKS_CONFIG:-$AGENT_REPO_ROOT/.autoducks/autoducks.json}"
-CUSTOM_AGENTS_ENABLED="true"
-if [[ -f "$AGENT_LIVE_CONFIG" ]]; then
-  CUSTOM_AGENTS_ENABLED="$(jq -r 'if .custom_agents.enabled == false then "false" else "true" end' "$AGENT_LIVE_CONFIG" 2>/dev/null || echo true)"
+
+# ── Trust anchor, mirroring discover-agents.sh ──────────────────────────
+# Every privilege-bearing config key is read from here, never from the
+# checked-out tree: on a PR surface that tree is refs/pull/N/head. The
+# merge-base rather than the base-ref tip, so a definition is not marked
+# changed just because the default branch moved after the branch was cut.
+AGENT_TRUST_REF=""
+if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
+  AGENT_TRUST_REF="$(git -C "$AGENT_REPO_ROOT" merge-base "$AUTODUCKS_BASE_REF" HEAD 2>/dev/null || true)"
+  [[ -n "$AGENT_TRUST_REF" ]] || AGENT_TRUST_REF="$AUTODUCKS_BASE_REF"
 fi
+
+# agent_base_config — autoducks.json as of the trust ref, or the live file
+# when there is no trust ref (a local run). Read once.
+_AGENT_BASE_CONFIG=""
+agent_base_config() {
+  if [[ -z "$_AGENT_BASE_CONFIG" ]]; then
+    if [[ -n "$AGENT_TRUST_REF" ]]; then
+      _AGENT_BASE_CONFIG="$(git -C "$AGENT_REPO_ROOT" show "$AGENT_TRUST_REF:.autoducks/autoducks.json" 2>/dev/null || echo '{}')"
+    elif [[ -f "$AGENT_LIVE_CONFIG" ]]; then
+      _AGENT_BASE_CONFIG="$(cat "$AGENT_LIVE_CONFIG")"
+    fi
+    [[ -n "$_AGENT_BASE_CONFIG" ]] || _AGENT_BASE_CONFIG='{}'
+  fi
+  printf '%s' "$_AGENT_BASE_CONFIG"
+}
+
+# `enabled` is the repo owner's kill switch, so it belongs to the same class
+# as tools and allow_unverified: reading it from the PR head would let a
+# contributor turn the lane back on in the same change that uses it.
+CUSTOM_AGENTS_ENABLED="$(agent_base_config | jq -r 'if .custom_agents.enabled == false then "false" else "true" end' 2>/dev/null || echo true)"
 if [[ "$CUSTOM_AGENTS_ENABLED" == "false" ]]; then
   refuse "🚫 Custom agents are disabled for this repository."
 fi
@@ -68,7 +95,9 @@ build_catalog_comment() {
         "_(no custom agents are defined in this repository)_"
       else
         (["| Name | Description | Source |", "|---|---|---|"]
-          + ($rows | map("| `" + .name + "` | " + ((.description // "—") | esc) + " | `" + .source + "` |")))
+          + ($rows | map("| `" + .name + "` | " + ((.description // "—") | esc)
+            + (if .verified == "unverified" then " _(unverified — differs from reviewed history; will be refused)_" else "" end)
+            + " | `" + .source + "` |")))
         | join("\n")
       end)
     + (if (.errors | length) == 0 then ""
@@ -142,15 +171,16 @@ DESC_VERIFIED="$(jq -r '.verified // "unchecked"' <<<"$DESCRIPTOR_JSON")"
 # than incidental; with no base ref there is nothing to trust, so it stays off.
 
 ALLOW_UNVERIFIED=false
-if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
-  ALLOW_UNVERIFIED="$(git -C "$AGENT_REPO_ROOT" show "$AUTODUCKS_BASE_REF:.autoducks/autoducks.json" 2>/dev/null \
-    | jq -r '.custom_agents.allow_unverified // false' 2>/dev/null || echo false)"
+if [[ -n "$AGENT_TRUST_REF" ]]; then
+  ALLOW_UNVERIFIED="$(agent_base_config | jq -r '.custom_agents.allow_unverified // false' 2>/dev/null || echo false)"
   [[ "$ALLOW_UNVERIFIED" == "true" ]] || ALLOW_UNVERIFIED=false
 fi
 if [[ "$DESC_VERIFIED" == "unverified" && "$ALLOW_UNVERIFIED" != "true" ]]; then
-  refuse "🚫 \`${AGENT_NAME}\` (\`${DESC_SOURCE}\`) does not match the default branch — it was added or edited on this pull request, so it has not been reviewed.
+  refuse "🚫 \`${AGENT_NAME}\` (\`${DESC_SOURCE}\`) does not match reviewed history — the file differs from the merge-base with the default branch, so this version of it has not been reviewed.
 
 Custom agents run with the repository's token, and the definition body becomes the prompt, so autoducks only runs definitions that are already merged.
+
+This is usually because the definition was added or edited on this pull request. It can also happen if the branch is stale — rebase onto the default branch and re-run.
 
 **To run it:** merge the definition to the default branch first, then re-run \`$(autoducks_command_for agent) ${AGENT_NAME}\`.
 

@@ -118,7 +118,7 @@ run_pre() {
       bash "$ws/.autoducks/agents/agent/pre.sh" )
 }
 
-REFUSAL="does not match the default branch"
+REFUSAL="does not match reviewed history"
 # pre.sh only assembles the prompt once every refusal is behind it, so the
 # file's presence is the positive signal that the run was actually permitted —
 # asserting only the absence of a string would pass on any earlier failure.
@@ -158,6 +158,21 @@ if proceeded "$WS"; then
 else
   fail "opt-in accepted but the run never reached prompt assembly"
 fi
+# AGENTS.md claims the opt-in "widens who may run, never what they may reach".
+# The definition asks for [Read] but an unverified run must land on the
+# unverified_tools floor regardless, and that floor must exclude writes.
+EFFECTIVE="$(jq -c '.tools_effective' /tmp/agent-descriptor.json 2>/dev/null)"
+FLOOR="$(jq -c '.unverified_tools' "$WS/.autoducks/agents/agent/defaults.json" 2>/dev/null)"
+if [[ -n "$EFFECTIVE" && "$EFFECTIVE" == "$FLOOR" ]]; then
+  pass "the opt-in run is still clamped to unverified_tools"
+else
+  fail "opt-in run not clamped: tools_effective=$EFFECTIVE floor=$FLOOR"
+fi
+if ! grep -q '"Write"' <<<"$EFFECTIVE" && ! grep -q '"Edit"' <<<"$EFFECTIVE"; then
+  pass "the clamped grant carries neither Write nor Edit"
+else
+  fail "clamped grant still contains a write tool: $EFFECTIVE"
+fi
 
 echo ""
 echo "3) allow_unverified only on the PR head does NOT let it through"
@@ -188,6 +203,49 @@ if proceeded "$WS"; then
   pass "the verified run proceeds to prompt assembly"
 else
   fail "a verified definition never reached prompt assembly"
+fi
+
+echo ""
+echo "5) with no AUTODUCKS_BASE_REF there is nothing to verify against"
+# This is the local setup.sh path: verified stays "unchecked" and the guard is
+# off by design. Pinned because it is the single input that disables it.
+WS="$(make_workspace)"; dirty_definition "$WS"
+LOG="$(new_tmp)/gh.log"; BIN="$(new_tmp)"; MARKER="$(new_tmp)"
+make_fake_gh "$BIN" "$LOG"
+( cd "$WS" && \
+  env -i PATH="$BIN:$ORIG_PATH" HOME="$HOME" GITHUB_ACTIONS=true \
+    GITHUB_WORKSPACE="$WS" RUNNER_TEMP="$MARKER" GITHUB_RUN_ID=test \
+    REPO=acme/widgets RUN_ID=1 ISSUE_NUM="$TEST_ISSUE_NUM" COMMENT_ID="" \
+    IS_PR=true AGENT_NAME=helper AUTODUCKS_PINNED_ROOT="$WS" \
+    bash "$WS/.autoducks/agents/agent/pre.sh" ) >/dev/null 2>&1
+
+if ! grep -qi "$REFUSAL" "$LOG" 2>/dev/null; then
+  pass "no base ref: the refusal does not fire"
+else
+  fail "refused with no base ref configured"
+fi
+if [[ "$(jq -r '.verified' /tmp/agent-descriptor.json 2>/dev/null)" == "unchecked" ]]; then
+  pass "no base ref: the descriptor records verified=unchecked"
+else
+  fail "expected verified=unchecked with no base ref"
+fi
+
+echo ""
+echo "6) the catalog marks an unverified agent instead of advertising it plainly"
+WS="$(make_workspace)"; dirty_definition "$WS"
+LOG="$(new_tmp)/gh.log"; BIN="$(new_tmp)"; MARKER="$(new_tmp)"
+make_fake_gh "$BIN" "$LOG"
+( cd "$WS" && \
+  env -i PATH="$BIN:$ORIG_PATH" HOME="$HOME" GITHUB_ACTIONS=true \
+    GITHUB_WORKSPACE="$WS" RUNNER_TEMP="$MARKER" GITHUB_RUN_ID=test \
+    REPO=acme/widgets RUN_ID=1 ISSUE_NUM="$TEST_ISSUE_NUM" COMMENT_ID="" \
+    IS_PR=true AGENT_NAME="" AUTODUCKS_BASE_REF=base-ref AUTODUCKS_PINNED_ROOT="$WS" \
+    bash "$WS/.autoducks/agents/agent/pre.sh" ) >/dev/null 2>&1
+
+if grep -q "unverified" "$LOG" 2>/dev/null; then
+  pass "the catalog flags the agent that /agent <name> would refuse"
+else
+  fail "catalog listed an unverified agent with no marker"
 fi
 
 echo ""

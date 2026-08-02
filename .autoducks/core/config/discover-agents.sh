@@ -57,6 +57,34 @@ REPO_ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
 CONFIG="${AUTODUCKS_CONFIG:-$REPO_ROOT/.autoducks/autoducks.json}"
 
+# ── Trust anchor ─────────────────────────────────────────────────────
+# Everything privilege-bearing is read from here, never from the checked-out
+# tree. Resolved to the MERGE-BASE of the base ref and HEAD, not the base ref
+# tip: comparing against the tip marks a definition as changed whenever the
+# default branch moves after the branch was cut, which is a false positive
+# that blames the wrong person. The merge-base is still reviewed history, so
+# nothing is lost by anchoring there.
+AUTODUCKS_TRUST_REF=""
+if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
+  AUTODUCKS_TRUST_REF="$(git -C "$REPO_ROOT" merge-base "$AUTODUCKS_BASE_REF" HEAD 2>/dev/null || true)"
+  [[ -n "$AUTODUCKS_TRUST_REF" ]] || AUTODUCKS_TRUST_REF="$AUTODUCKS_BASE_REF"
+fi
+
+# base_config_json — the whole autoducks.json as of the trust ref, or the live
+# file when there is no trust ref (a local setup.sh run). Read once.
+_BASE_CONFIG_JSON=""
+base_config_json() {
+  if [[ -z "$_BASE_CONFIG_JSON" ]]; then
+    if [[ -n "$AUTODUCKS_TRUST_REF" ]]; then
+      _BASE_CONFIG_JSON="$(git -C "$REPO_ROOT" show "$AUTODUCKS_TRUST_REF:.autoducks/autoducks.json" 2>/dev/null || echo '{}')"
+    elif [[ -f "$CONFIG" ]]; then
+      _BASE_CONFIG_JSON="$(cat "$CONFIG")"
+    fi
+    [[ -n "$_BASE_CONFIG_JSON" ]] || _BASE_CONFIG_JSON='{}'
+  fi
+  printf '%s' "$_BASE_CONFIG_JSON"
+}
+
 # ── Reserved names: built-in verbs/synonyms plus every configured
 # triggers.<agent>[] alias — a definition called architect.md must never
 # shadow /architect. ──────────────────────────────────────────────────────
@@ -100,7 +128,9 @@ if [[ -f "$CONFIG" ]]; then
   while IFS= read -r _extra; do
     [[ -z "$_extra" ]] && continue
     ROOT_DIRS+=("$_extra"); ROOT_KINDS+=("flat")
-  done < <(jq -r '.custom_agents.roots[]? // empty' "$CONFIG" 2>/dev/null)
+  # From the trust ref: a root added on a PR head is a privilege-bearing key
+  # in the same class as tools and allow_unverified.
+  done < <(base_config_json | jq -r '.custom_agents.roots[]? // empty' 2>/dev/null)
 fi
 
 # ── Small restricted string helpers (no eval, no external parser) ────
@@ -349,10 +379,9 @@ process_definition() {
   # supplies (model, context, labels, …) is not a privilege and keeps reading
   # the live file.
   local cfg_tools_src="$cfg"
-  if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
+  if [[ -n "$AUTODUCKS_TRUST_REF" ]]; then
     local base_cfg
-    base_cfg="$(git -C "$REPO_ROOT" show "$AUTODUCKS_BASE_REF:.autoducks/autoducks.json" 2>/dev/null \
-      | jq -c --arg n "$name" '.custom_agents.agents[$n] // {}' 2>/dev/null || echo '{}')"
+    base_cfg="$(base_config_json | jq -c --arg n "$name" '.custom_agents.agents[$n] // {}' 2>/dev/null || echo '{}')"
     [[ -n "$base_cfg" ]] || base_cfg='{}'
     cfg_tools_src="$base_cfg"
   fi
@@ -384,15 +413,15 @@ process_definition() {
   # base ref. This clamp is what bounds the run in that opt-in mode, and what
   # keeps the descriptor honest for anything else reading the registry.
   local verified="unchecked"
-  if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
+  if [[ -n "$AUTODUCKS_TRUST_REF" ]]; then
     local rel="$rel_source"
     # `git diff` rather than comparing the raw blob against the working-tree
     # file: git applies the same clean/smudge filters to both sides. A raw
     # byte compare reports every file as changed in any repo using
     # core.autocrlf or a `text=auto eol=crlf` .gitattributes, which would
     # clamp every custom agent in that repo for no reason.
-    if git -C "$REPO_ROOT" cat-file -e "$AUTODUCKS_BASE_REF:$rel" 2>/dev/null &&
-       git -C "$REPO_ROOT" diff --quiet "$AUTODUCKS_BASE_REF" -- "$rel" 2>/dev/null; then
+    if git -C "$REPO_ROOT" cat-file -e "$AUTODUCKS_TRUST_REF:$rel" 2>/dev/null &&
+       git -C "$REPO_ROOT" diff --quiet "$AUTODUCKS_TRUST_REF" -- "$rel" 2>/dev/null; then
       verified="base"
     else
       verified="unverified"
@@ -413,7 +442,7 @@ process_definition() {
         lane_tools_json="$(jq -c '.unverified_tools // .tools // []' "$lane_defaults" 2>/dev/null || echo "")"
       [[ -n "$lane_tools_json" ]] || lane_tools_json='[]'
       if [[ "$tools_effective_json" != "$lane_tools_json" ]]; then
-        echo "::warning::discover-agents: '$name' ($rel) differs from $AUTODUCKS_BASE_REF — tool grant clamped to the lane default." >&2
+        echo "::warning::discover-agents: '$name' ($rel) differs from the merge-base with $AUTODUCKS_BASE_REF — tool grant clamped to unverified_tools." >&2
       fi
       tools_effective_json="$lane_tools_json"
     fi
