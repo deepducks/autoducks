@@ -209,6 +209,43 @@ else
 fi
 rm -rf "$CS_DIR" "$LIN_DIR"
 
+echo "── the tag is pushed before the branch, and publishes the release ──"
+
+# The workflow used to publish on the branch push and hard-fail when the tag
+# was not there yet. On the --pr route the tag arrives minutes later by
+# construction, so it never was: v0.3.0 and v0.5.0 both had to be republished
+# by hand. Two halves to keep pinned — the push order here, and the trigger
+# in the workflow.
+_push_lines="$(grep -nE '^\s*git push origin' "$RELEASE_SH" | grep -vE '\$rel_branch')"
+_tag_line="$(printf '%s\n' "$_push_lines" | grep '"\$tag"' | tail -1 | cut -d: -f1)"
+_branch_line="$(printf '%s\n' "$_push_lines" | grep '"\$default_branch"' | tail -1 | cut -d: -f1)"
+if [[ -n "$_tag_line" && -n "$_branch_line" && "$_tag_line" -lt "$_branch_line" ]]; then
+  pass "release.sh pushes the tag before the default branch"
+else
+  fail "release.sh pushes the default branch first (tag:$_tag_line branch:$_branch_line) — reopens the publish race"
+fi
+
+WORKFLOW="$REPO_ROOT/.github/workflows/autoducks-release.yml"
+if grep -qE "^\s+tags: \['v\*'\]" "$WORKFLOW"; then
+  pass "release workflow triggers on the tag push"
+else
+  fail "release workflow has no tag trigger — publishing races the tag again"
+fi
+
+if grep -q 'workflow_dispatch:' "$WORKFLOW"; then
+  pass "release workflow can be dispatched to backfill a tag"
+else
+  fail "release workflow cannot republish a tag without re-running an old run"
+fi
+
+# --latest defaults to most-recently-created, so a backfill silently demotes
+# the newest release. That is what pointed the stable channel at v0.3.0.
+if grep -q 'LATEST_FLAG="--latest=false"' "$WORKFLOW" && grep -q 'semver::compare' "$WORKFLOW"; then
+  pass "release workflow computes --latest instead of letting GitHub guess"
+else
+  fail "release workflow does not compute --latest — a backfill will demote the newest release"
+fi
+
 echo ""
 echo "═══ release: $PASS passed, $FAIL failed ═══"
 [[ "$FAIL" -eq 0 ]] || exit 1
