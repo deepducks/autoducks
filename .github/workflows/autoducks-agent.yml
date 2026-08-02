@@ -229,11 +229,13 @@ jobs:
           AGENT_NAME: ${{ steps.ctx.outputs.agent_name }}
           AGENT_NAME_ERROR: ${{ steps.ctx.outputs.agent_name_error }}
           STEERING_PROMPT: ${{ steps.ctx.outputs.steering_prompt }}
-          # Definitions are only trusted with their declared tool grant when
-          # they match this ref byte-for-byte. On an issue comment the checkout
-          # already IS this ref, so nothing is clamped; on a PR the checkout is
-          # refs/pull/N/head and any added or edited definition falls back to
-          # the lane default set. See discover-agents.sh's `verified` field.
+          # Agent definitions and the config keys that grant them tools are
+          # read from THIS ref, never from the checked-out tree. A definition
+          # body becomes the agent's prompt, so on a PR — where the checkout
+          # is refs/pull/N/head — running from the tree would execute
+          # unreviewed content. Reading from the base branch is what makes
+          # the design's "merged, reviewed repo content" premise true by
+          # construction, and why this lane needs no tool ceiling.
           AUTODUCKS_BASE_REF: origin/${{ github.event.repository.default_branch }}
           GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: User pre hook

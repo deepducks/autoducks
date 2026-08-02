@@ -57,6 +57,82 @@ REPO_ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
 CONFIG="${AUTODUCKS_CONFIG:-$REPO_ROOT/.autoducks/autoducks.json}"
 
+# ── Where definitions come from ──────────────────────────────────────
+# ALWAYS the base branch, never the checked-out tree. A definition body
+# becomes the agent's prompt and its frontmatter asks for tools, so it is
+# executable content: on a PR the checkout is refs/pull/N/head, and running
+# from there would mean executing code that nobody has reviewed.
+#
+# Reading from the base ref is what makes the design's "merged, reviewed repo
+# content" premise true by construction rather than something checked after
+# the fact. It is also why this lane needs no tool ceiling, no clamp, and no
+# per-definition verification: there is only ever one source, and it is the
+# reviewed one.
+#
+# The consequence, stated plainly: an agent cannot be tried from the pull
+# request that introduces it. Merge the definition first, then use it.
+#
+# AUTODUCKS_BASE_REF unset means no ref to read from — a local `setup.sh`
+# run — and discovery falls back to the working tree for reporting only.
+DEFINITION_REF="${AUTODUCKS_BASE_REF:-}"
+
+# def_cat PATH — the file's contents as of DEFINITION_REF (or from disk when
+# there is no ref).
+def_cat() {
+  if [[ -n "$DEFINITION_REF" ]]; then
+    git -C "$REPO_ROOT" show "$DEFINITION_REF:$1" 2>/dev/null
+  else
+    cat "$REPO_ROOT/$1" 2>/dev/null
+  fi
+}
+
+# def_config — autoducks.json as of DEFINITION_REF. Same reasoning: roots[]
+# and the per-agent tool grants are privilege-bearing.
+# Resolved once, here: every call site reads it in a command substitution, so
+# assigning inside the function would only ever populate a subshell's copy.
+if [[ -n "$DEFINITION_REF" ]]; then
+  _DEF_CONFIG="$(git -C "$REPO_ROOT" show "$DEFINITION_REF:.autoducks/autoducks.json" 2>/dev/null || echo '{}')"
+elif [[ -f "$CONFIG" ]]; then
+  _DEF_CONFIG="$(cat "$CONFIG" 2>/dev/null || echo '{}')"
+else
+  _DEF_CONFIG='{}'
+fi
+[[ -n "$_DEF_CONFIG" ]] || _DEF_CONFIG='{}'
+def_config() { printf '%s' "$_DEF_CONFIG"; }
+
+# def_list ROOT KIND — "<mode> <repo-relative path>" for every definition
+# under ROOT as of DEFINITION_REF, sorted by path. The mode is carried so a
+# symlink (120000) can be refused: reading from a ref means there is no
+# realpath to compare against the repo root.
+def_list() {
+  local root="$1" kind="$2"
+  if [[ -n "$DEFINITION_REF" ]]; then
+    git -C "$REPO_ROOT" ls-tree -r "$DEFINITION_REF" -- "$root" 2>/dev/null \
+      | while read -r mode _type _sha f; do
+          if [[ "$kind" == "nested" ]]; then
+            # exactly <root>/<name>/agent.md — no deeper nesting, matching the
+            # -mindepth 2 -maxdepth 2 the local branch uses.
+            [[ "$f" == "$root"/*/agent.md && "$f" != "$root"/*/*/* ]] || continue
+          else
+            [[ "$f" == "$root"/*.md && "$f" != "$root"/*/* ]] || continue
+          fi
+          printf '%s %s\n' "$mode" "$f"
+        done | sort -k2
+  else
+    local depth_args=()
+    if [[ "$kind" == "nested" ]]; then
+      depth_args=(-mindepth 2 -maxdepth 2 -name 'agent.md')
+    else
+      depth_args=(-mindepth 1 -maxdepth 1 -name '*.md')
+    fi
+    find "$REPO_ROOT/$root" "${depth_args[@]}" 2>/dev/null \
+      | sed "s|^$REPO_ROOT/||" \
+      | while IFS= read -r f; do
+          if [[ -L "$REPO_ROOT/$f" ]]; then printf '120000 %s\n' "$f"; else printf '100644 %s\n' "$f"; fi
+        done | sort -k2
+  fi
+}
+
 # ── Reserved names: built-in verbs/synonyms plus every configured
 # triggers.<agent>[] alias — a definition called architect.md must never
 # shadow /architect. ──────────────────────────────────────────────────────
@@ -70,15 +146,16 @@ CONFIG="${AUTODUCKS_CONFIG:-$REPO_ROOT/.autoducks/autoducks.json}"
 _DA_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_DA_SH_DIR/agent-roster.sh"
 
+# Aliases come from the base config as well: reservation is what stops a
+# definition from shadowing a real verb, so reading it from the checked-out
+# tree would let a PR head delete an alias and free the name it protected.
 RESERVED_NAMES=" $AUTODUCKS_BUILTIN_VERBS "
-if [[ -f "$CONFIG" ]]; then
-  for _a in "${AUTODUCKS_AGENTS[@]}"; do
-    while IFS= read -r _alias; do
-      [[ -z "$_alias" ]] && continue
-      RESERVED_NAMES+="$_alias "
-    done < <(jq -r --arg a "$_a" '.triggers[$a][]? // empty' "$CONFIG" 2>/dev/null)
-  done
-fi
+for _a in "${AUTODUCKS_AGENTS[@]}"; do
+  while IFS= read -r _alias; do
+    [[ -z "$_alias" ]] && continue
+    RESERVED_NAMES+="$_alias "
+  done < <(def_config | jq -r --arg a "$_a" '.triggers[$a][]? // empty' 2>/dev/null)
+done
 
 is_reserved() {
   case "$RESERVED_NAMES" in
@@ -96,12 +173,14 @@ ROOT_DIRS+=(".claude/agents");           ROOT_KINDS+=("flat")
 ROOT_DIRS+=(".agents");                  ROOT_KINDS+=("flat")
 ROOT_DIRS+=(".github/agents");           ROOT_KINDS+=("flat")
 
-if [[ -f "$CONFIG" ]]; then
-  while IFS= read -r _extra; do
-    [[ -z "$_extra" ]] && continue
-    ROOT_DIRS+=("$_extra"); ROOT_KINDS+=("flat")
-  done < <(jq -r '.custom_agents.roots[]? // empty' "$CONFIG" 2>/dev/null)
-fi
+# No `-f "$CONFIG"` guard: the roots come from def_config, so gating them on
+# the *live* file existing would drop configured roots whenever the checkout
+# has no autoducks.json — and would let deleting that file on a PR head
+# change discovery.
+while IFS= read -r _extra; do
+  [[ -z "$_extra" ]] && continue
+  ROOT_DIRS+=("$_extra"); ROOT_KINDS+=("flat")
+done < <(def_config | jq -r '.custom_agents.roots[]? // empty' 2>/dev/null)
 
 # ── Small restricted string helpers (no eval, no external parser) ────
 _trim() {
@@ -287,7 +366,6 @@ emit_error() {
   ERRORS_JSON+=("$(jq -cn --arg source "$source" --arg reason "$reason" '{source:$source, reason:$reason}')")
 }
 
-REPO_ROOT_REAL="$(realpath "$REPO_ROOT" 2>/dev/null || printf '%s' "$REPO_ROOT")"
 
 # process_definition <file> <rel_source> <root> <precedence> <name>
 process_definition() {
@@ -300,13 +378,6 @@ process_definition() {
 
   if is_reserved "$name"; then
     emit_error "$rel_source" "reserved-name"
-    return
-  fi
-
-  local resolved
-  resolved="$(realpath "$file" 2>/dev/null || echo "")"
-  if [[ -z "$resolved" || "$resolved" != "$REPO_ROOT_REAL"/* ]]; then
-    emit_error "$rel_source" "symlink-escape"
     return
   fi
 
@@ -334,85 +405,19 @@ process_definition() {
   body_bytes="$(printf '%s' "$BODY_TEXT" | wc -c | tr -d '[:space:]')"
 
   # ── Config merge: custom_agents.agents.<name> ──────────────────────
+  # One config source, the same ref the definition came from.
   local cfg="{}"
-  if [[ -f "$CONFIG" ]]; then
-    cfg="$(jq -c --arg n "$name" '.custom_agents.agents[$n] // {}' "$CONFIG" 2>/dev/null || echo '{}')"
-  fi
-
-  # The tool grant is read from the BASE ref's autoducks.json, never the
-  # checked-out one. CONFIG resolves under $REPO_ROOT, which on a PR surface
-  # is the PR head — so a contributor who touches nothing but autoducks.json
-  # could add custom_agents.agents.<name>.tools = ["Bash"] for an already
-  # merged, unmodified definition. The definition-file clamp below would not
-  # fire (the file is byte-identical to base) and the escalation would land
-  # through the higher-precedence input instead. Everything else the config
-  # supplies (model, context, labels, …) is not a privilege and keeps reading
-  # the live file.
-  local cfg_tools_src="$cfg"
-  if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
-    local base_cfg
-    base_cfg="$(git -C "$REPO_ROOT" show "$AUTODUCKS_BASE_REF:.autoducks/autoducks.json" 2>/dev/null \
-      | jq -c --arg n "$name" '.custom_agents.agents[$n] // {}' 2>/dev/null || echo '{}')"
-    [[ -n "$base_cfg" ]] || base_cfg='{}'
-    cfg_tools_src="$base_cfg"
-  fi
+  cfg="$(def_config | jq -c --arg n "$name" '.custom_agents.agents[$n] // {}' 2>/dev/null || echo '{}')"
+  [[ -n "$cfg" ]] || cfg='{}'
 
   # tools: config wins over frontmatter
   local tools_declared_json tools_effective_json cfg_tools_json
   tools_declared_json="$(arr_to_json "${FM_TOOLS_ARR[@]}")"
-  cfg_tools_json="$(jq -c 'if has("tools") then (.tools | if type=="array" then . else (split(",") | map(gsub("^\\s+|\\s+$";""))) end) else empty end' <<<"$cfg_tools_src" 2>/dev/null || echo "")"
+  cfg_tools_json="$(jq -c 'if has("tools") then (.tools | if type=="array" then . else (split(",") | map(gsub("^\\s+|\\s+$";""))) end) else empty end' <<<"$cfg" 2>/dev/null || echo "")"
   if [[ -n "$cfg_tools_json" ]]; then
     tools_effective_json="$cfg_tools_json"
   else
     tools_effective_json="$tools_declared_json"
-  fi
-
-  # ── Unverified definitions cannot grant themselves tools ──────────────
-  # The design's no-ceiling rule rests on definitions being merged, reviewed
-  # repo content. On a PR surface that premise does not hold: the checkout is
-  # refs/pull/N/head, so a contributor can ship `surface: pr` + `tools: [Bash]`
-  # and have a maintainer's routine `/agent <name>` run it with contents:write
-  # and the app token. Nothing about that content has been reviewed.
-  #
-  # So the grant is clamped to the lane's own defaults.json whenever the
-  # definition does not appear, byte-identical, on the base ref. A definition
-  # merged on the default branch is unaffected and keeps the full no-ceiling
-  # behaviour; a new or edited one still runs — which is what makes testing an
-  # agent from its own PR possible — just with the lane default tool set.
-  local verified="unchecked"
-  if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
-    local rel="$rel_source"
-    # `git diff` rather than comparing the raw blob against the working-tree
-    # file: git applies the same clean/smudge filters to both sides. A raw
-    # byte compare reports every file as changed in any repo using
-    # core.autocrlf or a `text=auto eol=crlf` .gitattributes, which would
-    # clamp every custom agent in that repo for no reason.
-    if git -C "$REPO_ROOT" cat-file -e "$AUTODUCKS_BASE_REF:$rel" 2>/dev/null &&
-       git -C "$REPO_ROOT" diff --quiet "$AUTODUCKS_BASE_REF" -- "$rel" 2>/dev/null; then
-      verified="base"
-    else
-      verified="unverified"
-      # Clamp to a dedicated `unverified_tools` set, NOT to the lane default.
-      # The lane default is calibrated for definitions that have been through
-      # review; it includes Write, Edit, WebFetch and WebSearch. An unverified
-      # body is injected into the prompt verbatim, so clamping to that set
-      # would still let attacker-authored text read the repository and encode
-      # what it finds into a WebFetch URL. `unverified_tools` drops network
-      # egress and filesystem writes; what remains is read and inspect.
-      #
-      # Residual risk, stated so the next reader does not over-trust this:
-      # the definition BODY is still unreviewed content driving the prompt.
-      # Clamped is not contained — it is a smaller blast radius.
-      local lane_defaults="${AUTODUCKS_ROOT:-$REPO_ROOT/.autoducks}/agents/agent/defaults.json"
-      local lane_tools_json=""
-      [[ -f "$lane_defaults" ]] &&
-        lane_tools_json="$(jq -c '.unverified_tools // .tools // []' "$lane_defaults" 2>/dev/null || echo "")"
-      [[ -n "$lane_tools_json" ]] || lane_tools_json='[]'
-      if [[ "$tools_effective_json" != "$lane_tools_json" ]]; then
-        echo "::warning::discover-agents: '$name' ($rel) differs from $AUTODUCKS_BASE_REF — tool grant clamped to the lane default." >&2
-      fi
-      tools_effective_json="$lane_tools_json"
-    fi
   fi
 
   # model: frontmatter wins over config, both alias-resolved
@@ -475,7 +480,6 @@ process_definition() {
     --argjson context "$context_json" \
     --arg surface "$surface_effective" \
     --argjson labels "$labels_json" \
-    --arg verified "$verified" \
     --argjson body_bytes "$body_bytes" \
     '{
       name: $name,
@@ -492,7 +496,6 @@ process_definition() {
       context: $context,
       surface: $surface,
       labels: $labels,
-      verified: $verified,
       body_bytes: $body_bytes
     }')"
 
@@ -500,41 +503,44 @@ process_definition() {
 }
 
 # ── Scan roots in precedence order ───────────────────────────────────
-shopt -s nullglob
+_DEF_TMP="$(mktemp -d)"
+trap 'rm -rf "$_DEF_TMP"' EXIT
 
 for _ridx in "${!ROOT_DIRS[@]}"; do
   root="${ROOT_DIRS[$_ridx]}"
   kind="${ROOT_KINDS[$_ridx]}"
   precedence=$((_ridx + 1))
-  abs_root="$REPO_ROOT/$root"
-  [[ -d "$abs_root" ]] || continue
 
-  declare -a candidates=()
-  if [[ "$kind" == "nested" ]]; then
-    candidates=("$abs_root"/*/agent.md)
-  else
-    candidates=("$abs_root"/*.md)
-  fi
-  (( ${#candidates[@]} == 0 )) && continue
+  while read -r mode rel_source; do
+    [[ -n "$rel_source" ]] || continue
 
-  declare -a sorted=()
-  while IFS= read -r _c; do
-    sorted+=("$_c")
-  done < <(printf '%s\n' "${candidates[@]}" | sort)
-
-  for file in "${sorted[@]}"; do
-    [[ -f "$file" ]] || continue
-    rel_source="${file#"$REPO_ROOT"/}"
     if [[ "$kind" == "nested" ]]; then
-      name="$(basename "$(dirname "$file")")"
+      name="$(basename "$(dirname "$rel_source")")"
     else
-      name="$(basename "$file" .md)"
+      name="$(basename "$rel_source" .md)"
     fi
-    process_definition "$file" "$rel_source" "$root" "$precedence" "$name"
-  done
-done
 
-shopt -u nullglob
+    # A symlink is content the ref does not actually vouch for — it points
+    # somewhere else, possibly outside the tree. Refuse rather than follow.
+    if [[ "$mode" == "120000" ]]; then
+      emit_error "$rel_source" "symlink-escape"
+      continue
+    fi
+
+    file="$_DEF_TMP/def.md"
+    # Only a genuine read failure is "unreadable". An empty file is NOT
+    # short-circuited here: process_definition checks the name against the
+    # reserved list before it looks at content, and a reserved name must be
+    # refused as reserved-name whatever the file holds. It reaches the same
+    # empty-body verdict a moment later, in the right order.
+    if ! def_cat "$rel_source" > "$file" 2>/dev/null; then
+      emit_error "$rel_source" "unreadable"
+      continue
+    fi
+
+    process_definition "$file" "$rel_source" "$root" "$precedence" "$name"
+  done < <(def_list "$root" "$kind")
+done
 
 # ── Assemble + emit ───────────────────────────────────────────────────
 json_array_of() {

@@ -45,10 +45,22 @@ fi
 # ── Refusal #2: custom agents disabled repo-wide (never opens a definition) ─
 AGENT_REPO_ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
 AGENT_LIVE_CONFIG="${AUTODUCKS_CONFIG:-$AGENT_REPO_ROOT/.autoducks/autoducks.json}"
-CUSTOM_AGENTS_ENABLED="true"
-if [[ -f "$AGENT_LIVE_CONFIG" ]]; then
-  CUSTOM_AGENTS_ENABLED="$(jq -r 'if .custom_agents.enabled == false then "false" else "true" end' "$AGENT_LIVE_CONFIG" 2>/dev/null || echo true)"
-fi
+
+# Config, like the definitions themselves, is read from the base branch —
+# never the checked-out tree. `enabled` is the repo owner's kill switch, so a
+# contributor must not be able to flip it back on in the same change that
+# uses the lane. See discover-agents.sh for the full reasoning.
+agent_base_config() {
+  if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
+    git -C "$AGENT_REPO_ROOT" show "$AUTODUCKS_BASE_REF:.autoducks/autoducks.json" 2>/dev/null || echo '{}'
+  elif [[ -f "$AGENT_LIVE_CONFIG" ]]; then
+    cat "$AGENT_LIVE_CONFIG"
+  else
+    echo '{}'
+  fi
+}
+
+CUSTOM_AGENTS_ENABLED="$(agent_base_config | jq -r 'if .custom_agents.enabled == false then "false" else "true" end' 2>/dev/null || echo true)"
 if [[ "$CUSTOM_AGENTS_ENABLED" == "false" ]]; then
   refuse "🚫 Custom agents are disabled for this repository."
 fi
@@ -152,10 +164,21 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   } >> "$GITHUB_OUTPUT"
 fi
 
-# ── Read the inherited definition body (the descriptor carries only
-# body_bytes, not the text — discover-agents.sh scans the live tree, so the
-# body is read from there too, not the pinned snapshot). ────────────────
-DEFINITION_FILE="$AGENT_REPO_ROOT/$DESC_SOURCE"
+# ── Read the inherited definition body ─────────────────────────────────
+# From AUTODUCKS_BASE_REF, the same source discover-agents.sh enumerated it
+# from. This is the load-bearing read of the whole lane: the body below
+# becomes the agent's prompt, so reading it from the checked-out tree would
+# mean executing content from refs/pull/N/head — exactly what discovering
+# from the base ref exists to prevent. Discovery and prompt assembly must
+# never disagree about which tree a definition came from.
+DEFINITION_FILE="$(mktemp)"
+if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
+  if ! git -C "$AGENT_REPO_ROOT" show "$AUTODUCKS_BASE_REF:$DESC_SOURCE" > "$DEFINITION_FILE" 2>/dev/null; then
+    refuse "🚫 \`${AGENT_NAME}\` could not be read from the base branch (\`${DESC_SOURCE}\`). Custom agents only run definitions that are merged."
+  fi
+else
+  cat "$AGENT_REPO_ROOT/$DESC_SOURCE" > "$DEFINITION_FILE" 2>/dev/null || true
+fi
 
 # extract_body FILE — strip a leading `---`-delimited frontmatter block if
 # present, same detection discover-agents.sh's own parse_definition uses
