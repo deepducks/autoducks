@@ -14,6 +14,7 @@ CONFIG_DIR="$REPO_ROOT/.autoducks/core/config"
 ROSTER="$CONFIG_DIR/agent-roster.sh"
 PARSE="$CONFIG_DIR/parse-directive.sh"
 GENERATE="$CONFIG_DIR/generate-trigger-conditions.sh"
+DISCOVER="$CONFIG_DIR/discover-agents.sh"
 SCAFFOLD="$REPO_ROOT/.autoducks/autoducks.json"
 
 PASS=0
@@ -76,7 +77,7 @@ echo "── the roster is the only copy of the list ──"
 # cases as a space-separated run — an array literal or a `for x in ...` list.
 # Match four or more canonical names in a row.
 _NAME='(architect|engineer|execute|fix|revert|close|review|rework|defer|resolve|triage|merge|update)'
-for _f in "$PARSE" "$GENERATE"; do
+for _f in "$PARSE" "$GENERATE" "$DISCOVER"; do
   if grep -qE "$_NAME( $_NAME){3,}" "$_f"; then
     fail "$(basename "$_f") still spells out an agent list — source agent-roster.sh instead"
   else
@@ -148,6 +149,68 @@ for _agent in "${AUTODUCKS_AGENTS[@]}"; do
     fail "install-time: guard for $_agent omits /zz-$_agent — got '$_frag'"
   fi
 done
+
+# ---------------------------------------------------------------------------
+echo "── discover-agents reserves every canonical name and every alias ──"
+
+# The third consumer. It carried its own copy of both lists, already a release
+# behind: `agent` was missing, so a definition called agent.md was not reserved
+# and shadowed /agent, and aliases under triggers.agent[] were not collected
+# into RESERVED_NAMES either. Grepping for a literal list (above) proves the
+# copy is gone; this proves the behaviour it was supposed to produce.
+_SCRATCH="$TMP_DIR/repo"
+mkdir -p "$_SCRATCH/.claude/agents" "$_SCRATCH/.autoducks"
+cp "$TMP_DIR/config.json" "$_SCRATCH/.autoducks/autoducks.json"
+
+for _agent in "${AUTODUCKS_AGENTS[@]}"; do
+  : > "$_SCRATCH/.claude/agents/$_agent.md"        # canonical name
+  : > "$_SCRATCH/.claude/agents/zz-$_agent.md"     # its configured alias
+done
+for _syn in "${AUTODUCKS_VERB_SYNONYMS[@]}"; do
+  : > "$_SCRATCH/.claude/agents/${_syn%%:*}.md"    # built-in synonym
+done
+
+_REG=$(cd "$_SCRATCH" && GITHUB_WORKSPACE="$_SCRATCH" bash "$DISCOVER" list 2>/dev/null || echo '{}')
+
+_check_reserved() {
+  local name="$1" kind="$2"
+  if [[ "$(jq -r --arg s ".claude/agents/$name.md" \
+            '[.errors[]? | select(.source == $s and .reason == "reserved-name")] | length' \
+            <<< "$_REG")" == "1" ]]; then
+    pass "discover-agents reserves $kind $name"
+  else
+    fail "discover-agents did not reserve $kind $name — it would shadow /$name"
+  fi
+}
+
+for _agent in "${AUTODUCKS_AGENTS[@]}"; do
+  _check_reserved "$_agent" "agent"
+  _check_reserved "zz-$_agent" "alias"
+done
+for _syn in "${AUTODUCKS_VERB_SYNONYMS[@]}"; do
+  _check_reserved "${_syn%%:*}" "synonym"
+done
+
+# ---------------------------------------------------------------------------
+echo "── a .triggers key naming no agent is rejected at install time ──"
+
+# The inverse of the scaffold check above. A missing key is legitimate ("no
+# aliases"); a key naming nothing is a typo that validates, installs, and never
+# fires, because the generator only ever reads keys it already knows.
+jq '.triggers += {"triage-all": ["classify"]}' "$TMP_DIR/config.json" > "$TMP_DIR/bogus.json"
+if AUTODUCKS_CONFIG="$TMP_DIR/bogus.json" AUTODUCKS_AGENT="triage" \
+     bash "$GENERATE" >/dev/null 2>&1; then
+  fail "validate_triggers accepted '.triggers.triage-all', which names no agent"
+else
+  pass "validate_triggers rejects a .triggers key that names no agent"
+fi
+
+if AUTODUCKS_CONFIG="$TMP_DIR/config.json" AUTODUCKS_AGENT="triage" \
+     bash "$GENERATE" >/dev/null 2>&1; then
+  pass "validate_triggers still accepts a config whose keys are all agents"
+else
+  fail "validate_triggers rejected a valid config"
+fi
 
 # ---------------------------------------------------------------------------
 echo

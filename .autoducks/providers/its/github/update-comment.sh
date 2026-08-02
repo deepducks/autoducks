@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# An edit replaces the body wholesale, so the marker has to be re-applied or the
+# status comment stops being recognisable to revert the moment it is edited from
+# "running" to "finished" (#183). Sourced unconditionally — see comment-issue.sh
+# for why the `declare -F` guard was the wrong shape here.
+_UC_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_UC_SH_DIR/../../../core/config/comment-marker.sh"
+
 its::update_comment() {
   local comment_id="$1"
   local body="$2"
-  # An edit replaces the body wholesale, so the marker has to be re-applied or
-  # the status comment stops being recognisable to revert the moment it is
-  # edited from "running" to "finished" (#183).
-  if declare -F comment_marker::stamp >/dev/null 2>&1; then
-    body="$(comment_marker::stamp "$body")"
-  fi
+  body="$(comment_marker::stamp "$body")"
   gh api "repos/$REPO/issues/comments/$comment_id" --method PATCH -f "body=$body" --silent
 }
 

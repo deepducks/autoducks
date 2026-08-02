@@ -55,6 +55,22 @@ cmd_for() {
 validate_triggers() {
   local agent alias
   local -A seen=()
+
+  # A `.triggers` key naming no agent is a typo that behaves exactly like a
+  # working config: the loop below only ever reads keys it already knows, so
+  # `"triage-all": ["classify"]` validates, installs, and silently never fires.
+  # Consumer configs also drift the other way — this repo's own carried 12 of
+  # the 13 keys for a release — but a *missing* key means "no aliases", which is
+  # both harmless and a legitimate thing to write, so it is not an error.
+  local key
+  while IFS= read -r key; do
+    [[ -z "$key" ]] && continue
+    case " ${AGENTS[*]} " in
+      *" $key "*) : ;;
+      *) echo "trigger validation: '.triggers.$key' names no agent (known: ${AGENTS[*]})" >&2; return 1 ;;
+    esac
+  done < <(jq -r '.triggers // {} | keys[]' "$CONFIG")
+
   for agent in "${AGENTS[@]}"; do
     while IFS= read -r alias; do
       [[ -z "$alias" ]] && continue

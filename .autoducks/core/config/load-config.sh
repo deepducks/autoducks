@@ -84,31 +84,11 @@ export AUTODUCKS_MERGE_METHOD
 AUTODUCKS_MERGE_METHOD="$(echo "$_merged" | jq -r '.merge_method // "auto"')"
 
 # ── Machinery comment marker ──────────────────────────────────────────────
-# Every comment the machinery posts carries this. It is the only reliable way
-# to recognise one: the author depends entirely on which credential the install
-# uses. Under the default GITHUB_TOKEN comments come from `github-actions[bot]`,
-# under AUTODUCKS_PAT they come from the PAT owner's own account, and under an
-# App they come from `<app>[bot]`. Revert used to match the first of those three
-# by name, so on a PAT install it recognised nothing, deleted nothing, and left
-# every comment behind while still stripping the labels — an issue that looked
-# reverted and was not (#183).
-#
-# HTML comment, so it renders as nothing. Matching is on the marker, never on
-# the author, and never on comment prose.
-export AUTODUCKS_COMMENT_MARKER="<!-- autoducks:comment -->"
-
-# comment_marker::stamp BODY → BODY with the marker appended, idempotently.
-# Callers pass a body through this on every write, including edits: an edit
-# replaces the body wholesale, so a marker that is not re-applied is lost and
-# the comment becomes invisible to revert.
-comment_marker::stamp() {
-  local body="$1"
-  if [[ "$body" == *"$AUTODUCKS_COMMENT_MARKER"* ]]; then
-    printf '%s' "$body"
-  else
-    printf '%s\n\n%s' "$body" "$AUTODUCKS_COMMENT_MARKER"
-  fi
-}
+# AUTODUCKS_COMMENT_MARKER / comment_marker::stamp — see comment-marker.sh.
+# Split out of this file so the ITS writers can source it on their own instead
+# of stamping only when load-config happened to have run first.
+_LC_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_LC_SH_DIR/comment-marker.sh"
 
 # ── Reviewer required-check name ─────────────────────────────────────
 # Single source of truth shared by the reviewer (pre/post.sh) and
