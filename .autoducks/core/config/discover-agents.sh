@@ -88,18 +88,17 @@ def_cat() {
 
 # def_config — autoducks.json as of DEFINITION_REF. Same reasoning: roots[]
 # and the per-agent tool grants are privilege-bearing.
-_DEF_CONFIG=""
-def_config() {
-  if [[ -z "$_DEF_CONFIG" ]]; then
-    if [[ -n "$DEFINITION_REF" ]]; then
-      _DEF_CONFIG="$(git -C "$REPO_ROOT" show "$DEFINITION_REF:.autoducks/autoducks.json" 2>/dev/null || echo '{}')"
-    elif [[ -f "$CONFIG" ]]; then
-      _DEF_CONFIG="$(cat "$CONFIG")"
-    fi
-    [[ -n "$_DEF_CONFIG" ]] || _DEF_CONFIG='{}'
-  fi
-  printf '%s' "$_DEF_CONFIG"
-}
+# Resolved once, here: every call site reads it in a command substitution, so
+# assigning inside the function would only ever populate a subshell's copy.
+if [[ -n "$DEFINITION_REF" ]]; then
+  _DEF_CONFIG="$(git -C "$REPO_ROOT" show "$DEFINITION_REF:.autoducks/autoducks.json" 2>/dev/null || echo '{}')"
+elif [[ -f "$CONFIG" ]]; then
+  _DEF_CONFIG="$(cat "$CONFIG" 2>/dev/null || echo '{}')"
+else
+  _DEF_CONFIG='{}'
+fi
+[[ -n "$_DEF_CONFIG" ]] || _DEF_CONFIG='{}'
+def_config() { printf '%s' "$_DEF_CONFIG"; }
 
 # def_list ROOT KIND — "<mode> <repo-relative path>" for every definition
 # under ROOT as of DEFINITION_REF, sorted by path. The mode is carried so a
@@ -111,7 +110,9 @@ def_list() {
     git -C "$REPO_ROOT" ls-tree -r "$DEFINITION_REF" -- "$root" 2>/dev/null \
       | while read -r mode _type _sha f; do
           if [[ "$kind" == "nested" ]]; then
-            [[ "$f" == "$root"/*/agent.md ]] || continue
+            # exactly <root>/<name>/agent.md — no deeper nesting, matching the
+            # -mindepth 2 -maxdepth 2 the local branch uses.
+            [[ "$f" == "$root"/*/agent.md && "$f" != "$root"/*/*/* ]] || continue
           else
             [[ "$f" == "$root"/*.md && "$f" != "$root"/*/* ]] || continue
           fi
@@ -145,15 +146,16 @@ def_list() {
 _DA_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_DA_SH_DIR/agent-roster.sh"
 
+# Aliases come from the base config as well: reservation is what stops a
+# definition from shadowing a real verb, so reading it from the checked-out
+# tree would let a PR head delete an alias and free the name it protected.
 RESERVED_NAMES=" $AUTODUCKS_BUILTIN_VERBS "
-if [[ -f "$CONFIG" ]]; then
-  for _a in "${AUTODUCKS_AGENTS[@]}"; do
-    while IFS= read -r _alias; do
-      [[ -z "$_alias" ]] && continue
-      RESERVED_NAMES+="$_alias "
-    done < <(jq -r --arg a "$_a" '.triggers[$a][]? // empty' "$CONFIG" 2>/dev/null)
-  done
-fi
+for _a in "${AUTODUCKS_AGENTS[@]}"; do
+  while IFS= read -r _alias; do
+    [[ -z "$_alias" ]] && continue
+    RESERVED_NAMES+="$_alias "
+  done < <(def_config | jq -r --arg a "$_a" '.triggers[$a][]? // empty' 2>/dev/null)
+done
 
 is_reserved() {
   case "$RESERVED_NAMES" in
@@ -171,12 +173,14 @@ ROOT_DIRS+=(".claude/agents");           ROOT_KINDS+=("flat")
 ROOT_DIRS+=(".agents");                  ROOT_KINDS+=("flat")
 ROOT_DIRS+=(".github/agents");           ROOT_KINDS+=("flat")
 
-if [[ -f "$CONFIG" ]]; then
-  while IFS= read -r _extra; do
-    [[ -z "$_extra" ]] && continue
-    ROOT_DIRS+=("$_extra"); ROOT_KINDS+=("flat")
-  done < <(def_config | jq -r '.custom_agents.roots[]? // empty' 2>/dev/null)
-fi
+# No `-f "$CONFIG"` guard: the roots come from def_config, so gating them on
+# the *live* file existing would drop configured roots whenever the checkout
+# has no autoducks.json — and would let deleting that file on a PR head
+# change discovery.
+while IFS= read -r _extra; do
+  [[ -z "$_extra" ]] && continue
+  ROOT_DIRS+=("$_extra"); ROOT_KINDS+=("flat")
+done < <(def_config | jq -r '.custom_agents.roots[]? // empty' 2>/dev/null)
 
 # ── Small restricted string helpers (no eval, no external parser) ────
 _trim() {
@@ -524,8 +528,14 @@ for _ridx in "${!ROOT_DIRS[@]}"; do
     fi
 
     file="$_DEF_TMP/def.md"
-    if ! def_cat "$rel_source" > "$file" 2>/dev/null || [[ ! -s "$file" ]]; then
+    if ! def_cat "$rel_source" > "$file" 2>/dev/null; then
       emit_error "$rel_source" "unreadable"
+      continue
+    fi
+    # An empty file is a definition with no body, which process_definition
+    # already has a precise reason for; "unreadable" would misreport it.
+    if [[ ! -s "$file" ]]; then
+      emit_error "$rel_source" "empty-body"
       continue
     fi
 

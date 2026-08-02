@@ -164,10 +164,21 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   } >> "$GITHUB_OUTPUT"
 fi
 
-# ── Read the inherited definition body (the descriptor carries only
-# body_bytes, not the text — discover-agents.sh scans the live tree, so the
-# body is read from there too, not the pinned snapshot). ────────────────
-DEFINITION_FILE="$AGENT_REPO_ROOT/$DESC_SOURCE"
+# ── Read the inherited definition body ─────────────────────────────────
+# From AUTODUCKS_BASE_REF, the same source discover-agents.sh enumerated it
+# from. This is the load-bearing read of the whole lane: the body below
+# becomes the agent's prompt, so reading it from the checked-out tree would
+# mean executing content from refs/pull/N/head — exactly what discovering
+# from the base ref exists to prevent. Discovery and prompt assembly must
+# never disagree about which tree a definition came from.
+DEFINITION_FILE="$(mktemp)"
+if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
+  if ! git -C "$AGENT_REPO_ROOT" show "$AUTODUCKS_BASE_REF:$DESC_SOURCE" > "$DEFINITION_FILE" 2>/dev/null; then
+    refuse "🚫 \`${AGENT_NAME}\` could not be read from the base branch (\`${DESC_SOURCE}\`). Custom agents only run definitions that are merged."
+  fi
+else
+  cat "$AGENT_REPO_ROOT/$DESC_SOURCE" > "$DEFINITION_FILE" 2>/dev/null || true
+fi
 
 # extract_body FILE — strip a leading `---`-delimited frontmatter block if
 # present, same detection discover-agents.sh's own parse_definition uses
