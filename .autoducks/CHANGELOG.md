@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.3] - 2026-08-02
+
+### Changed
+- Autoducks: deliver feature/82-custom-agents (#1168)
+
 ## [0.5.2] - 2026-08-02
 
 ### Fixed
