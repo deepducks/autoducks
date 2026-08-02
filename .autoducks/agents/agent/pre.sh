@@ -119,7 +119,30 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
   echo "AUTODUCKS_AGENT_SOURCE=$AUTODUCKS_AGENT_SOURCE" >> "$GITHUB_ENV"
 fi
 
-# ── Refusal #4: surface mismatch (issue vs pr) ──────────────────────────
+# ── Refusal #4: unverified definition ──────────────────────────────────
+# discover-agents.sh clamps an unverified definition's *tool grant* to the
+# read-only `unverified_tools` floor. That bounds what the agent can reach,
+# but the definition BODY is still unreviewed content and it still becomes
+# the prompt — so a contributor can steer a maintainer's run, and whatever
+# the agent reads ends up in a public issue comment. Clamping narrows the
+# blast radius; it does not make the run trustworthy.
+#
+# So an unverified definition is refused by default. Setting
+# custom_agents.allow_unverified opts back in to the "try an agent from the
+# PR that introduces it" workflow, with the clamped grant still applied.
+DESC_VERIFIED="$(jq -r '.verified // "unchecked"' <<<"$DESCRIPTOR_JSON")"
+ALLOW_UNVERIFIED="$(jq -r '.custom_agents.allow_unverified // false' "$AUTODUCKS_ROOT/autoducks.json" 2>/dev/null || echo false)"
+if [[ "$DESC_VERIFIED" == "unverified" && "$ALLOW_UNVERIFIED" != "true" ]]; then
+  refuse "🚫 \`${AGENT_NAME}\` (\`${DESC_SOURCE}\`) does not match the default branch — it was added or edited on this pull request, so it has not been reviewed.
+
+Custom agents run with the repository's token, and the definition body becomes the prompt, so autoducks only runs definitions that are already merged.
+
+**To run it:** merge the definition to the default branch first, then re-run \`$(autoducks_command_for agent) ${AGENT_NAME}\`.
+
+**To try it from this pull request anyway:** set \`custom_agents.allow_unverified: true\` in \`.autoducks/autoducks.json\`. It will run with a read-only tool grant regardless of what the definition asks for."
+fi
+
+# ── Refusal #5: surface mismatch (issue vs pr) ──────────────────────────
 CURRENT_SURFACE="issue"
 [[ "${IS_PR:-false}" == "true" ]] && CURRENT_SURFACE="pr"
 if [[ "$DESC_SURFACE" != "$CURRENT_SURFACE" ]]; then
