@@ -1,22 +1,107 @@
 name: 'Autoducks: Release'
 # Upstream-only. scripts/release.sh (also upstream-only — absent from
 # install.sh's copy loop) commits `.autoducks/VERSION` + the CHANGELOG.md
-# section and pushes the `v<semver>` tag; this workflow turns that push into
-# the GitHub release the "stable" channel resolves against. Idempotent
-# (skips if the release already exists) and never fails silently: a
-# `.autoducks/VERSION` change pushed without its matching tag is reported,
-# not swallowed.
+# section and pushes the `v<semver>` tag; this workflow turns that tag into
+# the GitHub release the "stable" channel resolves against.
+#
+# The publisher is the *tag* push, not the branch push. It used to be the
+# branch, which races by construction: on the `--pr` route — the only route
+# available once the default branch enforces its checks on admins — the tag is
+# pushed by a separate `release.sh --tag` run minutes after the merge, so the
+# branch push always arrived first and always found no tag. Both v0.3.0 and
+# v0.5.0 failed that way and were republished by hand, which then mislabelled
+# `latest` (see the --latest computation below).
+#
+# The branch push keeps a job, downgraded to a warning: a VERSION bump with no
+# tag yet is the normal mid-flight state of the `--pr` route, so it cannot be
+# an error, but it is worth saying out loud so a forgotten `--tag` does not go
+# unnoticed.
+#
+# workflow_dispatch republishes any tag on demand — backfilling a release
+# without re-running a months-old workflow run.
 
 on:
   push:
+    tags: ['v*']
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g. v0.5.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  publish:
     name: publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Publish the release for this tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          TAG="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          VERSION="${TAG#v}"
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $TAG already exists — skipping (idempotent)"
+            exit 0
+          fi
+
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::tag $TAG does not exist in this repository." >&2
+            exit 1
+          fi
+
+          # The tag is authoritative, but the notes come from the CHANGELOG
+          # section committed alongside it, so read VERSION off the tagged tree
+          # rather than trusting the tag name to match what was released.
+          TAGGED_VERSION="$(git show "$TAG:.autoducks/VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
+          if [[ -n "$TAGGED_VERSION" && "$TAGGED_VERSION" != "$VERSION" ]]; then
+            echo "::error::tag $TAG points at a tree whose .autoducks/VERSION is $TAGGED_VERSION." >&2
+            exit 1
+          fi
+
+          # shellcheck source=/dev/null
+          source .autoducks/core/config/changelog.sh
+          NOTES="$(changelog::section "$VERSION")" || {
+            echo "::error::no CHANGELOG.md section found for $VERSION — add a '## [$VERSION] - <date>' entry and re-run this workflow." >&2
+            exit 1
+          }
+
+          # `latest` is GitHub's flag, not ours, and it defaults to *most
+          # recently created* — so republishing v0.3.0 after v0.5.0 handed the
+          # stable channel a two-version-old release. Claim it only when this
+          # version really is the highest one released.
+          # shellcheck source=/dev/null
+          source .autoducks/core/config/semver.sh
+          LATEST_FLAG="--latest"
+          while read -r existing; do
+            [[ -z "$existing" ]] && continue
+            if [[ "$(semver::compare "${existing#v}" "$VERSION")" == "1" ]]; then
+              LATEST_FLAG="--latest=false"
+              break
+            fi
+          done < <(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName')
+
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" --notes "$NOTES" "$LATEST_FLAG"
+          echo "published release $TAG ($LATEST_FLAG)"
+
+  tag-guard:
+    name: warn on an untagged VERSION bump
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,35 +115,15 @@ jobs:
           filters: |
             version:
               - '.autoducks/VERSION'
-      - name: Publish release for the new VERSION
+      - name: Report a VERSION bump with no tag behind it
         if: steps.changes.outputs.version == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-
           VERSION="$(tr -d '[:space:]' < .autoducks/VERSION)"
           TAG="v${VERSION}"
-
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "release $TAG already exists — skipping (idempotent)"
-            exit 0
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "\`$TAG\` exists — its push publishes the release." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::.autoducks/VERSION is $VERSION but $TAG does not exist yet. On the --pr route that is expected until you run 'scripts/release.sh --tag'; if you already ran it, the tag push failed."
+            echo "\`.autoducks/VERSION\` is \`$VERSION\` with no \`$TAG\` — run \`scripts/release.sh --tag\` on main." >> "$GITHUB_STEP_SUMMARY"
           fi
-
-          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "::error::.autoducks/VERSION changed to $VERSION but tag $TAG was not found. scripts/release.sh should have created and pushed it — push the tag manually or re-run scripts/release.sh, then re-run this workflow." >&2
-            exit 1
-          fi
-
-          # shellcheck source=/dev/null
-          source .autoducks/core/config/changelog.sh
-          NOTES="$(changelog::section "$VERSION")" || {
-            echo "::error::no CHANGELOG.md section found for $VERSION — add a '## [$VERSION] - <date>' entry and re-run this workflow." >&2
-            exit 1
-          }
-
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "$NOTES"
-          echo "published release $TAG"
-      - name: Skipped (no VERSION change)
-        if: steps.changes.outputs.version != 'true'
-        run: echo "No .autoducks/VERSION change in this push — nothing to release."

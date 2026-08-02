@@ -400,8 +400,14 @@ create and push \`$tag\` at the merged commit." \
   git add "$AUTODUCKS_ROOT/VERSION" "$(changelog::_file)" || release::die "git add failed"
   git commit -q -m "chore(release): $tag" || release::die "git commit failed"
   git tag "$tag" || release::die "git tag failed"
-  git push origin "$default_branch" || release::die "git push of $default_branch failed (tag '$tag' was created locally — push it manually once resolved)"
-  git push origin "$tag" || release::die "git push of tag '$tag' failed (branch push already succeeded)"
+  # Tag first, branch second. The release workflow publishes on the tag push,
+  # so pushing the branch first opens a window where a `.autoducks/VERSION`
+  # bump is on main with no tag behind it — which is exactly the state the
+  # tag-guard job warns about, and it used to be a hard failure. A tag whose
+  # commit is not yet on the default branch is momentary and harmless; the
+  # reverse is not.
+  git push origin "$tag" || release::die "git push of tag '$tag' failed (nothing has been pushed to $default_branch yet — fix and re-run)"
+  git push origin "$default_branch" || release::die "git push of $default_branch failed (tag '$tag' is already pushed — push the branch manually once resolved)"
 
   echo "release: pushed $tag ($AUTODUCKS_ROOT/VERSION -> $next)"
 }
