@@ -90,6 +90,56 @@ conclude_all() {
 
 reconcile_pins
 
+# ── Pin reachability (#178) ───────────────────────────────────────────────
+# The poll below answers "did every child's delivery PR merge". That is not the
+# same question as "can anyone clone this parent", and the gap is not
+# theoretical: on meta#165 the parent carried a gitlink no remote ref reached —
+# the branch holding it had been deleted — and this check reported SUCCESS the
+# whole time, because it read the child PR's *state* and never the SHA.
+#
+# Runs over every affected path, not just the protected ones. An unprotected
+# child was advanced synchronously, which makes its pin *likely* reachable, not
+# reachable — the branch can still be gone by the time the parent merges.
+#
+# Undetermined is not a failure. metarepo::pin_reachable returns 2 when it
+# cannot get an answer (no token, unknown slug, offline), and a check that goes
+# red on a network blip would be worse than the hole it closes.
+unreachable_pins() {
+  local m slug pinned rc
+  for m in "${AFFECTED[@]}"; do
+    [[ -n "$m" ]] || continue
+    slug="$(metarepo::slug_for_path "$m" 2>/dev/null || true)"
+    [[ -n "$slug" ]] || continue
+    pinned="$(git rev-parse "HEAD:$m" 2>/dev/null || true)"
+    [[ -n "$pinned" ]] || continue
+    # `|| rc=$?` rather than `if !`: the negation would swallow the exit code,
+    # and 1 (nothing reaches it) has to stay distinguishable from 2 (could not
+    # tell). Only 1 is a failure.
+    rc=0; metarepo::pin_reachable "$slug" "$pinned" || rc=$?
+    [[ "$rc" -eq 1 ]] || continue
+    echo "- \`$m\` pinned at \`${pinned:0:7}\` on $slug, which no branch, tag or open PR head reaches — a fresh clone cannot initialise this submodule"
+  done
+}
+
+# conclude_success TITLE SUMMARY — conclude success, unless a pin is stranded.
+conclude_success() {
+  local title="$1" summary="$2" stranded
+  stranded="$(unreachable_pins)"
+  if [[ -n "$stranded" ]]; then
+    notice "parent PR pins a commit no remote ref on the child reaches"
+    step_summary "### Delivery poll — failed (unreachable gitlink)"
+    step_summary "$stranded"
+    conclude_all failure "Gitlink unreachable" \
+      "The children delivered, but the parent pins a commit nothing on the child reaches.
+
+$stranded
+
+Re-push the branch that held it, or re-point the gitlink at a commit the child's default branch contains."
+    exit 0
+  fi
+  conclude_all success "$title" "$summary"
+}
+
 # ── Filter to protected children — only they need gating; an unprotected
 # child was already advanced synchronously by submodule_deliver. ──────────
 declare -a PROTECTED_PATHS=()
@@ -104,7 +154,7 @@ for m in "${AFFECTED[@]}"; do
 done
 
 if [[ "${#PROTECTED_PATHS[@]}" -eq 0 ]]; then
-  conclude_all success "No protected children to poll" \
+  conclude_success "No protected children to poll" \
     "No affected submodule has a protected default branch — nothing to wait on."
   exit 0
 fi
@@ -223,7 +273,7 @@ $(render_summary)"
     reconcile_pins
     step_summary "### Delivery poll — success (round $round)"
     step_summary "$(render_summary)"
-    conclude_all success "All children delivered" \
+    conclude_success "All children delivered" \
       "$(render_summary)"
     exit 0
   fi
