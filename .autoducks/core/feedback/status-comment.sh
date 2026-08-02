@@ -60,6 +60,12 @@ status_comment::start() {
   label=$(status_comment::_label)
   link=$(status_comment::_run_link)
   body="<img src=\"${AUTODUCKS_STATUS_GIF}\" height=\"32\" valign=\"middle\" alt=\"Running...\" /> **\`${label}\`**: running on ${link}"
+  # Posts directly rather than through its::comment_issue because it needs the
+  # returned URL to recover the comment id, so it stamps the marker itself
+  # (#183).
+  if declare -F comment_marker::stamp >/dev/null 2>&1; then
+    body="$(comment_marker::stamp "$body")"
+  fi
   out=$(gh issue comment "$issue_id" --repo "$REPO" --body "$body" 2>/dev/null) || return 0
   # gh prints the comment URL: …/issues/N#issuecomment-<id>
   cid=$(echo "$out" | grep -oE 'issuecomment-[0-9]+' | grep -oE '[0-9]+' | head -1 || true)

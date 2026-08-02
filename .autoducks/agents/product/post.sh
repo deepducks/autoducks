@@ -86,7 +86,7 @@ CONFIDENCE_THRESHOLD=$(jq -r '.product.confidence_threshold // "high"' "$AUTODUC
 MAX_CLOSES_PER_RUN=$(jq -r '.product.max_closes_per_run // 5' "$AUTODUCKS_ROOT/autoducks.json")
 [[ -z "$MAX_CLOSES_PER_RUN" || "$MAX_CLOSES_PER_RUN" == "null" ]] && MAX_CLOSES_PER_RUN=5
 
-AUTO_MERGE_DUPLICATES=$(jq -r '.product.auto_merge_duplicates // true' "$AUTODUCKS_ROOT/autoducks.json")
+AUTO_MERGE_DUPLICATES=$(jq -r 'if .product.flag_duplicates != null then .product.flag_duplicates elif .product.auto_merge_duplicates != null then .product.auto_merge_duplicates else true end' "$AUTODUCKS_ROOT/autoducks.json")
 [[ -z "$AUTO_MERGE_DUPLICATES" || "$AUTO_MERGE_DUPLICATES" == "null" ]] && AUTO_MERGE_DUPLICATES="true"
 
 # `//` can't be used here (same reasoning as auto_merge_duplicates in
@@ -123,7 +123,8 @@ fi
 
 # Scope / config guardrails: a scoped single-issue run never touches
 # duplicates (pre.sh didn't gather anything to dedup against), and
-# `auto_merge_duplicates: false` disables the whole dedup half regardless
+# `flag_duplicates: false` (or the legacy `auto_merge_duplicates: false`)
+# disables the whole dedup half regardless
 # of what the LLM proposed.
 if [[ "$SCOPE" == "single" || "$AUTO_MERGE_DUPLICATES" != "true" ]]; then
   DUPLICATES_JSON="[]"
@@ -269,11 +270,16 @@ if [[ "$BACKEND" != "off" && "$PRIORITY_COUNT" -gt 0 ]]; then
 fi
 APPLIED_PRIORITY_COUNT=$(echo "$APPLIED_PRIORITIES_JSON" | jq 'length')
 
-# ── Apply duplicates: close, label, cross-reference ─────────────────────
-CLOSED_DUPLICATES_JSON="[]"
+# ── Apply duplicates: label and cross-reference, never close ────────────
+# The sweep flags, it does not fold. This is a scheduled job acting on an
+# LLM's opinion about issues nobody pointed it at, and it can reach several
+# groups a night — closing on that basis is cheap to do and tedious to undo.
+# The explicit `/merge #N` path still closes, because there a human named both
+# issues at a moment of their choosing.
+FLAGGED_DUPLICATES_JSON="[]"
 if [[ "$DUPLICATE_GROUP_COUNT" -gt 0 ]]; then
   # Private collector: only jq -n's output may land here, so side-effect
-  # stdout from fold_duplicate::close below can never contaminate the jq -s slurp.
+  # stdout from fold_duplicate::reference below can never contaminate the jq -s slurp.
   duplicates_collector=$(mktemp)
   while IFS= read -r group; do
     canonical=$(echo "$group" | jq -r '.canonical')
@@ -290,26 +296,27 @@ if [[ "$DUPLICATE_GROUP_COUNT" -gt 0 ]]; then
         continue
       fi
 
-      fold_duplicate::close "$dup" "$canonical" >/dev/null
+      fold_duplicate::reference "$dup" "$canonical" >/dev/null
 
       jq -n --argjson canonical "$canonical" --argjson duplicate "$dup" '{canonical: $canonical, duplicate: $duplicate}' >> "$duplicates_collector"
     done < <(echo "$group" | jq -r '.duplicates[]')
   done < <(echo "$DUPLICATES_JSON" | jq -c '.[]')
-  CLOSED_DUPLICATES_JSON=$(jq -s '.' < "$duplicates_collector")
+  FLAGGED_DUPLICATES_JSON=$(jq -s '.' < "$duplicates_collector")
   rm -f "$duplicates_collector"
 fi
 
-# Cross-reference comment on each canonical, folding in whichever of its
-# duplicates were actually closed (delivery-phase locks may have skipped
-# some of the group). Wording matches merge.sh's "Folding in #N ..." so the
-# two close paths read the same regardless of which one produced them.
-echo "$CLOSED_DUPLICATES_JSON" | jq -c 'group_by(.canonical) | .[]' | while IFS= read -r fold; do
+# Cross-reference comment on each canonical, naming whichever of its
+# duplicates were actually flagged (delivery-phase locks may have skipped some
+# of the group). Both sides get a pointer, so the canonical is discoverable
+# from the duplicate and vice versa — that is the whole product of the sweep
+# now, and it has to be legible without the close to carry the meaning.
+echo "$FLAGGED_DUPLICATES_JSON" | jq -c 'group_by(.canonical) | .[]' | while IFS= read -r fold; do
   canonical=$(echo "$fold" | jq -r '.[0].canonical')
   ids=$(echo "$fold" | jq -r '[.[].duplicate] | map("#" + (. | tostring)) | join(", ")')
-  its::comment_issue "$canonical" "Folding in $ids as duplicate(s) of this issue (closed as \`not_planned\`)." 2>/dev/null || true
+  its::comment_issue "$canonical" "$ids look like duplicate(s) of this issue. Left open — close whichever is redundant when you have the context, or run \`$(autoducks_command_for merge) #$canonical\` on it." 2>/dev/null || true
 done
 
-CLOSED_COUNT=$(echo "$CLOSED_DUPLICATES_JSON" | jq 'length')
+FLAGGED_COUNT=$(echo "$FLAGGED_DUPLICATES_JSON" | jq 'length')
 
 # ── Apply classifications: authoritative Bug/Feature labels ─────────────
 # The LLM's `kind` is a hint, never the enforcement point — every entry is
@@ -356,13 +363,13 @@ SUMMARY="Triage complete (scope: \`$SCOPE\`, priority backend: \`$BACKEND\`)."
 if [[ "$APPLIED_PRIORITY_COUNT" -gt 0 ]]; then
   SUMMARY+=$'\n\n**Priorities set:** '"$APPLIED_PRIORITY_COUNT"
 fi
-if [[ "$CLOSED_COUNT" -gt 0 ]]; then
-  SUMMARY+=$'\n\n**Duplicates closed:** '"$CLOSED_COUNT"
+if [[ "$FLAGGED_COUNT" -gt 0 ]]; then
+  SUMMARY+=$'\n\n**Duplicates flagged (not closed):** '"$FLAGGED_COUNT"
 fi
 if [[ "$APPLIED_CLASSIFICATION_COUNT" -gt 0 ]]; then
   SUMMARY+=$'\n\n**Classified:** '"$APPLIED_CLASSIFICATION_COUNT"
 fi
-if [[ "$APPLIED_PRIORITY_COUNT" -eq 0 && "$CLOSED_COUNT" -eq 0 && "$APPLIED_CLASSIFICATION_COUNT" -eq 0 ]]; then
+if [[ "$APPLIED_PRIORITY_COUNT" -eq 0 && "$FLAGGED_COUNT" -eq 0 && "$APPLIED_CLASSIFICATION_COUNT" -eq 0 ]]; then
   SUMMARY+=$'\n\nNo-op — the backlog in scope was already groomed.'
 fi
 

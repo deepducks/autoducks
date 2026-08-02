@@ -46,12 +46,18 @@ else
   pass "no --auto merge carries --delete-branch"
 fi
 
-# The synchronous merges SHOULD delete: by the time gh returns, the merge is done.
+# The synchronous merges no longer delete either — not because the deletion is
+# unsafe here (by the time gh returns the merge is done), but because delivery
+# does not own the child branch's lifetime. The parent's pipeline created it and
+# the parent's PR close deletes it, once it is contained in the child's default
+# branch. Deleting at child-merge time retired the branch while the parent PR
+# was still open, and the review loop's next rework round had nowhere to commit
+# (#182). See test/unit-child-branch-lifetime.sh for the replacement contract.
 sync_deletes=$(grep -- 'gh pr merge' "$CODE" | grep -v -- '--auto' | grep -c -- '--delete-branch' || true)
-if [[ "$sync_deletes" -ge 1 ]]; then
-  pass "synchronous merges still delete the branch ($sync_deletes)"
+if [[ "$sync_deletes" -eq 0 ]]; then
+  pass "synchronous merges no longer delete the branch (parent PR close owns it)"
 else
-  fail "the synchronous merges stopped deleting the branch — that is a different regression"
+  fail "a synchronous merge still deletes the child branch ($sync_deletes) — that retires it while the parent PR is open"
 fi
 
 # ---------------------------------------------------------------------------

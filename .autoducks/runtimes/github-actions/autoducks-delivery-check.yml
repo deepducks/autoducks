@@ -151,6 +151,63 @@ jobs:
           MERGED_PR_NUM: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
 
+  # The parent PR closing is the end of the pipeline that created the mirrored
+  # child branches, so it is where they are deleted (#182). Unlike
+  # `repin-siblings` this does NOT require `merged == true`: an abandoned parent
+  # PR ends the pipeline just as definitively, and its children were very likely
+  # already delivered. The script never deletes a child branch holding work that
+  # is not contained in the child's default branch, so the unmerged case cannot
+  # lose anything.
+  cleanup-child-branches:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      (startsWith(github.event.pull_request.head.ref, 'feature/') ||
+       startsWith(github.event.pull_request.head.ref, 'fix/')) &&
+      !startsWith(github.event.pull_request.base.ref, 'feature/') &&
+      !startsWith(github.event.pull_request.base.ref, 'fix/') &&
+      !contains(github.event.pull_request.body, 'autoducks:metarepo-managed')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
+    concurrency:
+      group: autoducks-metarepo-cleanup-${{ github.repository }}-${{ github.event.pull_request.head.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Mint app token
+        id: apptoken
+        shell: bash
+        env:
+          AUTODUCKS_APP: ${{ vars.AUTODUCKS_APP }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTODUCKS_APP:-}" ]; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BROKER="https://autoducks-api.gustavospgondim.workers.dev"
+          OIDC=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=autoducks-broker" | jq -r .value)
+          TOKEN=$(curl -sf -X POST -H "Authorization: Bearer $OIDC" \
+            "$BROKER/token" | jq -r .token)
+          echo "::add-mask::$TOKEN"
+          echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+      - name: Snapshot machinery
+        id: snapshot
+        run: bash .autoducks/core/robustness/snapshot-machinery.sh
+      - name: Delete delivered child branches
+        run: bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/orchestration/cleanup-child-branches.sh"
+        env:
+          REPO: ${{ github.repository }}
+          FEATURE_BRANCH: ${{ github.event.pull_request.head.ref }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
+
   # The same reconcile, on the other way a gitlink moves: a direct push to the
   # default branch. `repin-siblings` above only sees PR merges, so without this
   # a hand-pushed gitlink bump leaves every open parent PR CONFLICTING with

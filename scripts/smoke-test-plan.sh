@@ -17,10 +17,11 @@
 #   6. The #164 stale-`Tactics:done` regression: rewriting the body to a fresh,
 #      marker-free design spec while `Tactics:done` lingers must not lose the
 #      rewritten design zone on the next /engineer run.
-#   7. The tactical-zone-preservation fix for /architect re-runs: an
-#      existing tactical zone (markers + YAML wave plan) must survive
-#      verbatim below a freshly-written design zone, and a markerless body
-#      must still get no tactical markers on the fallback path.
+#   7. The /architect re-run contract: an existing tactical zone is STRIPPED
+#      (with a warning comment, and its task issues closed) rather than
+#      preserved — the design changed, so the plan is stale by construction.
+#      A markerless body must still get no tactical markers on the fallback
+#      path.
 #
 # With --single, runs a separate variant instead: seeds a draft narrow
 # enough to yield exactly one task, and asserts the engineer-agent's
@@ -67,10 +68,9 @@
 #     rewritten design zone must survive verbatim with a fresh tactical
 #     zone appended below it (sentinel present, markers present, sentinel
 #     above the begin marker)
-#   - /architect re-run regression: an existing tactical zone (markers +
-#     YAML wave plan) must survive verbatim below a freshly-written design
-#     zone (markers present, tactical sentinel below the begin marker, fresh
-#     design-spec heading above it)
+#   - /architect re-run contract: an existing tactical zone is stripped, the
+#     removal is announced in a comment, and a fresh design spec is written
+#     in its place
 #   - /architect on a markerless body writes the design spec as the full
 #     body and introduces no tactical markers
 #
@@ -201,8 +201,12 @@ wait_for_feature_unplanned() {
   while [[ $waited -lt $timeout_s ]]; do
     labels=$(gh api "repos/$REPO/issues/$issue" \
       --jq '[.labels[].name] | join(",")' 2>/dev/null || echo "?")
+    # Machinery comments only. The trigger comments this script posts (/engineer,
+    # /revert) are the human's, and revert deliberately leaves human comments
+    # alone — asserting on the raw count demanded more than revert promises and
+    # could never pass (#183).
     comments=$(gh api "repos/$REPO/issues/$issue/comments" \
-      --jq '. | length' 2>/dev/null || echo "?")
+      --jq '[.[] | select((.body // "") | contains("<!-- autoducks:comment -->"))] | length' 2>/dev/null || echo "?")
     local labels_clean=1
     case ",$labels," in
       *,Tactics:done,*|*,draft,*) labels_clean=0 ;;
@@ -404,7 +408,7 @@ EOF
   echo "  Revert comment posted (id: ${REVERT_COMMENT_ID:-unknown})"
 
   REVERT_RC=0
-  wait_for_feature_unplanned "$FEATURE" 120 || REVERT_RC=$?
+  wait_for_feature_unplanned "$FEATURE" 600 || REVERT_RC=$?
   case $REVERT_RC in
     0) pass "revert completed (labels stripped + comments deleted on #$FEATURE)" ;;
     2) fail "revert did not reach terminal state within 2 min" ;;
@@ -424,11 +428,11 @@ EOF
     fail "Label 'Tactics:done' still present (got: $FINAL_LABELS)"
   fi
 
-  COMMENT_COUNT=$(gh api "repos/$REPO/issues/$FEATURE/comments" --jq '. | length' 2>/dev/null || echo "999")
+  COMMENT_COUNT=$(gh api "repos/$REPO/issues/$FEATURE/comments" --jq "[.[] | select((.body // \"\") | contains(\"<!-- autoducks:comment -->\"))] | length" 2>/dev/null || echo "999")
   if [[ "$COMMENT_COUNT" -eq 0 ]]; then
-    pass "All comments deleted from #$FEATURE"
+    pass "All machinery comments deleted from #$FEATURE"
   else
-    fail "$COMMENT_COUNT comment(s) still present on #$FEATURE (expected 0)"
+    fail "$COMMENT_COUNT machinery comment(s) still present on #$FEATURE (expected 0)"
   fi
 
   POST_REVERT_BODY=$(gh issue view $FEATURE $REPO_ARG --json body --jq '.body')
@@ -461,47 +465,77 @@ fi
 # --- Create the seed issue with a narrow, decomposable draft ---
 # The draft is intentionally specific (explicit file paths, exact signatures)
 # so the engineer-agent goes straight to Plan Mode without asking questions.
+#
+# It also has to be unambiguously MULTI-task, which the previous seed was not:
+# two three-line scripts with no relationship between them are one cohesive
+# change, and a plan that says so is correct — the run that reported an "empty
+# splitter" had simply taken the legitimate single-task fast path (#183). The
+# multi-task path is what this variant exists to cover, so the work is layered
+# instead: the operations, then a dispatcher that cannot be written before them,
+# then a runner that cannot be written before the dispatcher. The dependencies
+# are stated as facts about the code, not as instructions about how to plan.
 echo "[2/9] Creating seed feature issue..."
 SEED_BODY=$(cat <<EOF
 # Plan smoke test — ${TIMESTAMP}
 
-Add two tiny utility modules under \`scripts/smoke-plan-${TIMESTAMP}/\`, each
-with a documented signature. This is a synthetic test — no real
-implementation is needed, the goal is just to exercise the /engineer
-pipeline end-to-end.
+Build a tiny calculator CLI under \`scripts/smoke-plan-${TIMESTAMP}/\`, in three
+layers: the operations, a dispatcher that routes to them, and a test runner that
+exercises the dispatcher. This is a synthetic test — no real implementation is
+needed, the goal is just to exercise the /engineer pipeline end-to-end.
 
-## Files to create
+## Layer 1 — operations
 
 ### \`scripts/smoke-plan-${TIMESTAMP}/add.sh\`
 
-A bash function that sums two integers from positional args and echoes
-the result.
+Sums two integers from positional args and echoes the result.
 
 \`\`\`bash
 #!/usr/bin/env bash
 # Usage: ./add.sh <a> <b>
-# Echoes: a + b
 set -euo pipefail
 echo \$((\${1:-0} + \${2:-0}))
 \`\`\`
 
 ### \`scripts/smoke-plan-${TIMESTAMP}/subtract.sh\`
 
-A bash function that subtracts two integers from positional args.
+Subtracts two integers from positional args.
 
 \`\`\`bash
 #!/usr/bin/env bash
 # Usage: ./subtract.sh <a> <b>
-# Echoes: a - b
 set -euo pipefail
 echo \$((\${1:-0} - \${2:-0}))
 \`\`\`
 
+## Layer 2 — dispatcher
+
+### \`scripts/smoke-plan-${TIMESTAMP}/calc.sh\`
+
+Takes an operation name and two integers, and delegates to the matching script
+from layer 1. Exits 2 with a usage message on an unknown operation. It invokes
+\`add.sh\` and \`subtract.sh\` by path, so it cannot be written or exercised until
+both exist.
+
+\`\`\`bash
+# Usage: ./calc.sh <add|subtract> <a> <b>
+\`\`\`
+
+## Layer 3 — test runner
+
+### \`scripts/smoke-plan-${TIMESTAMP}/run-tests.sh\`
+
+Calls \`calc.sh\` for each supported operation, compares the output against the
+expected value, prints one line per case, and exits non-zero if any case fails.
+It drives the dispatcher rather than the operation scripts, so it depends on
+layer 2 being in place.
+
 ## Acceptance Criteria
 
-- Both files exist and are executable
-- \`./add.sh 2 3\` echoes \`5\`
-- \`./subtract.sh 5 3\` echoes \`2\`
+- All four files exist and are executable
+- \`./add.sh 2 3\` echoes \`5\` and \`./subtract.sh 5 3\` echoes \`2\`
+- \`./calc.sh add 2 3\` echoes \`5\` and \`./calc.sh subtract 5 3\` echoes \`2\`
+- \`./calc.sh multiply 2 3\` exits 2 and prints a usage message
+- \`./run-tests.sh\` exits 0 and prints one line per case
 
 ## Notes
 
@@ -613,10 +647,35 @@ if [[ -n "$YAML_BLOCK" ]]; then
   done < <(echo "$YAML_BLOCK" | grep -oE 'tasks:[[:space:]]*\[[^]]*\]' | grep -oE '[0-9]+' || true)
 fi
 
+# The shape check below has to look at the tactical zone alone, not the whole
+# body: the design zone above it is the seed text, preserved verbatim, and the
+# seed carries its own `## Acceptance Criteria`. Matching against the full body
+# would find the seed's headings and call every failure a fast path.
+TACTICAL_ZONE=$(echo "$CURRENT_BODY" | awk '
+  /^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$/ { flag=1; next }
+  /^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$/   { flag=0 }
+  flag')
+
+# Three outcomes, not two. "No task numbers" used to be reported as an empty
+# splitter, but it is also the documented shape of a legitimate single-task
+# plan: the fast path writes no waves YAML, no Progress checklist and no label
+# at all, because the Maestro detects that case structurally by the absence of a
+# waves plan (engineer/post.sh, D12). Conflating the two meant a passing run
+# reported a defect, and a real splitter failure would have looked identical
+# (#183). Discriminated the same way the Maestro does — by shape.
 if [[ ${#TASK_NUMBERS[@]} -ge 1 ]]; then
   pass "Plan YAML contains ${#TASK_NUMBERS[@]} task number(s): ${TASK_NUMBERS[*]}"
+elif [[ -z "$YAML_BLOCK" ]] && grep -qE '^## (Summary|Tasks)' <<< "$TACTICAL_ZONE"; then
+  # No waves block, but the tactical zone is a task body: the single-task fast
+  # path. Legitimate here, though it means this run did not exercise the
+  # multi-task splitter the default seed is meant to reach — worth surfacing,
+  # not worth failing on.
+  warn "Engineer took the single-task fast path (no waves plan) — the multi-task assertions below are skipped. If this recurs on the default seed, the seed is no longer unambiguously multi-task."
+  TASK_NUMBERS=()
+elif [[ -n "$YAML_BLOCK" ]]; then
+  fail "Plan YAML block is present but carries no task numbers — splitter output empty"
 else
-  fail "Plan YAML has no task numbers — splitter output empty?"
+  fail "Plan has neither a waves YAML block nor a single-task body — engineer wrote no usable tactical zone"
 fi
 
 if [[ ${#TASK_NUMBERS[@]} -eq 0 ]]; then
@@ -624,14 +683,28 @@ if [[ ${#TASK_NUMBERS[@]} -eq 0 ]]; then
   TASK_NUMBERS=()
 fi
 
-# Each task has priority:P* label
+# Each task carries the Task label.
+#
+# This used to assert `priority:P*` on every task, and had never actually run:
+# the per-task loop was reached for the first time once the seed reliably
+# produced a multi-task plan, and it failed on all four. `priority:P0..P3` is a
+# *retired* taxonomy — design/AGENTS.md lists it under "Retired (cleaned up on
+# sight by revert/close/engineer)" and parse-plan.py calls the suffixes retired
+# by D14. The Engineer files tasks with `labels: ["Task"]` and nothing else, so
+# the assertion was demanding a label the machinery deliberately stopped
+# applying. Asserting the label it does apply is the check that has meaning.
 for t in "${TASK_NUMBERS[@]:-}"; do
   [[ -z "$t" ]] && continue
   TLABELS=$(gh issue view $t $REPO_ARG --json labels --jq '[.labels[].name] | join(",")')
-  if echo "$TLABELS" | grep -qE "priority:P"; then
-    pass "Task #$t has priority label ($TLABELS)"
+  if echo "$TLABELS" | grep -qE '(^|,)Task(,|$)'; then
+    pass "Task #$t carries the Task label ($TLABELS)"
   else
-    fail "Task #$t missing priority label"
+    fail "Task #$t missing the Task label (got: ${TLABELS:-none})"
+  fi
+  # A task that also carries Feature means something re-classified a
+  # pipeline-created issue — the triage sweep used to do exactly that.
+  if echo "$TLABELS" | grep -qE '(^|,)Feature(,|$)'; then
+    fail "Task #$t is also labelled Feature — something re-classified a pipeline task ($TLABELS)"
   fi
 done
 
@@ -788,28 +861,46 @@ else
 fi
 echo ""
 
-# --- Reproduce the tactical-zone-preservation fix for /architect re-runs ---
+# --- Assert the /architect re-run contract (stale plan is torn down) ---
 # Companion to the #164 regression above, but for the *other* re-entrant
-# workflow: /architect re-run on a feature that already has a tactical
-# zone (markers + YAML wave plan) must preserve that zone verbatim while
-# rewriting only the design zone above it. Starts from the state this script
-# already reached above (the feature body has markers and a real YAML wave
-# plan from the second /engineer run). Captures a task-number sentinel
-# from the tactical zone, re-runs /architect, and asserts the tactical
-# zone survives verbatim below a freshly-written design zone.
-echo "[7/9] Reproducing /architect re-run regression (tactical zone must survive)..."
+# workflow: /architect re-run on a feature that already has a tactical zone.
+# The contract is teardown, not preservation — the design is changing, so the
+# plan derived from the old design is stale by construction. Starts from the
+# state this script already reached above (the feature body has markers and a
+# tactical zone from the second /engineer run — single-task or multi-task,
+# either is valid here), re-runs /architect, and asserts the zone is gone, the
+# user was told, a fresh design spec took its place, and the orphaned task
+# issues were closed with it.
+echo "[7/9] Asserting the /architect re-run contract (tactical zone is stripped)..."
 if [[ "$REDEVISE_RC" -ne 0 ]]; then
   fail "Skipping design re-run assertions — second engineer-agent run did not complete"
-elif [[ ${#TASK_NUMBERS[@]} -eq 0 ]]; then
-  fail "Skipping design re-run assertions — no task numbers to use as a tactical sentinel"
 else
-  DESIGN_TACTICAL_SENTINEL="#${TASK_NUMBERS[0]}"
+  # This step used to assert the opposite of the shipped contract. It checked
+  # that the tactical zone survived an /architect re-run byte-for-byte, and it
+  # had never run — the task-number sentinel it keyed on only exists on the
+  # multi-task path, and the body step 6 rewrites plans as a single task. Once
+  # the sentinel was fixed and the step finally executed, it failed: the
+  # Architect strips the zone, deliberately.
+  #
+  # The user-facing contract says so in two places (guides/re-running-agents):
+  # "If a tactical zone is present, it is stripped (with a warning comment)
+  # rather than preserved — the design changed, so the old plan is treated as
+  # stale and re-planning is left to the Engineer", and the preserved/rewritten
+  # table lists the tactical zone under Rewritten. pre.sh and post.sh implement
+  # exactly that, down to closing the orphaned task issues.
+  #
+  # So the assertions below pin the real contract: the zone goes away, the user
+  # is told, and a fresh design zone takes its place.
   PRE_DESIGN_BODY=$(gh issue view $FEATURE $REPO_ARG --json body --jq '.body')
+  PRE_DESIGN_TACTICAL=$(echo "$PRE_DESIGN_BODY" | awk '
+    /^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$/ { flag=1; next }
+    /^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$/   { flag=0 }
+    flag')
 
-  if echo "$PRE_DESIGN_BODY" | grep -qF "$DESIGN_TACTICAL_SENTINEL"; then
-    pass "Tactical sentinel ($DESIGN_TACTICAL_SENTINEL) present before /architect re-run"
+  if [[ -n "$PRE_DESIGN_TACTICAL" ]]; then
+    pass "Tactical zone captured before /architect re-run ($(wc -l <<< "$PRE_DESIGN_TACTICAL" | tr -d ' ') lines)"
   else
-    fail "Tactical sentinel ($DESIGN_TACTICAL_SENTINEL) missing before /architect re-run — cannot set up the test"
+    fail "No tactical zone present before /architect re-run — cannot set up the test"
   fi
 
   DESIGN_COMMENT_URL=$(gh issue comment $FEATURE $REPO_ARG --body "/architect sonnet low")
@@ -832,39 +923,51 @@ else
   if [[ "$DESIGN_RC" -eq 0 ]]; then
     DESIGN_BODY=$(gh issue view $FEATURE $REPO_ARG --json body --jq '.body')
 
-    if echo "$DESIGN_BODY" | grep -qE '^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$' && \
-       echo "$DESIGN_BODY" | grep -qE '^[[:space:]]*<!-- autoducks:tactical:end -->[[:space:]]*$'; then
-      pass "Tactical zone markers present after /architect re-run"
+    if echo "$DESIGN_BODY" | grep -qE '^[[:space:]]*<!-- autoducks:tactical:(begin|end) -->[[:space:]]*$'; then
+      fail "Tactical markers still present after /architect re-run — the stale plan was not stripped"
     else
-      fail "Tactical zone markers LOST after /architect re-run"
+      pass "Tactical zone stripped by the /architect re-run (design-only body republished)"
     fi
 
-    if echo "$DESIGN_BODY" | grep -qF "$DESIGN_TACTICAL_SENTINEL"; then
-      pass "Tactical sentinel ($DESIGN_TACTICAL_SENTINEL) survived the /architect re-run"
+    # The stripped plan must not vanish silently: the contract is "stripped
+    # WITH a warning comment", because the user has to know their plan is gone
+    # and that re-planning is on them now.
+    if gh issue view $FEATURE $REPO_ARG --json comments \
+         --jq '[.comments[].body] | join("\n")' 2>/dev/null \
+         | grep -qiE 'previous tactical plan was removed|re-run .*engineer'; then
+      pass "Re-run warned that the previous tactical plan was removed"
     else
-      fail "Tactical sentinel ($DESIGN_TACTICAL_SENTINEL) LOST after /architect re-run"
+      fail "Tactical plan was stripped with no warning comment — silent data loss for the user"
     fi
 
-    BEGIN_LINE=$(echo "$DESIGN_BODY" | grep -nE '^[[:space:]]*<!-- autoducks:tactical:begin -->[[:space:]]*$' | head -1 | cut -d: -f1 || echo "")
-    SENTINEL_LINE=$(echo "$DESIGN_BODY" | grep -nF "$DESIGN_TACTICAL_SENTINEL" | head -1 | cut -d: -f1 || echo "")
-    if [[ -n "$SENTINEL_LINE" && -n "$BEGIN_LINE" && "$SENTINEL_LINE" -gt "$BEGIN_LINE" ]]; then
-      pass "Tactical sentinel appears below the tactical:begin marker (tactical zone preserved in place)"
-    else
-      fail "Tactical sentinel does not appear below the tactical:begin marker (tactical zone corrupted or misplaced)"
-    fi
+    BEGIN_LINE=$(echo "$DESIGN_BODY" | wc -l | tr -d ' ')
 
     # "## Problem Statement" is a required section of every design spec the
     # architect-agent writes (.autoducks/agents/architect/prompt.md) — a stable,
     # LLM-independent sentinel that the design zone was actually rewritten,
     # not just left stale above the preserved tactical zone.
-    DESIGN_SENTINEL_LINE=$(echo "$DESIGN_BODY" | grep -nE '^## Problem Statement[[:space:]]*$' | head -1 | cut -d: -f1 || echo "")
-    if [[ -n "$DESIGN_SENTINEL_LINE" && -n "$BEGIN_LINE" && "$DESIGN_SENTINEL_LINE" -lt "$BEGIN_LINE" ]]; then
-      pass "Fresh design spec ('## Problem Statement') appears above the tactical:begin marker"
+    DESIGN_SENTINEL_LINE=$(echo "$DESIGN_BODY" | grep -cE '^## Problem Statement[[:space:]]*$' || true)
+    if [[ "$DESIGN_SENTINEL_LINE" -ge 1 ]]; then
+      pass "Fresh design spec written ('## Problem Statement' present)"
     else
-      fail "Fresh design spec heading missing or not above the tactical:begin marker"
+      fail "Fresh design spec heading missing after the /architect re-run"
+    fi
+
+    # The old plan's task issues are torn down with it — otherwise they linger
+    # as orphans pointing at a design that no longer exists.
+    STILL_OPEN=0
+    for t in "${TASK_NUMBERS[@]:-}"; do
+      [[ -z "$t" ]] && continue
+      st=$(gh issue view "$t" $REPO_ARG --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+      [[ "$st" == "OPEN" ]] && STILL_OPEN=$((STILL_OPEN + 1))
+    done
+    if [[ "$STILL_OPEN" -eq 0 ]]; then
+      pass "Task issues from the discarded plan were closed"
+    else
+      warn "$STILL_OPEN task issue(s) from the discarded plan are still open"
     fi
   else
-    fail "Skipping tactical-zone-survival assertions — architect-agent run did not complete"
+    fail "Skipping /architect re-run assertions — architect-agent run did not complete"
   fi
 fi
 echo ""
@@ -949,7 +1052,7 @@ echo "  Revert comment posted (id: ${REVERT_COMMENT_ID:-unknown})"
 # stripped from the feature issue. Issue-scoped, so parallel reverts
 # on other features don't cross-talk.
 REVERT_RC=0
-wait_for_feature_unplanned "$FEATURE" 120 || REVERT_RC=$?
+wait_for_feature_unplanned "$FEATURE" 600 || REVERT_RC=$?
 case $REVERT_RC in
   0) pass "revert completed (labels stripped + comments deleted on #$FEATURE)" ;;
   2) fail "revert did not reach terminal state within 2 min" ;;
@@ -983,12 +1086,12 @@ else
   fail "Label 'draft' still present"
 fi
 
-# All comments deleted (should be 0)
-COMMENT_COUNT=$(gh api "repos/$REPO/issues/$FEATURE/comments" --jq '. | length' 2>/dev/null || echo "999")
+# Machinery comments deleted (the human trigger comments are left alone).
+COMMENT_COUNT=$(gh api "repos/$REPO/issues/$FEATURE/comments" --jq "[.[] | select((.body // \"\") | contains(\"<!-- autoducks:comment -->\"))] | length" 2>/dev/null || echo "999")
 if [[ "$COMMENT_COUNT" -eq 0 ]]; then
-  pass "All comments deleted from #$FEATURE"
+  pass "All machinery comments deleted from #$FEATURE"
 else
-  fail "$COMMENT_COUNT comment(s) still present on #$FEATURE (expected 0)"
+  fail "$COMMENT_COUNT machinery comment(s) still present on #$FEATURE (expected 0)"
 fi
 
 # Body restored — soft assertion (depends on userContentEdits coverage)

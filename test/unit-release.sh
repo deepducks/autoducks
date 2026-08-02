@@ -147,6 +147,105 @@ else
   fail "a release commit was created before the refusal"
 fi
 
+echo "── commit_subjects_since: one entry per merged PR ──"
+# Every PR lands as a merge commit, so its subject exists twice: on the branch
+# commit and on the merge (the latter with " (#N)" appended by GitHub). Walking
+# every commit put both into the changelog — the v0.5.0 draft listed all five
+# changes twice. This builds that exact shape and asserts one entry per PR.
+CS_DIR=$(mktemp -d)
+(
+  cd "$CS_DIR"
+  git init -q -b main
+  git config user.email t@e.com; git config user.name T
+  git commit -q --allow-empty -m "chore(release): v0.1.0"
+  git tag v0.1.0
+
+  git checkout -q -b feature-a
+  git commit -q --allow-empty -m "feat(x): add the thing"
+  git checkout -q main
+  git merge -q --no-ff feature-a -m "feat(x): add the thing (#101)"
+
+  git checkout -q -b feature-b
+  git commit -q --allow-empty -m "fix(y): repair the other thing"
+  git checkout -q main
+  git merge -q --no-ff feature-b -m "fix(y): repair the other thing (#102)"
+) >/dev/null 2>&1
+
+subjects=$(cd "$CS_DIR" && bash -c "source '$RELEASE_SH'; release::commit_subjects_since v0.1.0")
+count=$(printf '%s\n' "$subjects" | grep -c . || true)
+
+if [[ "$count" -eq 2 ]]; then
+  pass "two merged PRs produce exactly 2 subjects (got $count)"
+else
+  fail "expected 2 subjects, got $count:"$'\n'"$subjects"
+fi
+if printf '%s' "$subjects" | grep -q '(#101)' && printf '%s' "$subjects" | grep -q '(#102)'; then
+  pass "keeps the merge subjects, which carry the PR numbers"
+else
+  fail "lost the PR-numbered subjects:"$'\n'"$subjects"
+fi
+if [[ "$(printf '%s\n' "$subjects" | grep -c 'add the thing' || true)" -eq 1 ]]; then
+  pass "each change appears once, not once per parent"
+else
+  fail "duplicate entry survived:"$'\n'"$subjects"
+fi
+
+# A linear history (squash-merge or direct push) must be unaffected.
+LIN_DIR=$(mktemp -d)
+(
+  cd "$LIN_DIR"
+  git init -q -b main
+  git config user.email t@e.com; git config user.name T
+  git commit -q --allow-empty -m "chore(release): v0.1.0"
+  git tag v0.1.0
+  git commit -q --allow-empty -m "feat(x): squashed change (#201)"
+  git commit -q --allow-empty -m "fix(y): direct push"
+) >/dev/null 2>&1
+lin=$(cd "$LIN_DIR" && bash -c "source '$RELEASE_SH'; release::commit_subjects_since v0.1.0")
+if [[ "$(printf '%s\n' "$lin" | grep -c . || true)" -eq 2 ]]; then
+  pass "linear history still yields every commit"
+else
+  fail "linear history lost commits:"$'\n'"$lin"
+fi
+rm -rf "$CS_DIR" "$LIN_DIR"
+
+echo "── the tag is pushed before the branch, and publishes the release ──"
+
+# The workflow used to publish on the branch push and hard-fail when the tag
+# was not there yet. On the --pr route the tag arrives minutes later by
+# construction, so it never was: v0.3.0 and v0.5.0 both had to be republished
+# by hand. Two halves to keep pinned — the push order here, and the trigger
+# in the workflow.
+_push_lines="$(grep -nE '^\s*git push origin' "$RELEASE_SH" | grep -vE '\$rel_branch')"
+_tag_line="$(printf '%s\n' "$_push_lines" | grep '"\$tag"' | tail -1 | cut -d: -f1)"
+_branch_line="$(printf '%s\n' "$_push_lines" | grep '"\$default_branch"' | tail -1 | cut -d: -f1)"
+if [[ -n "$_tag_line" && -n "$_branch_line" && "$_tag_line" -lt "$_branch_line" ]]; then
+  pass "release.sh pushes the tag before the default branch"
+else
+  fail "release.sh pushes the default branch first (tag:$_tag_line branch:$_branch_line) — reopens the publish race"
+fi
+
+WORKFLOW="$REPO_ROOT/.github/workflows/autoducks-release.yml"
+if grep -qE "^\s+tags: \['v\*'\]" "$WORKFLOW"; then
+  pass "release workflow triggers on the tag push"
+else
+  fail "release workflow has no tag trigger — publishing races the tag again"
+fi
+
+if grep -q 'workflow_dispatch:' "$WORKFLOW"; then
+  pass "release workflow can be dispatched to backfill a tag"
+else
+  fail "release workflow cannot republish a tag without re-running an old run"
+fi
+
+# --latest defaults to most-recently-created, so a backfill silently demotes
+# the newest release. That is what pointed the stable channel at v0.3.0.
+if grep -q 'LATEST_FLAG="--latest=false"' "$WORKFLOW" && grep -q 'semver::compare' "$WORKFLOW"; then
+  pass "release workflow computes --latest instead of letting GitHub guess"
+else
+  fail "release workflow does not compute --latest — a backfill will demote the newest release"
+fi
+
 echo ""
 echo "═══ release: $PASS passed, $FAIL failed ═══"
 [[ "$FAIL" -eq 0 ]] || exit 1

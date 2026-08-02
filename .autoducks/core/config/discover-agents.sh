@@ -59,17 +59,18 @@ CONFIG="${AUTODUCKS_CONFIG:-$REPO_ROOT/.autoducks/autoducks.json}"
 
 # ── Reserved names: built-in verbs/synonyms plus every configured
 # triggers.<agent>[] alias — a definition called architect.md must never
-# shadow /architect. Both lists come from agent-roster.sh ("adding an agent
-# means adding it here and nowhere else"); re-typing them here is what let
-# the previous copy drift, omitting `agent` from the trigger list so that a
-# configured triggers.agent[] alias never became reserved and a custom agent
-# could be named after it. ────────────────────────────────────────────────
+# shadow /architect. ──────────────────────────────────────────────────────
+#
+# AUTODUCKS_AGENTS / AUTODUCKS_BUILTIN_VERBS — see agent-roster.sh. This file
+# used to carry its own copy of both lists, which is the drift #167 was filed
+# about and it came back here: the copies were already a release behind,
+# missing `agent`, so an agent.md definition was not reserved and could shadow
+# /agent, and aliases configured under triggers.agent[] were not reserved
+# either. Third consumer of the roster, third file that must not spell it out.
 _DA_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_DA_SH_DIR/agent-roster.sh"
 
-BUILTINS="$AUTODUCKS_BUILTIN_VERBS"
-
-RESERVED_NAMES=" $BUILTINS "
+RESERVED_NAMES=" $AUTODUCKS_BUILTIN_VERBS "
 if [[ -f "$CONFIG" ]]; then
   for _a in "${AUTODUCKS_AGENTS[@]}"; do
     while IFS= read -r _alias; do

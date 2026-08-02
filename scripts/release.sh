@@ -130,12 +130,23 @@ release::last_tag() {
 
 # release::commit_subjects_since TAG — one commit subject per line, from TAG
 # (exclusive) to HEAD; every commit reachable from HEAD when TAG is empty.
+#
+# `--first-parent`, because every PR lands as a merge commit and therefore
+# contributes its subject twice: once from the branch commit and once from the
+# merge, the latter with ` (#1234)` appended by GitHub. Walking every commit
+# put both in the changelog, so the v0.5.0 draft listed all five changes
+# twice. Following only the first parent gives exactly one entry per merged
+# PR — and it is the merge subject, which is the one carrying the PR number.
+#
+# A repo that squash-merges or pushes straight to the default branch is
+# unaffected: those produce a single linear commit each, which is its own
+# first parent.
 release::commit_subjects_since() {
   local tag="$1"
   if [[ -n "$tag" ]]; then
-    git log --format='%s' "$tag"..HEAD 2>/dev/null || true
+    git log --first-parent --format='%s' "$tag"..HEAD 2>/dev/null || true
   else
-    git log --format='%s' HEAD 2>/dev/null || true
+    git log --first-parent --format='%s' HEAD 2>/dev/null || true
   fi
 }
 
@@ -389,8 +400,14 @@ create and push \`$tag\` at the merged commit." \
   git add "$AUTODUCKS_ROOT/VERSION" "$(changelog::_file)" || release::die "git add failed"
   git commit -q -m "chore(release): $tag" || release::die "git commit failed"
   git tag "$tag" || release::die "git tag failed"
-  git push origin "$default_branch" || release::die "git push of $default_branch failed (tag '$tag' was created locally — push it manually once resolved)"
-  git push origin "$tag" || release::die "git push of tag '$tag' failed (branch push already succeeded)"
+  # Tag first, branch second. The release workflow publishes on the tag push,
+  # so pushing the branch first opens a window where a `.autoducks/VERSION`
+  # bump is on main with no tag behind it — which is exactly the state the
+  # tag-guard job warns about, and it used to be a hard failure. A tag whose
+  # commit is not yet on the default branch is momentary and harmless; the
+  # reverse is not.
+  git push origin "$tag" || release::die "git push of tag '$tag' failed (nothing has been pushed to $default_branch yet — fix and re-run)"
+  git push origin "$default_branch" || release::die "git push of $default_branch failed (tag '$tag' is already pushed — push the branch manually once resolved)"
 
   echo "release: pushed $tag ($AUTODUCKS_ROOT/VERSION -> $next)"
 }

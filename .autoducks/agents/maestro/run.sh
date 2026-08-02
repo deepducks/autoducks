@@ -121,7 +121,11 @@ deliver_children() {
         repin_pairs+=("$m=$resolved_sha")
         git::retrigger_child_check "$child_pr" "$slug" "$tok" \
           || log "WARN: could not re-trigger required check on '$slug' PR #$child_pr"
-        GH_TOKEN="$tok" gh pr merge "$child_pr" --repo "$slug" --merge --auto --delete-branch 2>/dev/null \
+        # No --delete-branch: `--auto` returns before the merge happens, so the
+        # flag would delete the branch holding the resolved work immediately and
+        # close the PR unmerged (#176). The parent's PR close owns the deletion
+        # anyway (#182).
+        GH_TOKEN="$tok" gh pr merge "$child_pr" --repo "$slug" --merge --auto 2>/dev/null \
           || log "WARN: could not re-arm auto-merge on '$slug' PR #$child_pr"
       else
         log "WARN: '$slug' PR #$child_pr could not be auto-resolved (failed or timed out) — leaving it open"

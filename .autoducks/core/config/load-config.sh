@@ -83,6 +83,13 @@ fi
 export AUTODUCKS_MERGE_METHOD
 AUTODUCKS_MERGE_METHOD="$(echo "$_merged" | jq -r '.merge_method // "auto"')"
 
+# ── Machinery comment marker ──────────────────────────────────────────────
+# AUTODUCKS_COMMENT_MARKER / comment_marker::stamp — see comment-marker.sh.
+# Split out of this file so the ITS writers can source it on their own instead
+# of stamping only when load-config happened to have run first.
+_LC_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_LC_SH_DIR/comment-marker.sh"
+
 # ── Reviewer required-check name ─────────────────────────────────────
 # Single source of truth shared by the reviewer (pre/post.sh) and
 # scripts/setup.sh, so the emitted Check-run name and the ruleset that

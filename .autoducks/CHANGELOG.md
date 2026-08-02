@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.1] - 2026-08-02
+
+### Fixed
+- fix(release): publish on the tag push, and stop letting GitHub pick `latest` (#1163)
+- fix(config,its): one roster, one marker — close the two ways they degrade (#1162)
+
+## [0.5.0] - 2026-08-01
+
+### Added
+- feat(product): the triage sweep flags duplicates instead of closing them (#1159)
+
+### Fixed
+- fix(release): one changelog entry per merged PR, not one per parent (#1160)
+- fix(smoke,design): assert the /architect re-run contract that actually ships (#1158)
+- fix(product,smoke): stop triage re-classifying pipeline tasks (#183 follow-up) (#1157)
+- fix(revert): recognise machinery comments by marker, not by author (#183) (#1156)
+- fix(metarepo): let the parent own the child branch's lifetime (#182) (#1155)
+
 ## [0.4.0] - 2026-08-01
 
 ### Fixed
