@@ -339,14 +339,80 @@ process_definition() {
     cfg="$(jq -c --arg n "$name" '.custom_agents.agents[$n] // {}' "$CONFIG" 2>/dev/null || echo '{}')"
   fi
 
+  # The tool grant is read from the BASE ref's autoducks.json, never the
+  # checked-out one. CONFIG resolves under $REPO_ROOT, which on a PR surface
+  # is the PR head — so a contributor who touches nothing but autoducks.json
+  # could add custom_agents.agents.<name>.tools = ["Bash"] for an already
+  # merged, unmodified definition. The definition-file clamp below would not
+  # fire (the file is byte-identical to base) and the escalation would land
+  # through the higher-precedence input instead. Everything else the config
+  # supplies (model, context, labels, …) is not a privilege and keeps reading
+  # the live file.
+  local cfg_tools_src="$cfg"
+  if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
+    local base_cfg
+    base_cfg="$(git -C "$REPO_ROOT" show "$AUTODUCKS_BASE_REF:.autoducks/autoducks.json" 2>/dev/null \
+      | jq -c --arg n "$name" '.custom_agents.agents[$n] // {}' 2>/dev/null || echo '{}')"
+    [[ -n "$base_cfg" ]] || base_cfg='{}'
+    cfg_tools_src="$base_cfg"
+  fi
+
   # tools: config wins over frontmatter
   local tools_declared_json tools_effective_json cfg_tools_json
   tools_declared_json="$(arr_to_json "${FM_TOOLS_ARR[@]}")"
-  cfg_tools_json="$(jq -c 'if has("tools") then (.tools | if type=="array" then . else (split(",") | map(gsub("^\\s+|\\s+$";""))) end) else empty end' <<<"$cfg" 2>/dev/null || echo "")"
+  cfg_tools_json="$(jq -c 'if has("tools") then (.tools | if type=="array" then . else (split(",") | map(gsub("^\\s+|\\s+$";""))) end) else empty end' <<<"$cfg_tools_src" 2>/dev/null || echo "")"
   if [[ -n "$cfg_tools_json" ]]; then
     tools_effective_json="$cfg_tools_json"
   else
     tools_effective_json="$tools_declared_json"
+  fi
+
+  # ── Unverified definitions cannot grant themselves tools ──────────────
+  # The design's no-ceiling rule rests on definitions being merged, reviewed
+  # repo content. On a PR surface that premise does not hold: the checkout is
+  # refs/pull/N/head, so a contributor can ship `surface: pr` + `tools: [Bash]`
+  # and have a maintainer's routine `/agent <name>` run it with contents:write
+  # and the app token. Nothing about that content has been reviewed.
+  #
+  # So the grant is clamped to the lane's own defaults.json whenever the
+  # definition does not appear, byte-identical, on the base ref. A definition
+  # merged on the default branch is unaffected and keeps the full no-ceiling
+  # behaviour; a new or edited one still runs — which is what makes testing an
+  # agent from its own PR possible — just with the lane default tool set.
+  local verified="unchecked"
+  if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
+    local rel="$rel_source"
+    # `git diff` rather than comparing the raw blob against the working-tree
+    # file: git applies the same clean/smudge filters to both sides. A raw
+    # byte compare reports every file as changed in any repo using
+    # core.autocrlf or a `text=auto eol=crlf` .gitattributes, which would
+    # clamp every custom agent in that repo for no reason.
+    if git -C "$REPO_ROOT" cat-file -e "$AUTODUCKS_BASE_REF:$rel" 2>/dev/null &&
+       git -C "$REPO_ROOT" diff --quiet "$AUTODUCKS_BASE_REF" -- "$rel" 2>/dev/null; then
+      verified="base"
+    else
+      verified="unverified"
+      # Clamp to a dedicated `unverified_tools` set, NOT to the lane default.
+      # The lane default is calibrated for definitions that have been through
+      # review; it includes Write, Edit, WebFetch and WebSearch. An unverified
+      # body is injected into the prompt verbatim, so clamping to that set
+      # would still let attacker-authored text read the repository and encode
+      # what it finds into a WebFetch URL. `unverified_tools` drops network
+      # egress and filesystem writes; what remains is read and inspect.
+      #
+      # Residual risk, stated so the next reader does not over-trust this:
+      # the definition BODY is still unreviewed content driving the prompt.
+      # Clamped is not contained — it is a smaller blast radius.
+      local lane_defaults="${AUTODUCKS_ROOT:-$REPO_ROOT/.autoducks}/agents/agent/defaults.json"
+      local lane_tools_json=""
+      [[ -f "$lane_defaults" ]] &&
+        lane_tools_json="$(jq -c '.unverified_tools // .tools // []' "$lane_defaults" 2>/dev/null || echo "")"
+      [[ -n "$lane_tools_json" ]] || lane_tools_json='[]'
+      if [[ "$tools_effective_json" != "$lane_tools_json" ]]; then
+        echo "::warning::discover-agents: '$name' ($rel) differs from $AUTODUCKS_BASE_REF — tool grant clamped to the lane default." >&2
+      fi
+      tools_effective_json="$lane_tools_json"
+    fi
   fi
 
   # model: frontmatter wins over config, both alias-resolved
@@ -409,6 +475,7 @@ process_definition() {
     --argjson context "$context_json" \
     --arg surface "$surface_effective" \
     --argjson labels "$labels_json" \
+    --arg verified "$verified" \
     --argjson body_bytes "$body_bytes" \
     '{
       name: $name,
@@ -425,6 +492,7 @@ process_definition() {
       context: $context,
       surface: $surface,
       labels: $labels,
+      verified: $verified,
       body_bytes: $body_bytes
     }')"
 

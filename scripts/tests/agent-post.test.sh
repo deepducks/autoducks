@@ -199,6 +199,81 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+echo ""
+echo "4) agent edits conflict with the base -> no PR, no conflict markers committed"
+rm -f /tmp/agent-response.md /tmp/agent-descriptor.json "/tmp/autoducks-status-comment-id.${TEST_ISSUE_NUM}"
+printf 'I rewrote the config.\n' > /tmp/agent-response.md
+cat > /tmp/agent-descriptor.json <<'JSON'
+{"name": "doc-explainer", "source": ".agents/doc-explainer.md", "tools_effective": ["Read", "Write"]}
+JSON
+
+# Base branch and PR head both touch the same line; the agent then edits it
+# again. Replaying the agent's edit onto the base is a genuine conflict —
+# the case the rebase was written for, and the one that must not produce a
+# branch containing <<<<<<< markers.
+WORK="$(new_tmp)"
+(
+  cd "$WORK"
+  git init -q -b main 2>/dev/null || git init -q
+  git config user.email t@example.com; git config user.name tester
+  git config commit.gpgsign false
+  printf 'base\n' > shared.txt
+  git add -A; git commit -q -m init
+  git branch -f main HEAD 2>/dev/null || true
+  git checkout -q -b pr-head
+  printf 'from the contributor PR\n' > shared.txt
+  git commit -qam pr
+  printf 'from the agent\n' > shared.txt          # uncommitted agent edit
+) >/dev/null 2>&1
+
+LOG="$(new_tmp)/gh.log"
+BIN="$(new_tmp)"
+MARKER="$(new_tmp)"
+make_fake_gh "$BIN" "$LOG"
+# The shared stub answers `issue view` with nothing; this path needs the
+# issue title to build the branch name, so extend it just for this case.
+cat > "$BIN/gh" <<FAKE_GH
+#!/usr/bin/env bash
+{
+  printf '>>> gh invocation\n'
+  printf '%s\n' "\$@"
+  printf '<<<\n'
+} >> "$LOG"
+case "\$1 \$2" in
+  "issue view")    echo '{"title": "Conflicting change", "body": "b", "labels": []}' ;;
+  "issue comment") echo "https://github.com/\${REPO:-o/r}/issues/0#issuecomment-999001" ;;
+  "issue edit")    exit 0 ;;
+  "pr create")     echo "https://github.com/\${REPO:-o/r}/pull/999" ;;
+  *)               exit 0 ;;
+esac
+FAKE_GH
+chmod +x "$BIN/gh"
+
+if run_post "$WORK" "$BIN" "$MARKER"; then rc=0; else rc=$?; fi
+
+if ! grep -q "pr create" "$LOG"; then
+  pass "no PR is opened when the agent's edits conflict with the base"
+else
+  fail "opened a PR from a conflicted tree"
+fi
+
+CONFLICTED=0
+while IFS= read -r ref; do
+  if (cd "$WORK" && git grep -q '^<<<<<<< ' "$ref" -- 2>/dev/null); then CONFLICTED=1; fi
+done < <(cd "$WORK" && git for-each-ref --format='%(refname)' refs/heads 2>/dev/null)
+if [[ "$CONFLICTED" -eq 0 ]]; then
+  pass "no branch carries committed conflict markers"
+else
+  fail "a committed tree contains conflict markers"
+fi
+
+if grep -q "conflict" "$LOG"; then
+  pass "the response comment tells the user the changes could not be delivered"
+else
+  fail "expected the conflict to be reported in the posted comment"
+fi
+
 echo ""
 echo "=== agent lane post.sh (offline): $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]] || exit 1
