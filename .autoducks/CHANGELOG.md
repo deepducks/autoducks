@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.1] - 2026-08-02
+
+### Fixed
+- fix(release): publish on the tag push, and stop letting GitHub pick `latest` (#1163)
+- fix(config,its): one roster, one marker — close the two ways they degrade (#1162)
+
 ## [0.5.0] - 2026-08-01
 
 ### Added
