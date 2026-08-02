@@ -24,10 +24,14 @@ fail() { echo "  ❌ $1"; FAIL=$((FAIL + 1)); }
 
 MARKER="<!-- autoducks:comment -->"
 
-# The stamp helper, lifted from load-config.sh without running the whole config
-# loader (which needs a repo, a token and a config file).
-eval "$(sed -n '/^comment_marker::stamp() {/,/^}/p' "$REPO_ROOT/.autoducks/core/config/load-config.sh")"
-AUTODUCKS_COMMENT_MARKER="$MARKER"
+# The marker lives in its own file precisely so it can be sourced without the
+# whole config loader (which needs a repo, a token and a config file).
+# shellcheck source=/dev/null
+source "$REPO_ROOT/.autoducks/core/config/comment-marker.sh"
+
+[[ "$AUTODUCKS_COMMENT_MARKER" == "$MARKER" ]] \
+  && pass "comment-marker.sh defines the expected marker" \
+  || fail "marker changed to '$AUTODUCKS_COMMENT_MARKER' — revert matches on the literal above"
 
 echo "── comment_marker::stamp ──"
 
@@ -138,6 +142,49 @@ if grep -q 'wait_for_feature_unplanned "\$FEATURE" 120' "$SMOKE"; then
 else
   pass "revert wait budget is no longer the 120s outlier"
 fi
+
+echo "── the ITS writers stamp unconditionally ──"
+
+# Both writers used to stamp only `if declare -F comment_marker::stamp`, so a
+# call path that had not sourced load-config posted an unstamped comment and
+# said nothing about it. That is #183 again with no symptom: revert strips the
+# labels and deletes nothing. The writers source the marker themselves now, so
+# the guard is gone — these run them in a shell where load-config never ran.
+for _w in comment-issue update-comment; do
+  if grep -q 'declare -F comment_marker::stamp' \
+       "$REPO_ROOT/.autoducks/providers/its/github/$_w.sh"; then
+    fail "$_w.sh still stamps behind a declare -F guard"
+  else
+    pass "$_w.sh has no silent unstamped path"
+  fi
+done
+
+_SPY="$(mktemp -d)"; trap 'rm -rf "$_SPY"' EXIT
+cat > "$_SPY/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$GH_SPY_OUT"
+STUB
+chmod +x "$_SPY/gh"
+
+_body_posted() {
+  # Fresh bash: nothing sourced load-config, so only the writer's own source
+  # line can put the marker there.
+  GH_SPY_OUT="$_SPY/args" PATH="$_SPY:$PATH" REPO="acme/repo" \
+    bash -c "source '$1'; $2" >/dev/null 2>&1
+  cat "$_SPY/args" 2>/dev/null || true
+}
+
+_out="$(_body_posted "$REPO_ROOT/.autoducks/providers/its/github/comment-issue.sh" \
+                     'its::comment_issue 7 "hello"')"
+[[ "$_out" == *"$MARKER"* ]] \
+  && pass "its::comment_issue stamps without load-config" \
+  || fail "its::comment_issue posted an unstamped body: $_out"
+
+_out="$(_body_posted "$REPO_ROOT/.autoducks/providers/its/github/update-comment.sh" \
+                     'its::update_comment 7 "hello"')"
+[[ "$_out" == *"$MARKER"* ]] \
+  && pass "its::update_comment stamps without load-config" \
+  || fail "its::update_comment posted an unstamped body: $_out"
 
 echo ""
 echo "═══ revert-comment-identity: $PASS passed, $FAIL failed ═══"
