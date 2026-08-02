@@ -268,6 +268,61 @@ metarepo::pin_relation() {
   esac
 }
 
+# metarepo::pin_reachable(slug, sha) → 0 when some remote ref on the child
+# reaches SHA, 1 when nothing does, 2 when the answer could not be determined
+# (offline, no token, unknown slug) — an undetermined answer is never a failure.
+#
+# pin_relation answers "where is the pin relative to the default branch", which
+# is a different question from "can anyone clone this". A child PR can be
+# merged, closed or open while the SHA the parent pins is reachable by nothing:
+# the branch was deleted, history was rewritten, or the merge produced a
+# different commit than the one pinned. That is the state that breaks a fresh
+# clone — `git submodule update` has no ref to fetch — and the delivery check
+# reported SUCCESS right through it on meta#165 (#176, #178).
+#
+# Three steps, cheapest first, and it stops at the first that answers:
+#   1. contained in the default branch — the overwhelmingly common case, one
+#      compare call, and the same one pin_relation already makes.
+#   2. equal to some ref tip, including refs/pull/*/head — one `ls-remote`, no
+#      API quota. Covers a pin ahead of the default branch that is still the tip
+#      of its delivery branch or PR head.
+#   3. contained in some open PR head — only reached when a pin is ahead of the
+#      default branch AND is an interior commit of an open PR, which is rare
+#      enough to be worth the extra calls and wrong enough to be worth catching.
+metarepo::pin_reachable() {
+  local slug="$1" sha="$2"
+  [[ -n "$slug" && -n "$sha" ]] || return 2
+
+  local token default_branch
+  token="$(git::resolve_token "$slug")"
+  default_branch="$(GH_TOKEN="$token" gh api "repos/$slug" --jq '.default_branch' 2>/dev/null || true)"
+  [[ -n "$default_branch" ]] || return 2
+
+  case "$(metarepo::pin_relation "$slug" "$sha" \
+            "$(GH_TOKEN="$token" gh api "repos/$slug/commits/$default_branch" --jq '.sha' 2>/dev/null || echo '')")" in
+    identical|behind) return 0 ;;
+  esac
+
+  # `--refs` drops the peeled `^{}` lines; refs/pull/*/head is not in the
+  # default refspec, so it is asked for explicitly.
+  local url="https://x-access-token:${token}@github.com/${slug}.git"
+  if git ls-remote "$url" 'refs/heads/*' 'refs/tags/*' 'refs/pull/*/head' 2>/dev/null \
+       | awk '{print $1}' | grep -qxF "$sha"; then
+    return 0
+  fi
+
+  local head_sha
+  while read -r head_sha; do
+    [[ -n "$head_sha" ]] || continue
+    case "$(metarepo::pin_relation "$slug" "$sha" "$head_sha")" in
+      identical|behind) return 0 ;;
+    esac
+  done < <(GH_TOKEN="$token" gh api "repos/$slug/pulls?state=open&per_page=100" \
+             --jq '.[].head.sha' 2>/dev/null || true)
+
+  return 1
+}
+
 # metarepo::reconcile_gitlinks(head_branch, path ...) — bring a parent PR's
 # gitlinks back in line with each child's *current* default-branch tip, then push
 # to head_branch. Returns 0 when nothing needed doing or the push succeeded.
@@ -461,6 +516,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     delivered) metarepo::delivered_children_from_body "${2:-}" ;;
     stale-keys)   metarepo::stale_submodule_keys "${2:-}" ;;
     protected)    metarepo::protected_for_path "${2:?path required}" ;;
+    reachable)    metarepo::pin_reachable "${2:?slug required}" "${3:?sha required}" ;;
     --help|*)
       echo "Usage: metarepo.sh {paths|slug PATH|owner PATH|protected PATH|stale-keys [CONFIG]}"
       echo "  Config helpers mapping a submodule path -> child repo slug via .gitmodules" ;;
