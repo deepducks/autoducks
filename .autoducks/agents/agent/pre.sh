@@ -46,35 +46,20 @@ fi
 AGENT_REPO_ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
 AGENT_LIVE_CONFIG="${AUTODUCKS_CONFIG:-$AGENT_REPO_ROOT/.autoducks/autoducks.json}"
 
-# ── Trust anchor, mirroring discover-agents.sh ──────────────────────────
-# Every privilege-bearing config key is read from here, never from the
-# checked-out tree: on a PR surface that tree is refs/pull/N/head. The
-# merge-base rather than the base-ref tip, so a definition is not marked
-# changed just because the default branch moved after the branch was cut.
-AGENT_TRUST_REF=""
-if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
-  AGENT_TRUST_REF="$(git -C "$AGENT_REPO_ROOT" merge-base "$AUTODUCKS_BASE_REF" HEAD 2>/dev/null || true)"
-  [[ -n "$AGENT_TRUST_REF" ]] || AGENT_TRUST_REF="$AUTODUCKS_BASE_REF"
-fi
-
-# agent_base_config — autoducks.json as of the trust ref, or the live file
-# when there is no trust ref (a local run). Read once.
-_AGENT_BASE_CONFIG=""
+# Config, like the definitions themselves, is read from the base branch —
+# never the checked-out tree. `enabled` is the repo owner's kill switch, so a
+# contributor must not be able to flip it back on in the same change that
+# uses the lane. See discover-agents.sh for the full reasoning.
 agent_base_config() {
-  if [[ -z "$_AGENT_BASE_CONFIG" ]]; then
-    if [[ -n "$AGENT_TRUST_REF" ]]; then
-      _AGENT_BASE_CONFIG="$(git -C "$AGENT_REPO_ROOT" show "$AGENT_TRUST_REF:.autoducks/autoducks.json" 2>/dev/null || echo '{}')"
-    elif [[ -f "$AGENT_LIVE_CONFIG" ]]; then
-      _AGENT_BASE_CONFIG="$(cat "$AGENT_LIVE_CONFIG")"
-    fi
-    [[ -n "$_AGENT_BASE_CONFIG" ]] || _AGENT_BASE_CONFIG='{}'
+  if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
+    git -C "$AGENT_REPO_ROOT" show "$AUTODUCKS_BASE_REF:.autoducks/autoducks.json" 2>/dev/null || echo '{}'
+  elif [[ -f "$AGENT_LIVE_CONFIG" ]]; then
+    cat "$AGENT_LIVE_CONFIG"
+  else
+    echo '{}'
   fi
-  printf '%s' "$_AGENT_BASE_CONFIG"
 }
 
-# `enabled` is the repo owner's kill switch, so it belongs to the same class
-# as tools and allow_unverified: reading it from the PR head would let a
-# contributor turn the lane back on in the same change that uses it.
 CUSTOM_AGENTS_ENABLED="$(agent_base_config | jq -r 'if .custom_agents.enabled == false then "false" else "true" end' 2>/dev/null || echo true)"
 if [[ "$CUSTOM_AGENTS_ENABLED" == "false" ]]; then
   refuse "🚫 Custom agents are disabled for this repository."
@@ -95,9 +80,7 @@ build_catalog_comment() {
         "_(no custom agents are defined in this repository)_"
       else
         (["| Name | Description | Source |", "|---|---|---|"]
-          + ($rows | map("| `" + .name + "` | " + ((.description // "—") | esc)
-            + (if .verified == "unverified" then " _(unverified — differs from reviewed history; will be refused)_" else "" end)
-            + " | `" + .source + "` |")))
+          + ($rows | map("| `" + .name + "` | " + ((.description // "—") | esc) + " | `" + .source + "` |")))
         | join("\n")
       end)
     + (if (.errors | length) == 0 then ""
@@ -148,46 +131,7 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
   echo "AUTODUCKS_AGENT_SOURCE=$AUTODUCKS_AGENT_SOURCE" >> "$GITHUB_ENV"
 fi
 
-# ── Refusal #4: unverified definition ──────────────────────────────────
-# discover-agents.sh clamps an unverified definition's *tool grant* to the
-# read-only `unverified_tools` floor. That bounds what the agent can reach,
-# but the definition BODY is still unreviewed content and it still becomes
-# the prompt — so a contributor can steer a maintainer's run, and whatever
-# the agent reads ends up in a public issue comment. Clamping narrows the
-# blast radius; it does not make the run trustworthy.
-#
-# So an unverified definition is refused by default. Setting
-# custom_agents.allow_unverified opts back in to the "try an agent from the
-# PR that introduces it" workflow, with the clamped grant still applied.
-DESC_VERIFIED="$(jq -r '.verified // "unchecked"' <<<"$DESCRIPTOR_JSON")"
-# Read the opt-in from the BASE ref explicitly, not from $AUTODUCKS_ROOT.
-# AUTODUCKS_ROOT is the pinned snapshot, which is *usually* the merge-base and
-# therefore safe — but snapshot-machinery.sh falls back to copying the live
-# tree when the pin cannot be resolved (fetch failure, shallow clone, a base
-# predating autoducks). On a PR surface that live tree is refs/pull/N/head, so
-# in that fallback a contributor could ship allow_unverified in the same PR
-# that ships the definition and switch off the refusal that exists to stop
-# them. Anchoring to AUTODUCKS_BASE_REF makes the safe reading explicit rather
-# than incidental; with no base ref there is nothing to trust, so it stays off.
-
-ALLOW_UNVERIFIED=false
-if [[ -n "$AGENT_TRUST_REF" ]]; then
-  ALLOW_UNVERIFIED="$(agent_base_config | jq -r '.custom_agents.allow_unverified // false' 2>/dev/null || echo false)"
-  [[ "$ALLOW_UNVERIFIED" == "true" ]] || ALLOW_UNVERIFIED=false
-fi
-if [[ "$DESC_VERIFIED" == "unverified" && "$ALLOW_UNVERIFIED" != "true" ]]; then
-  refuse "🚫 \`${AGENT_NAME}\` (\`${DESC_SOURCE}\`) does not match reviewed history — the file differs from the merge-base with the default branch, so this version of it has not been reviewed.
-
-Custom agents run with the repository's token, and the definition body becomes the prompt, so autoducks only runs definitions that are already merged.
-
-This is usually because the definition was added or edited on this pull request. It can also happen if the branch is stale — rebase onto the default branch and re-run.
-
-**To run it:** merge the definition to the default branch first, then re-run \`$(autoducks_command_for agent) ${AGENT_NAME}\`.
-
-**To allow definitions to be tried from the pull request that introduces them:** set \`custom_agents.allow_unverified: true\` in \`.autoducks/autoducks.json\` **on the default branch**. It is read from there, not from this pull request, so it cannot be switched on by the same change it would permit. Runs allowed that way still get a read-only tool grant, whatever the definition asks for."
-fi
-
-# ── Refusal #5: surface mismatch (issue vs pr) ──────────────────────────
+# ── Refusal #4: surface mismatch (issue vs pr) ──────────────────────────
 CURRENT_SURFACE="issue"
 [[ "${IS_PR:-false}" == "true" ]] && CURRENT_SURFACE="pr"
 if [[ "$DESC_SURFACE" != "$CURRENT_SURFACE" ]]; then
