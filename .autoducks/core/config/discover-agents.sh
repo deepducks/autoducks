@@ -374,11 +374,15 @@ process_definition() {
   # and have a maintainer's routine `/agent <name>` run it with contents:write
   # and the app token. Nothing about that content has been reviewed.
   #
-  # So the grant is clamped to the lane's own defaults.json whenever the
-  # definition does not appear, byte-identical, on the base ref. A definition
-  # merged on the default branch is unaffected and keeps the full no-ceiling
-  # behaviour; a new or edited one still runs — which is what makes testing an
-  # agent from its own PR possible — just with the lane default tool set.
+  # So `verified` records whether the definition appears, unchanged, on the
+  # base ref, and an unverified one has its grant clamped to the read-only
+  # `unverified_tools` floor. A definition merged on the default branch is
+  # unaffected and keeps the full no-ceiling behaviour.
+  #
+  # Note that clamping is not the whole defence: pre.sh refuses an unverified
+  # definition outright unless custom_agents.allow_unverified is set on the
+  # base ref. This clamp is what bounds the run in that opt-in mode, and what
+  # keeps the descriptor honest for anything else reading the registry.
   local verified="unchecked"
   if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
     local rel="$rel_source"

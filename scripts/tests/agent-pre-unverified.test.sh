@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
+# Run via scripts/tests/run.sh, or directly: bash scripts/tests/agent-pre-unverified.test.sh
 set -uo pipefail
 
-# Exercises pre.sh's unverified-definition refusal against a real git fixture:
-# a definition that differs from the base ref must be refused before the LLM
-# step unless custom_agents.allow_unverified is set.
+# Exercises pre.sh's unverified-definition refusal against a real git fixture.
+# A definition that differs from the base ref must be refused before the LLM
+# step, unless custom_agents.allow_unverified is set ON THE BASE REF — the
+# whole point being that the opt-in cannot ride in on the same pull request as
+# the definition it would permit.
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# Each fixture gets its own copy of the machinery, so AUTODUCKS_ROOT (derived
-# from load-config.sh's own path) resolves to the fixture's autoducks.json
-# rather than this repo's.
 ORIG_PATH="$PATH"
 TEST_ISSUE_NUM=778811
 
@@ -23,25 +23,36 @@ cleanup() {
   for d in "${TMP_DIRS[@]:-}"; do
     [[ -n "$d" ]] && rm -rf "$d"
   done
-  rm -f /tmp/agent-descriptor.json "/tmp/autoducks-status-comment-id.${TEST_ISSUE_NUM}"
+  # pre.sh writes several files into the shared /tmp that sibling suites also
+  # use; leaving them behind leaks state across scripts/tests/run.sh.
+  rm -f /tmp/agent-descriptor.json /tmp/agent-registry.json \
+        /tmp/agent-definition-body.md /tmp/steering-prompt.md \
+        /tmp/issue-request.md /tmp/issue-comments.md /tmp/issue-meta.md \
+        /tmp/context-manifest.json \
+        "/tmp/autoducks-status-comment-id.${TEST_ISSUE_NUM}"
 }
 trap cleanup EXIT
 
 new_tmp() { local d; d="$(mktemp -d)"; TMP_DIRS+=("$d"); printf '%s' "$d"; }
 
-# A workspace whose definition is committed on `base-ref` and then edited, so
-# discover-agents.sh reports verified=unverified.
+# A workspace whose definition is committed on `base-ref`. `surface: pr` so the
+# run is not diverted by the surface-mismatch refusal that follows this one —
+# without it, cases below would "pass" by stopping for the wrong reason.
+#
+# Each fixture carries its own copy of the machinery: load-config.sh derives
+# AUTODUCKS_ROOT by walking up from its own path, so a fixture reusing this
+# repo's scripts would read this repo's autoducks.json.
 make_workspace() {
   local d; d="$(new_tmp)"
   mkdir -p "$d/.claude/agents" "$d/.autoducks"
-  cp -R "$REPO_ROOT/.autoducks/agents" "$d/.autoducks/agents"
-  cp -R "$REPO_ROOT/.autoducks/core" "$d/.autoducks/core"
+  cp -R "$REPO_ROOT/.autoducks/agents"    "$d/.autoducks/agents"
+  cp -R "$REPO_ROOT/.autoducks/core"      "$d/.autoducks/core"
   cp -R "$REPO_ROOT/.autoducks/providers" "$d/.autoducks/providers"
-  cp -R "$REPO_ROOT/.autoducks/design" "$d/.autoducks/design" 2>/dev/null || true
+  cp -R "$REPO_ROOT/.autoducks/design"    "$d/.autoducks/design" 2>/dev/null || true
   # Start from the repo's real config: a bare {} makes downstream jq merges
   # fail on null, which is a fixture artifact rather than anything under test.
   cp "$REPO_ROOT/.autoducks/autoducks.json" "$d/.autoducks/autoducks.json"
-  printf -- '---\ntools: [Read]\n---\nOriginal reviewed body.\n' > "$d/.claude/agents/helper.md"
+  printf -- '---\nsurface: pr\ntools: [Read]\n---\nOriginal reviewed body.\n' > "$d/.claude/agents/helper.md"
   (
     cd "$d"
     git init -q -b main 2>/dev/null || git init -q
@@ -51,9 +62,25 @@ make_workspace() {
     git config core.autocrlf false
     git add -A && git commit -qm base && git branch -f base-ref HEAD
   ) >/dev/null 2>&1
-  # Now edit it, the way a PR head would.
-  printf -- '---\ntools: [Read]\n---\nBody rewritten on the PR head.\n' > "$d/.claude/agents/helper.md"
   printf '%s' "$d"
+}
+
+# Edit the definition the way a PR head would, making it unverified.
+dirty_definition() {
+  printf -- '---\nsurface: pr\ntools: [Read]\n---\nBody rewritten on the PR head.\n' > "$1/.claude/agents/helper.md"
+}
+
+# set_flag WORKSPACE true|false yes|no
+# yes commits the flag onto base-ref (the trusted source); no leaves it only in
+# the working tree, i.e. only on the "PR head".
+set_flag() {
+  local ws="$1" value="$2" committed="$3"
+  jq --argjson v "$value" '.custom_agents = ((.custom_agents // {}) + {allow_unverified: $v})' \
+    "$ws/.autoducks/autoducks.json" > "$ws/.autoducks/autoducks.json.tmp" \
+    && mv "$ws/.autoducks/autoducks.json.tmp" "$ws/.autoducks/autoducks.json"
+  if [[ "$committed" == "yes" ]]; then
+    ( cd "$ws" && git add -A && git commit -qm flag && git branch -f base-ref HEAD ) >/dev/null 2>&1
+  fi
 }
 
 make_fake_gh() {
@@ -62,7 +89,7 @@ make_fake_gh() {
 #!/usr/bin/env bash
 { printf '>>> gh\n'; printf '%s\n' "\$@"; printf '<<<\n'; } >> "$log_file"
 case "\$1 \$2" in
-  "issue view")    echo '{"title": "T", "body": "b", "labels": []}' ;;
+  "issue view")    echo '{"title": "T", "body": "b", "labels": [], "comments": []}' ;;
   "issue comment") echo "https://github.com/o/r/issues/0#issuecomment-1" ;;
   *)               exit 0 ;;
 esac
@@ -91,52 +118,76 @@ run_pre() {
       bash "$ws/.autoducks/agents/agent/pre.sh" )
 }
 
-echo "1) an unverified definition is refused, with no LLM step reached"
-WS="$(make_workspace)"
+REFUSAL="does not match the default branch"
+# pre.sh only assembles the prompt once every refusal is behind it, so the
+# file's presence is the positive signal that the run was actually permitted —
+# asserting only the absence of a string would pass on any earlier failure.
+proceeded() { [[ -f "$1/.autoducks/agents/agent/resolved-prompt.md" ]]; }
+
+echo "1) an unverified definition is refused before the LLM step"
+WS="$(make_workspace)"; dirty_definition "$WS"
 LOG="$(new_tmp)/gh.log"; BIN="$(new_tmp)"; MARKER="$(new_tmp)"
 make_fake_gh "$BIN" "$LOG"
 run_pre "$WS" "$BIN" "$MARKER" >/dev/null 2>&1
 
-if grep -qi "does not match the default branch" "$LOG"; then
+if grep -qi "$REFUSAL" "$LOG" 2>/dev/null; then
   pass "refusal names the unverified definition"
 else
   fail "expected the unverified refusal in the posted comment"
 fi
-if grep -q "allow_unverified" "$LOG"; then
-  pass "refusal tells the user how to opt in"
+if ! proceeded "$WS"; then
+  pass "no prompt assembled — the run stopped before the LLM step"
 else
-  fail "expected allow_unverified in the refusal message"
+  fail "a prompt was assembled despite the refusal"
 fi
 
 echo ""
-echo "2) custom_agents.allow_unverified lets it through"
-WS="$(make_workspace)"
-jq '.custom_agents = ((.custom_agents // {}) + {allow_unverified: true})' \
-  "$WS/.autoducks/autoducks.json" > "$WS/.autoducks/autoducks.json.tmp" \
-  && mv "$WS/.autoducks/autoducks.json.tmp" "$WS/.autoducks/autoducks.json"
+echo "2) allow_unverified on the base ref lets it through"
+WS="$(make_workspace)"; set_flag "$WS" true yes; dirty_definition "$WS"
 LOG="$(new_tmp)/gh.log"; BIN="$(new_tmp)"; MARKER="$(new_tmp)"
 make_fake_gh "$BIN" "$LOG"
 run_pre "$WS" "$BIN" "$MARKER" >/dev/null 2>&1
 
-if ! grep -qi "does not match the default branch" "$LOG"; then
-  pass "no refusal when allow_unverified is set"
+if ! grep -qi "$REFUSAL" "$LOG" 2>/dev/null; then
+  pass "no refusal when the opt-in is committed on the base ref"
 else
-  fail "refused despite allow_unverified: true"
+  fail "refused despite allow_unverified committed on base-ref"
+fi
+if proceeded "$WS"; then
+  pass "the permitted run actually proceeds to prompt assembly"
+else
+  fail "opt-in accepted but the run never reached prompt assembly"
 fi
 
 echo ""
-echo "3) a definition matching the base ref is never refused"
-WS="$(make_workspace)"
-git -C "$WS" checkout -- .claude/agents/helper.md 2>/dev/null || \
-  printf -- '---\ntools: [Read]\n---\nOriginal reviewed body.\n' > "$WS/.claude/agents/helper.md"
+echo "3) allow_unverified only on the PR head does NOT let it through"
+WS="$(make_workspace)"; dirty_definition "$WS"; set_flag "$WS" true no
 LOG="$(new_tmp)/gh.log"; BIN="$(new_tmp)"; MARKER="$(new_tmp)"
 make_fake_gh "$BIN" "$LOG"
 run_pre "$WS" "$BIN" "$MARKER" >/dev/null 2>&1
 
-if ! grep -qi "does not match the default branch" "$LOG"; then
-  pass "a verified definition runs without the refusal"
+if grep -qi "$REFUSAL" "$LOG" 2>/dev/null; then
+  pass "the opt-in cannot be switched on by the pull request it would permit"
+else
+  fail "an uncommitted allow_unverified bypassed the refusal"
+fi
+
+echo ""
+echo "4) a definition matching the base ref runs without the refusal"
+WS="$(make_workspace)"
+LOG="$(new_tmp)/gh.log"; BIN="$(new_tmp)"; MARKER="$(new_tmp)"
+make_fake_gh "$BIN" "$LOG"
+run_pre "$WS" "$BIN" "$MARKER" >/dev/null 2>&1
+
+if ! grep -qi "$REFUSAL" "$LOG" 2>/dev/null; then
+  pass "a verified definition is never refused"
 else
   fail "a base-identical definition was refused"
+fi
+if proceeded "$WS"; then
+  pass "the verified run proceeds to prompt assembly"
+else
+  fail "a verified definition never reached prompt assembly"
 fi
 
 echo ""

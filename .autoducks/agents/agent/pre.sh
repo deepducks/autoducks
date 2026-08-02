@@ -131,7 +131,22 @@ fi
 # custom_agents.allow_unverified opts back in to the "try an agent from the
 # PR that introduces it" workflow, with the clamped grant still applied.
 DESC_VERIFIED="$(jq -r '.verified // "unchecked"' <<<"$DESCRIPTOR_JSON")"
-ALLOW_UNVERIFIED="$(jq -r '.custom_agents.allow_unverified // false' "$AUTODUCKS_ROOT/autoducks.json" 2>/dev/null || echo false)"
+# Read the opt-in from the BASE ref explicitly, not from $AUTODUCKS_ROOT.
+# AUTODUCKS_ROOT is the pinned snapshot, which is *usually* the merge-base and
+# therefore safe — but snapshot-machinery.sh falls back to copying the live
+# tree when the pin cannot be resolved (fetch failure, shallow clone, a base
+# predating autoducks). On a PR surface that live tree is refs/pull/N/head, so
+# in that fallback a contributor could ship allow_unverified in the same PR
+# that ships the definition and switch off the refusal that exists to stop
+# them. Anchoring to AUTODUCKS_BASE_REF makes the safe reading explicit rather
+# than incidental; with no base ref there is nothing to trust, so it stays off.
+
+ALLOW_UNVERIFIED=false
+if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
+  ALLOW_UNVERIFIED="$(git -C "$AGENT_REPO_ROOT" show "$AUTODUCKS_BASE_REF:.autoducks/autoducks.json" 2>/dev/null \
+    | jq -r '.custom_agents.allow_unverified // false' 2>/dev/null || echo false)"
+  [[ "$ALLOW_UNVERIFIED" == "true" ]] || ALLOW_UNVERIFIED=false
+fi
 if [[ "$DESC_VERIFIED" == "unverified" && "$ALLOW_UNVERIFIED" != "true" ]]; then
   refuse "🚫 \`${AGENT_NAME}\` (\`${DESC_SOURCE}\`) does not match the default branch — it was added or edited on this pull request, so it has not been reviewed.
 
@@ -139,7 +154,7 @@ Custom agents run with the repository's token, and the definition body becomes t
 
 **To run it:** merge the definition to the default branch first, then re-run \`$(autoducks_command_for agent) ${AGENT_NAME}\`.
 
-**To try it from this pull request anyway:** set \`custom_agents.allow_unverified: true\` in \`.autoducks/autoducks.json\`. It will run with a read-only tool grant regardless of what the definition asks for."
+**To allow definitions to be tried from the pull request that introduces them:** set \`custom_agents.allow_unverified: true\` in \`.autoducks/autoducks.json\` **on the default branch**. It is read from there, not from this pull request, so it cannot be switched on by the same change it would permit. Runs allowed that way still get a read-only tool grant, whatever the definition asks for."
 fi
 
 # ── Refusal #5: surface mismatch (issue vs pr) ──────────────────────────
