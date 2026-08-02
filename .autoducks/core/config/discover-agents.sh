@@ -528,14 +528,13 @@ for _ridx in "${!ROOT_DIRS[@]}"; do
     fi
 
     file="$_DEF_TMP/def.md"
+    # Only a genuine read failure is "unreadable". An empty file is NOT
+    # short-circuited here: process_definition checks the name against the
+    # reserved list before it looks at content, and a reserved name must be
+    # refused as reserved-name whatever the file holds. It reaches the same
+    # empty-body verdict a moment later, in the right order.
     if ! def_cat "$rel_source" > "$file" 2>/dev/null; then
       emit_error "$rel_source" "unreadable"
-      continue
-    fi
-    # An empty file is a definition with no body, which process_definition
-    # already has a precise reason for; "unreadable" would misreport it.
-    if [[ ! -s "$file" ]]; then
-      emit_error "$rel_source" "empty-body"
       continue
     fi
 
