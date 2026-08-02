@@ -2,8 +2,24 @@
 
 ## [0.5.3] - 2026-08-02
 
+### Security
+- The custom-agent lane now reads agent definitions — and the `custom_agents`
+  config keys that grant them tools — from the base branch, never from the
+  checked-out tree. On a pull request the checkout is `refs/pull/N/head`, and a
+  definition body becomes the agent's prompt, so the previous behaviour could
+  execute unreviewed content with the repository's token. This applies to both
+  discovery and prompt assembly. (#1168)
+
 ### Changed
-- Autoducks: deliver feature/82-custom-agents (#1168)
+- **Behaviour change for `/agent`:** a definition that exists only on a pull
+  request is no longer discovered, so an agent cannot be tried from the pull
+  request that introduces it. Merge the definition to the default branch first,
+  then use it. A `/agent` run on a pull request still works and still takes that
+  pull request as its context; only the definition comes from elsewhere. (#1168)
+- Removed the machinery this replaces: the `verified` descriptor field, the tool
+  clamp and its `unverified_tools` floor, the unverified-definition refusal, and
+  the `custom_agents.allow_unverified` opt-in. None of these were part of a
+  release, so no configuration needs migrating. (#1168)
 
 ## [0.5.2] - 2026-08-02
 
