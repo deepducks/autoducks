@@ -162,6 +162,23 @@ esac
 # union of this lane's defaults.json with the repo-wide .defaults.tools). ──
 TOOLS_CSV="$(jq -r '.tools_effective // [] | join(",")' <<<"$DESCRIPTOR_JSON")"
 
+# Whatever the definition asks for, the lane's own output contract still has
+# to be satisfiable. The wrapper prompt requires the agent to write
+# /tmp/agent-response.md, and a definition that declares `tools` REPLACES the
+# lane default outright — so `tools: [WebSearch]` produced an agent that was
+# ordered to write a file with no tool that can write, burned its whole turn
+# budget on denied calls, and failed as `scope-missing`, blaming the
+# definition for "not stating an output contract".
+#
+# So required_tools is unioned in, always. It is deliberately not part of
+# defaults.json's `tools`: that list is a *default* a definition may replace,
+# while this one is the floor the lane needs to function at all.
+REQUIRED_TOOLS_JSON="$(jq -c '.required_tools // []' "$AUTODUCKS_PINNED_ROOT/.autoducks/agents/agent/defaults.json" 2>/dev/null || echo '[]')"
+if [[ -n "$TOOLS_CSV" && "$REQUIRED_TOOLS_JSON" != "[]" ]]; then
+  TOOLS_CSV="$(jq -rn --argjson req "$REQUIRED_TOOLS_JSON" --arg csv "$TOOLS_CSV" \
+    '($csv | split(",")) + $req | unique_by(.) | join(",")')"
+fi
+
 DESC_MODEL="$(jq -r '.model // empty' <<<"$DESCRIPTOR_JSON")"
 DESC_EFFORT="$(jq -r '.effort // empty' <<<"$DESCRIPTOR_JSON")"
 DESC_MAX_TURNS="$(jq -r '.max_turns // empty' <<<"$DESCRIPTOR_JSON")"
