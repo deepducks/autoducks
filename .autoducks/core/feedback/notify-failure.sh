@@ -107,6 +107,10 @@ notify_failure() {
         reviewer)  retry="re-run \`$(autoducks_command_for review) turns=$turns\`" ;;
         rework)    retry="re-run \`$(autoducks_command_for rework) turns=$turns\`" ;;
         defer)     retry="re-run \`$(autoducks_command_for defer) turns=$turns\`" ;;
+        # The agent lane has no partial branch and is not resumable: pointing
+        # it at /execute sent the user to the developer lane, which knows
+        # nothing about this run. Name the agent so the retry is copy-pasteable.
+        agent)     retry="re-run \`$(autoducks_command_for agent) ${AUTODUCKS_AGENT_NAME:-<name>} turns=$turns\`" ;;
         *)         retry="\`$(autoducks_command_for execute) turns=$turns\` to resume from the partial branch with more turns" ;;
       esac
       ;;
