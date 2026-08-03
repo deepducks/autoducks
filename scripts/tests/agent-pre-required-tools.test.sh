@@ -102,6 +102,14 @@ if grep -q "Write" <<<"$T"; then
 else
   fail "Write missing — the agent cannot satisfy its own output contract ($T)"
 fi
+# Read is floor too: the wrapper lists the materialized context files under
+# `## Input` and tells the agent to read them, so a definition without Read
+# answers blind — and does it quietly, which is the worse failure.
+if grep -qE "(^|,)Read(,|$)" <<<"$T"; then
+  pass "Read is present, so the agent can reach its own inputs ($T)"
+else
+  fail "Read missing — the agent cannot read the context it is given ($T)"
+fi
 if grep -q "WebSearch" <<<"$T" && grep -q "WebFetch" <<<"$T"; then
   pass "the declared tools survive alongside it"
 else
@@ -110,7 +118,8 @@ fi
 
 echo ""
 echo "2) the floor does not silently widen a declared grant"
-if ! grep -qE "(^|,)Edit(,|$)" <<<"$T" && ! grep -qE "(^|,)Bash" <<<"$T"; then
+if ! grep -qE "(^|,)Edit(,|$)" <<<"$T" && ! grep -qE "(^|,)Bash" <<<"$T" \
+   && ! grep -qE "(^|,)Glob(,|$)" <<<"$T"; then
   pass "nothing beyond required_tools was added"
 else
   fail "the resolved grant picked up more than the floor: $T"
@@ -128,10 +137,11 @@ fi
 echo ""
 echo "4) Write is not duplicated when the definition already asks for it"
 T3="$(resolved_tools "$(make_workspace '[Read, Write]')")"
-if [[ "$(grep -o "Write" <<<"$T3" | wc -l | tr -d ' ')" == "1" ]]; then
-  pass "Write appears exactly once ($T3)"
+if [[ "$(grep -o "Write" <<<"$T3" | wc -l | tr -d ' ')" == "1" \
+   && "$(grep -o "Read" <<<"$T3" | wc -l | tr -d ' ')" == "1" ]]; then
+  pass "neither floor tool is duplicated ($T3)"
 else
-  fail "Write duplicated: $T3"
+  fail "a floor tool was duplicated: $T3"
 fi
 
 echo ""
