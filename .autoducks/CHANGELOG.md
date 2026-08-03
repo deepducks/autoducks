@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.8] - 2026-08-03
+
+### Fixed
+- fix(agent): narrow the custom-agent lane's base-ref claim to what it delivers (#1179)
+
 ## [0.5.7] - 2026-08-03
 
 ### Fixed
