@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.4] - 2026-08-03
+
+### Fixed
+- fix(agent): honour surface: both, and stop double-posting refusals (#1170)
+
 ## [0.5.3] - 2026-08-02
 
 ### Security
