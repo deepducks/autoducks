@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.6] - 2026-08-03
+
+### Fixed
+- fix(agent): a tool floor the definition cannot replace away (#1174)
+
 ## [0.5.5] - 2026-08-03
 
 ### Fixed
