@@ -1,11 +1,29 @@
 {
   "tools": [
-    "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch",
+    "Read",
+    "Write",
+    "Edit",
+    "Glob",
+    "Grep",
+    "WebFetch",
+    "WebSearch",
     "Bash(read-only)",
-    "Bash(git log:*)", "Bash(git show:*)", "Bash(git diff:*)", "Bash(git status:*)",
-    "Bash(git blame:*)", "Bash(git rev-parse:*)", "Bash(git branch --list:*)",
-    "Bash(gh issue view:*)", "Bash(gh issue list:*)", "Bash(gh pr view:*)",
-    "Bash(gh pr diff:*)", "Bash(gh pr list:*)", "Bash(gh issue comment:*)"
+    "Bash(git log:*)",
+    "Bash(git show:*)",
+    "Bash(git diff:*)",
+    "Bash(git status:*)",
+    "Bash(git blame:*)",
+    "Bash(git rev-parse:*)",
+    "Bash(git branch --list:*)",
+    "Bash(gh issue view:*)",
+    "Bash(gh issue list:*)",
+    "Bash(gh pr view:*)",
+    "Bash(gh pr diff:*)",
+    "Bash(gh pr list:*)",
+    "Bash(gh issue comment:*)"
+  ],
+  "required_tools": [
+    "Write"
   ],
   "max_turns": 30,
   "labels": []
