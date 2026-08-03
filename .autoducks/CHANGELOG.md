@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.7] - 2026-08-03
+
+### Fixed
+- fix(agent): Read belongs in the tool floor too (#1176)
+
 ## [0.5.6] - 2026-08-03
 
 ### Fixed
