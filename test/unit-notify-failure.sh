@@ -202,6 +202,17 @@ assert_max_turns_agent "reviewer"  're-run `/review turns=100`'
 assert_max_turns_agent "rework"    're-run `/rework turns=100`'
 assert_max_turns_agent "defer"     're-run `/defer turns=100`'
 
+# The agent lane has no partial branch and is not resumable, so the generic
+# "/execute … to resume from the partial branch" hint sent the user to the
+# developer lane. It must name the custom agent instead.
+(
+  export AUTODUCKS_AGENT_NAME="anatidae"
+  assert_max_turns_agent "agent" 're-run `/agent anatidae turns=100`'
+)
+# With no agent name resolved (the run failed before pre.sh exported it), the
+# hint still has to be a usable shape rather than a bare /execute.
+assert_max_turns_agent "agent" 're-run `/agent <name> turns=100`'
+
 # ---------------------------------------------------------------------------
 # Test 4b: max_turns retry budget derives from MAX_TURNS (double + cap + fallback)
 # ---------------------------------------------------------------------------
