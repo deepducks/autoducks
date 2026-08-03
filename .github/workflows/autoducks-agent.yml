@@ -158,10 +158,18 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id || '0' }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # AUTODUCKS_ROOT is set, not just the script path. Without it
+      # load-agent-defaults.sh resolves `_root=.autoducks` relative to the CWD
+      # (load-agent-defaults.sh:8) — i.e. the PR head — so the `tools=` value a
+      # definition without its own `tools` falls through to came from
+      # `.autoducks/autoducks.json` `.defaults.tools` on unreviewed content, in
+      # a job holding contents: write. Reading it from the pin (merge-base with
+      # the base branch, see snapshot-machinery.sh) puts the fallback grant on
+      # the same reviewed footing as the definition itself.
       - name: Load agent defaults
         id: agent
         if: steps.authz.outcome == 'success'
-        run: AUTODUCKS_AGENT=agent bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/config/load-agent-defaults.sh" >> "$GITHUB_OUTPUT"
+        run: AUTODUCKS_AGENT=agent AUTODUCKS_ROOT="${AUTODUCKS_PINNED_ROOT:-.}/.autoducks" bash "${AUTODUCKS_PINNED_ROOT:-.}/.autoducks/core/config/load-agent-defaults.sh" >> "$GITHUB_OUTPUT"
       - name: Set context
         id: ctx
         if: steps.authz.outcome == 'success'
@@ -235,7 +243,13 @@ jobs:
           # is refs/pull/N/head — running from the tree would execute
           # unreviewed content. Reading from the base branch is what makes
           # the design's "merged, reviewed repo content" premise true by
-          # construction, and why this lane needs no tool ceiling.
+          # construction, and why this lane needs no per-definition clamp.
+          #
+          # Scope, precisely: the definition body and every custom_agents key.
+          # The fallback tool grant a definition without `tools` lands on comes
+          # from the pinned machinery snapshot (see the Load agent defaults
+          # step), and resolve-prompt.sh's `.autoducks/custom/` overlays are
+          # still live-tree reads, as in every lane. Not a blanket ceiling.
           AUTODUCKS_BASE_REF: origin/${{ github.event.repository.default_branch }}
           GH_TOKEN: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
       - name: User pre hook

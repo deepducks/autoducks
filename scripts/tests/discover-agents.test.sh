@@ -2,9 +2,12 @@
 # Offline unit tests for .autoducks/core/config/discover-agents.sh.
 #
 # Builds throwaway fixture repos under mktemp and points the script at them
-# via GITHUB_WORKSPACE (the script reads the live working tree, never
-# $AUTODUCKS_PINNED_ROOT), so this suite never touches the real repo tree
-# and needs no network access. Run via scripts/tests/run.sh, or directly:
+# via GITHUB_WORKSPACE, so this suite never touches the real repo tree and
+# needs no network access. The script reads definitions from
+# $AUTODUCKS_BASE_REF and falls back to the live working tree when it is unset
+# (never $AUTODUCKS_PINNED_ROOT); cases below exercise both paths, so check
+# which one a fixture is on before reading its expectations.
+# Run via scripts/tests/run.sh, or directly:
 # bash scripts/tests/discover-agents.test.sh
 set -uo pipefail
 
@@ -310,7 +313,7 @@ JSON
   # was read without depending on how the parser treats a trailing newline.
   BODY_BYTES="$(jq -r '.agents[] | select(.name=="merged") | .body_bytes' <<<"$OUT")"
   HEAD_LEN="${#PR_HEAD_BODY}"
-  if [[ "$BODY_BYTES" -gt 0 && "$BODY_BYTES" -ne "$HEAD_LEN" && "$BODY_BYTES" -lt "$HEAD_LEN" ]]; then
+  if [[ "$BODY_BYTES" -gt 0 && "$BODY_BYTES" -lt "$HEAD_LEN" ]]; then
     pass "the body is the merged one, not the longer PR-head rewrite"
   else
     fail "body looks like the PR-head rewrite (bytes=$BODY_BYTES, PR-head len=$HEAD_LEN)"
@@ -354,6 +357,68 @@ if [[ "$R" == "reserved-name" ]]; then
   pass "a definition named after a triggers.agent[] alias is refused"
 else
   fail "triggers.agent[] alias not reserved (reason=$R)"
+fi
+
+# ── A C-quoted path from git ls-tree is refused, never silently dropped ──
+# core.quotePath defaults to true, so a definition holding non-ASCII bytes
+# comes back from `ls-tree` as `"na\303\257ve.md"`. The leading quote used to
+# make it match neither root glob, dropping it with no error at all — the one
+# thing this script's contract says it never does.
+D="$(new_fixture)"
+git -C "$D" init -q -b main 2>/dev/null || git -C "$D" init -q 2>/dev/null
+git -C "$D" config user.email t@t
+git -C "$D" config user.name t
+git -C "$D" config commit.gpgsign false
+git -C "$D" config core.quotePath true
+mkdir -p "$D/.claude/agents"
+printf -- '---\n---\nbody\n' > "$D/.claude/agents/naïve.md"
+printf -- '---\n---\nbody\n' > "$D/.claude/agents/plain.md"
+git -C "$D" add -A >/dev/null 2>&1
+if ! git -C "$D" commit -qm quoted >/dev/null 2>&1 \
+   || ! git -C "$D" branch -f base-ref HEAD >/dev/null 2>&1; then
+  fail "fixture setup failed (quoted-path block)"
+else
+  OUT="$(cd "$D" && GITHUB_WORKSPACE="$D" AUTODUCKS_BASE_REF=base-ref bash "$DISCOVER" list 2>/dev/null)"
+  # `naïve` is not a valid agent name, so the correct outcome is a refusal in
+  # errors[] — the point is that it is *accounted for*, not skipped.
+  SEEN="$(jq -r '[(.agents[].source), (.errors[].source)] | join(" ")' <<<"$OUT")"
+  if [[ "$SEEN" == *"ve.md"* ]]; then
+    pass "a non-ASCII (C-quoted) definition is accounted for, not silently dropped"
+  else
+    fail "C-quoted path vanished from both agents[] and errors[]: $(jq -c '{a:[.agents[].source],e:[.errors[].source]}' <<<"$OUT")"
+  fi
+  if [[ "$(jq -r '[.agents[].name] | join(",")' <<<"$OUT")" == "plain" ]]; then
+    pass "the neighbouring valid definition is still discovered"
+  else
+    fail "valid sibling lost: $(jq -c '[.agents[].name]' <<<"$OUT")"
+  fi
+fi
+
+# ── A custom_agents.roots[] entry with a trailing slash still matches ────
+# "extra-agents/" used to build the glob "extra-agents//*.md", which matches
+# nothing under [[ ]] — so a config that worked before the base-ref switch
+# silently stopped discovering anything.
+D="$(new_fixture)"
+git -C "$D" init -q -b main 2>/dev/null || git -C "$D" init -q 2>/dev/null
+git -C "$D" config user.email t@t
+git -C "$D" config user.name t
+git -C "$D" config commit.gpgsign false
+mkdir -p "$D/extra-agents"
+printf -- '---\n---\nbody\n' > "$D/extra-agents/via-root.md"
+cat > "$D/.autoducks/autoducks.json" <<'JSON'
+{ "custom_agents": { "roots": ["extra-agents/"] } }
+JSON
+git -C "$D" add -A >/dev/null 2>&1
+if ! git -C "$D" commit -qm roots >/dev/null 2>&1 \
+   || ! git -C "$D" branch -f base-ref HEAD >/dev/null 2>&1; then
+  fail "fixture setup failed (trailing-slash root block)"
+else
+  OUT="$(cd "$D" && GITHUB_WORKSPACE="$D" AUTODUCKS_BASE_REF=base-ref bash "$DISCOVER" list 2>/dev/null)"
+  if jq -e '.agents[] | select(.name=="via-root")' <<<"$OUT" >/dev/null 2>&1; then
+    pass "a roots[] entry with a trailing slash still discovers its definitions"
+  else
+    fail "trailing-slash root discovered nothing: $(jq -c '[.agents[].name]' <<<"$OUT")"
+  fi
 fi
 
 echo ""

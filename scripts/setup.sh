@@ -743,8 +743,14 @@ echo ""
 # .autoducks/custom/agents, .claude/agents, .agents, .github/agents, and any
 # custom_agents.roots[]) and surfaces what it finds. A non-empty errors[]
 # means at least one definition was refused (bad name, reserved name,
-# oversized, empty body, or a symlink escaping the repo) — fail so the
+# oversized, empty body, unreadable, or a symlinked definition) — fail so the
 # operator fixes it before the definition is silently unusable at runtime.
+#
+# This runs with no AUTODUCKS_BASE_REF, so discovery reads the working tree
+# while the runtime reads the default branch. Without the mergeability warning
+# below the two disagree in the most confusing possible way: setup says
+# "discovered", and the agent then answers "no custom agent named <name> was
+# found" for a file the operator is looking at on disk.
 echo "[15/15] Custom agent discovery"
 DISCOVER_AGENTS="$SCRIPT_DIR/../.autoducks/core/config/discover-agents.sh"
 if [[ ! -f "$DISCOVER_AGENTS" ]]; then
@@ -760,7 +766,36 @@ else
       pass "No custom agent definitions found"
     else
       pass "Discovered $AGENT_COUNT custom agent definition(s):"
-      jq -r '.agents[] | "      - \(.name) (\(.source))\(if .shadowed then " [shadowed]" else "" end)"' <<<"$REGISTRY_JSON"
+      # Resolve the default branch once. With no origin/HEAD — no remote, or a
+      # clone that never fetched — there is nothing to compare against, so the
+      # mergeability annotation is simply omitted.
+      DEFAULT_REF=""
+      if _dh="$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null)"; then
+        DEFAULT_REF="${_dh#refs/remotes/}"
+      fi
+      UNMERGED=0
+      while IFS=$'\t' read -r _name _source _shadowed; do
+        [[ -n "$_name" ]] || continue
+        _note=""
+        [[ "$_shadowed" == "true" ]] && _note=" [shadowed]"
+        if [[ -n "$DEFAULT_REF" ]]; then
+          if ! git cat-file -e "$DEFAULT_REF:$_source" 2>/dev/null; then
+            _note="$_note  ← not on $DEFAULT_REF, will NOT run"
+            UNMERGED=$((UNMERGED + 1))
+          elif ! git diff --quiet "$DEFAULT_REF" -- "$_source" 2>/dev/null; then
+            _note="$_note  ← differs from $DEFAULT_REF, the merged body runs"
+            UNMERGED=$((UNMERGED + 1))
+          fi
+        fi
+        printf '      - %s (%s)%s\n' "$_name" "$_source" "$_note"
+      done < <(jq -r '.agents[] | [.name, .source, (.shadowed // false)] | @tsv' <<<"$REGISTRY_JSON")
+      if [[ "$UNMERGED" -gt 0 ]]; then
+        # Deliberately `manual`, not `fail`: authoring a definition on a branch
+        # is a legitimate intermediate state. What the operator needs is to know
+        # that this check reads the working tree while the runtime reads the
+        # default branch, so "discovered" here does not mean "runnable" there.
+        manual "$UNMERGED custom agent definition(s) are not merged on $DEFAULT_REF — the runtime reads definitions from the default branch, so they will not run (or will run an older body) until merged"
+      fi
     fi
     if [[ "$ERROR_COUNT" -gt 0 ]]; then
       fail "$ERROR_COUNT custom agent definition(s) failed validation:"

@@ -22,6 +22,25 @@
 # could affect the suite changed. A docs-only PR (e.g. #826) reports the check
 # green without spinning the 31 suites; a draft PR reports green via a skipped
 # job. Skipped jobs/steps count as successful for branch protection.
+#
+# PUSHING TO AN ALREADY-READY PR — the escape hatch.
+# The trigger list above has no `synchronize`, so a commit pushed after the PR
+# went ready produces no new run. The check GitHub shows then belongs to an
+# earlier SHA: either absent for the new head (PR blocked, nothing in the UI
+# unblocks it) or, worse, present and green from before the change (#1168 hit
+# the failing-then-fixed variant of this).
+#
+# The fix is NOT to add `synchronize` — that is exactly what #818 removed, and
+# it would re-run the full suite on every task push of every Maestro wave.
+# Instead, re-fire one of the accepted triggers by toggling the PR:
+#
+#     gh pr ready --undo <N> && gh pr ready <N>
+#
+# `ready_for_review` fires on the second call and the suite runs against the
+# current head. Do this whenever you push to a PR that is already ready — it is
+# the supported way to refresh the check, not a workaround. The Maestro's own
+# flow does not need it: it stays draft until delivery, so its single
+# `ready_for_review` already lands on the final head.
 name: CI — unit tests
 
 on:

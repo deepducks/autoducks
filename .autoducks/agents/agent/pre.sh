@@ -114,6 +114,11 @@ if [[ "$GET_RC" -eq 4 || -z "$DESCRIPTOR_JSON" ]]; then
 
 No custom agent named \`${AGENT_NAME}\` was found. Run \`$(autoducks_command_for agent) <name>\` naming one of the agents below.
 
+Definitions are read from the default branch, so one that exists only in your
+working tree, only on a feature branch, or under a \`.gitignore\`d path (\`.claude/\`
+often is) will not appear here. Commit and merge it first — including the
+pull request that introduces it, which cannot run its own agent.
+
 $(build_catalog_comment)"
 fi
 
@@ -207,12 +212,23 @@ fi
 # from the base ref exists to prevent. Discovery and prompt assembly must
 # never disagree about which tree a definition came from.
 DEFINITION_FILE="$(mktemp)"
+# Separate from the ERR trap above, which reports the failure rather than
+# cleaning up. Harmless to skip on an ephemeral runner, but discover-agents.sh
+# traps its own temp dir and this script should not be the odd one out.
+trap 'rm -f "$DEFINITION_FILE"' EXIT
 if [[ -n "${AUTODUCKS_BASE_REF:-}" ]]; then
   if ! git -C "$AGENT_REPO_ROOT" show "$AUTODUCKS_BASE_REF:$DESC_SOURCE" > "$DEFINITION_FILE" 2>/dev/null; then
     refuse "🚫 \`${AGENT_NAME}\` could not be read from the base branch (\`${DESC_SOURCE}\`). Custom agents only run definitions that are merged."
   fi
 else
-  cat "$AGENT_REPO_ROOT/$DESC_SOURCE" > "$DEFINITION_FILE" 2>/dev/null || true
+  # No `|| true`: an unreadable definition here used to leave the file empty
+  # and let the run continue into a real LLM call with an empty `## Role`.
+  # Unreachable from the shipped workflow, which always sets AUTODUCKS_BASE_REF,
+  # but reachable from local and test invocations — and a silent empty role is
+  # the worst of the available failures. Refuse, matching the branch above.
+  if ! cat "$AGENT_REPO_ROOT/$DESC_SOURCE" > "$DEFINITION_FILE" 2>/dev/null; then
+    refuse "🚫 \`${AGENT_NAME}\` could not be read from \`${DESC_SOURCE}\`."
+  fi
 fi
 
 # extract_body FILE — strip a leading `---`-delimited frontmatter block if
