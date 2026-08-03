@@ -28,9 +28,14 @@ status_comment::start "$ISSUE_NUM"
 # via the shared pre-failed marker + skip=true (no LLM call, post.sh no-ops).
 refuse() {
   local message="$1"
-  its::comment_issue "$ISSUE_NUM" "$message" || true
+  # The reason goes in the status comment only. Posting it as a standalone
+  # comment as well put identical text on the issue twice for every refusal:
+  # once from its::comment_issue, once as the status comment's failure body.
   react_to_comment "${COMMENT_ID:-}" "confused"
-  status_comment::fail "$ISSUE_NUM" "$message" 2>/dev/null || true
+  if ! status_comment::fail "$ISSUE_NUM" "$message" 2>/dev/null; then
+    # Nothing to edit — do not let a status-comment failure swallow the reason.
+    its::comment_issue "$ISSUE_NUM" "$message" || true
+  fi
   progress_labels::abort "$ISSUE_NUM" "Agent:running" 2>/dev/null || true
   touch "$AUTODUCKS_PRE_FAILED_MARKER"
   [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -134,13 +139,20 @@ fi
 # ── Refusal #4: surface mismatch (issue vs pr) ──────────────────────────
 CURRENT_SURFACE="issue"
 [[ "${IS_PR:-false}" == "true" ]] && CURRENT_SURFACE="pr"
-if [[ "$DESC_SURFACE" != "$CURRENT_SURFACE" ]]; then
-  if [[ "$DESC_SURFACE" == "pr" ]]; then
+# `both` means both, so it never mismatches. Comparing for equality alone
+# refused it on every surface, and the message then reported it as
+# `surface: issue` — the else branch only distinguished `pr` — so an agent
+# declared `both`, invoked on an issue, was told it can only run on an issue.
+case "$DESC_SURFACE" in
+  both)               : ;;
+  "$CURRENT_SURFACE") : ;;
+  pr)
     refuse "🚫 \`${AGENT_NAME}\` is declared \`surface: pr\` and can only run from a pull request — re-run \`$(autoducks_command_for agent) ${AGENT_NAME}\` on the pull request instead."
-  else
+    ;;
+  *)
     refuse "🚫 \`${AGENT_NAME}\` is declared \`surface: issue\` and can only run from an issue — re-run \`$(autoducks_command_for agent) ${AGENT_NAME}\` on the issue instead."
-  fi
-fi
+    ;;
+esac
 
 # ── Tool resolution: discover-agents.sh already applied levels 1+2
 # (custom_agents.agents.<name>.tools beats frontmatter tools outright, no
