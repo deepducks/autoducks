@@ -246,6 +246,21 @@ enabled on a private repo under some plans, and `PATCH`ing it returns `200` whil
 field stays `false`. Such a child always lands on the fallback path, so it gets the
 same check assertion.
 
+**The same toggle is the manual escape hatch.** `synchronize` is deliberately absent
+from a child's CI triggers (gotcha 5 below), so *any* push to a PR that is already
+ready produces no new run — including one you make by hand to fix a failing check. The
+check GitHub then shows belongs to an earlier SHA: absent for the new head, leaving the
+PR blocked with nothing in the UI to unblock it, or present and stale. `autoducks#1168`
+hit the stale variant — the red `shell unit suite` on the PR was from the commit
+*before* the fix that made it pass. Recovery is one line, and it is the supported
+procedure rather than a workaround:
+
+```bash
+gh pr ready --undo <N> && gh pr ready <N>
+```
+
+Run it every time you push to an already-ready PR. Do **not** reach for `synchronize`.
+
 ---
 
 ## Gotchas & requirements (hard-won)

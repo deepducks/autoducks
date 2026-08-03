@@ -2,10 +2,12 @@
 set -euo pipefail
 
 # ── Custom agent definition discovery ────────────────────────────────
-# Scans the *live working tree* (never $AUTODUCKS_PINNED_ROOT — the pinned
-# snapshot contains only .autoducks) for user-authored agent definitions and
-# emits a registry every downstream consumer (setup.sh, the trigger
-# generator, the dispatcher) can share instead of re-parsing markdown itself.
+# Scans $AUTODUCKS_BASE_REF for user-authored agent definitions and emits a
+# registry every downstream consumer (setup.sh, the trigger generator, the
+# dispatcher) can share instead of re-parsing markdown itself. With no base
+# ref set — a local `setup.sh` run — it falls back to the live working tree
+# (never $AUTODUCKS_PINNED_ROOT — the pinned snapshot contains only
+# .autoducks). See "Where definitions come from" below for why the ref wins.
 #
 # Usage:
 #   discover-agents.sh list                 # -> registry JSON on stdout
@@ -65,9 +67,14 @@ CONFIG="${AUTODUCKS_CONFIG:-$REPO_ROOT/.autoducks/autoducks.json}"
 #
 # Reading from the base ref is what makes the design's "merged, reviewed repo
 # content" premise true by construction rather than something checked after
-# the fact. It is also why this lane needs no tool ceiling, no clamp, and no
-# per-definition verification: there is only ever one source, and it is the
-# reviewed one.
+# the fact. It is also why this lane needs no per-definition clamp and no
+# per-definition verification: the definition and every custom_agents key
+# have only ever one source, and it is the reviewed one.
+#
+# It is NOT a blanket tool ceiling. A definition that declares no tools falls
+# through to .defaults.tools, which autoducks-agent.yml reads via
+# load-agent-defaults.sh from the pinned machinery snapshot — reviewed, but a
+# different source than this one.
 #
 # The consequence, stated plainly: an agent cannot be tried from the pull
 # request that introduces it. Merge the definition first, then use it.
@@ -101,14 +108,27 @@ fi
 def_config() { printf '%s' "$_DEF_CONFIG"; }
 
 # def_list ROOT KIND — "<mode> <repo-relative path>" for every definition
-# under ROOT as of DEFINITION_REF, sorted by path. The mode is carried so a
-# symlink (120000) can be refused: reading from a ref means there is no
-# realpath to compare against the repo root.
+# under ROOT as of DEFINITION_REF, sorted by path, NUL-terminated. The mode is
+# carried so a symlink (120000) can be refused: reading from a ref means there
+# is no realpath to compare against the repo root.
+#
+# `ls-tree -z` is load-bearing, not a style choice. Without it core.quotePath
+# (default true) C-quotes any path holding non-ASCII bytes, a quote, a
+# backslash or a control character — `naïve.md` comes back as
+# `"na\303\257ve.md"` — and the leading quote makes the entry match neither
+# glob below, so it would be dropped silently. This file refuses; it does not
+# skip. `-c core.quotePath=false` would only cover the non-ASCII case, and
+# neither form protects the line-based reader from a path with a newline in
+# it. -z gives raw bytes and a NUL record separator, which covers all of it.
 def_list() {
   local root="$1" kind="$2"
   if [[ -n "$DEFINITION_REF" ]]; then
-    git -C "$REPO_ROOT" ls-tree -r "$DEFINITION_REF" -- "$root" 2>/dev/null \
-      | while read -r mode _type _sha f; do
+    git -C "$REPO_ROOT" ls-tree -r -z "$DEFINITION_REF" -- "$root" 2>/dev/null \
+      | while IFS= read -r -d '' _rec; do
+          # "<mode> <type> <sha>\t<path>" — split on the tab, then take the
+          # mode off the front of the metadata half.
+          local _meta="${_rec%%$'\t'*}" f="${_rec#*$'\t'}" mode
+          mode="${_meta%% *}"
           if [[ "$kind" == "nested" ]]; then
             # exactly <root>/<name>/agent.md — no deeper nesting, matching the
             # -mindepth 2 -maxdepth 2 the local branch uses.
@@ -116,8 +136,8 @@ def_list() {
           else
             [[ "$f" == "$root"/*.md && "$f" != "$root"/*/* ]] || continue
           fi
-          printf '%s %s\n' "$mode" "$f"
-        done | sort -k2
+          printf '%s %s\0' "$mode" "$f"
+        done | sort -z -k2
   else
     local depth_args=()
     if [[ "$kind" == "nested" ]]; then
@@ -125,11 +145,13 @@ def_list() {
     else
       depth_args=(-mindepth 1 -maxdepth 1 -name '*.md')
     fi
-    find "$REPO_ROOT/$root" "${depth_args[@]}" 2>/dev/null \
-      | sed "s|^$REPO_ROOT/||" \
-      | while IFS= read -r f; do
-          if [[ -L "$REPO_ROOT/$f" ]]; then printf '120000 %s\n' "$f"; else printf '100644 %s\n' "$f"; fi
-        done | sort -k2
+    # -print0 for the same reason as -z above: the record separator has to be
+    # a byte that cannot occur in a path.
+    find "$REPO_ROOT/$root" "${depth_args[@]}" -print0 2>/dev/null \
+      | while IFS= read -r -d '' p; do
+          local f="${p#"$REPO_ROOT/"}"
+          if [[ -L "$REPO_ROOT/$f" ]]; then printf '120000 %s\0' "$f"; else printf '100644 %s\0' "$f"; fi
+        done | sort -z -k2
   fi
 }
 
@@ -179,6 +201,11 @@ ROOT_DIRS+=(".github/agents");           ROOT_KINDS+=("flat")
 # change discovery.
 while IFS= read -r _extra; do
   [[ -z "$_extra" ]] && continue
+  # Trailing slashes have to go: the ref branch matches paths with `[[ ]]`
+  # globbing, where "extra-agents//*.md" never matches "extra-agents/x.md".
+  # The old filesystem glob tolerated the double slash, so a config that used
+  # to work would silently stop discovering anything.
+  while [[ "$_extra" == */ && "$_extra" != "/" ]]; do _extra="${_extra%/}"; done
   ROOT_DIRS+=("$_extra"); ROOT_KINDS+=("flat")
 done < <(def_config | jq -r '.custom_agents.roots[]? // empty' 2>/dev/null)
 
@@ -511,7 +538,12 @@ for _ridx in "${!ROOT_DIRS[@]}"; do
   kind="${ROOT_KINDS[$_ridx]}"
   precedence=$((_ridx + 1))
 
-  while read -r mode rel_source; do
+  # NUL-delimited: def_list emits raw paths, so no separator can appear inside
+  # one. Splitting mode off the front by hand keeps the rest of the record —
+  # spaces and all — intact as the path.
+  while IFS= read -r -d '' _rec; do
+    mode="${_rec%% *}"
+    rel_source="${_rec#* }"
     [[ -n "$rel_source" ]] || continue
 
     if [[ "$kind" == "nested" ]]; then
