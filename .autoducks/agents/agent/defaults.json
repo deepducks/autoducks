@@ -23,6 +23,7 @@
     "Bash(gh issue comment:*)"
   ],
   "required_tools": [
+    "Read",
     "Write"
   ],
   "max_turns": 30,

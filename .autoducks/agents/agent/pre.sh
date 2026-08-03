@@ -170,6 +170,12 @@ TOOLS_CSV="$(jq -r '.tools_effective // [] | join(",")' <<<"$DESCRIPTOR_JSON")"
 # budget on denied calls, and failed as `scope-missing`, blaming the
 # definition for "not stating an output contract".
 #
+# The same applies to Read: the wrapper's `## Input` section lists the
+# materialized context files and tells the agent to read them, so a definition
+# without Read answers blind. That failed quietly rather than loudly — the
+# agent produced a plausible answer and only mentioned in passing that it
+# could not read the request, which it misdiagnosed as sandboxing.
+#
 # So required_tools is unioned in, always. It is deliberately not part of
 # defaults.json's `tools`: that list is a *default* a definition may replace,
 # while this one is the floor the lane needs to function at all.
