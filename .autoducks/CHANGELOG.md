@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.5] - 2026-08-03
+
+### Fixed
+- fix(feedback): a max_turns retry hint for the agent lane (#1172)
+
 ## [0.5.4] - 2026-08-03
 
 ### Fixed
