@@ -44,6 +44,9 @@
 #      an override map, not a registry
 #  15. Custom agent discovery — runs discover-agents.sh list, prints the
 #      discovered agents, and fails on a non-empty errors[]
+#  16. Base branch resolution — the branch autoducks acts on must exist. Fails
+#      when defaults.base_branch names a branch the repo does not have, and
+#      reports when it disagrees with the repository's own default branch
 # =============================================================================
 
 set -euo pipefail
@@ -96,11 +99,19 @@ VISIBILITY=$(gh repo view "$REPO" --json visibility --jq '.visibility' 2>/dev/nu
 # its existing body and simply reads this value.
 TYPES_JSON=$(gh api "orgs/$ORG/issue-types" 2>/dev/null || echo "")
 
+# The repository's own default branch, and the branch autoducks will act on.
+# Resolution order matches load-config.sh (#1181): the explicit override wins,
+# then the repository's answer. No literal fallback — a wrong branch name that
+# looks plausible is worse than an empty value the checks below can report.
+DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo "")
+CONFIGURED_BRANCH=$(jq -r '.defaults.base_branch // empty' .autoducks/autoducks.json 2>/dev/null || echo "")
+ACTIVE_BRANCH="${CONFIGURED_BRANCH:-$DEFAULT_BRANCH}"
+
 echo "=== Setup check for $REPO ==="
 echo ""
 
 # --- Check 1: gh CLI auth ---
-echo "[1/15] GitHub CLI authentication"
+echo "[1/16] GitHub CLI authentication"
 if gh auth status &>/dev/null; then
   pass "gh CLI is authenticated"
 else
@@ -110,7 +121,7 @@ fi
 echo ""
 
 # --- Check 2: Labels ---
-echo "[2/15] Required labels"
+echo "[2/16] Required labels"
 LABELS=("Feature|6F42C1|Orchestration feature issue"
         "Bug|D73A4A|Autoducks bug pipeline"
         "Task|1D76DB|Autoducks task issue"
@@ -165,7 +176,7 @@ done
 echo ""
 
 # --- Check 3: Secret ---
-echo "[3/15] Required secrets"
+echo "[3/16] Required secrets"
 REPO_SECRETS_OK=true
 SECRET_NAMES=$(gh secret list $REPO_ARG --json name --jq '.[].name' 2>/dev/null) \
   || { REPO_SECRETS_OK=false; SECRET_NAMES=""; }
@@ -383,7 +394,7 @@ fi
 echo ""
 
 # --- Check 4: Actions permissions ---
-echo "[4/15] Actions workflow permissions"
+echo "[4/16] Actions workflow permissions"
 PERMS=$(gh api "repos/$REPO/actions/permissions/workflow" --jq '.default_workflow_permissions + "|" + (.can_approve_pull_request_reviews | tostring)' 2>/dev/null || echo "")
 
 if [[ -z "$PERMS" ]]; then
@@ -399,7 +410,7 @@ fi
 echo ""
 
 # --- Check 5: Claude Code GitHub App ---
-echo "[5/15] Claude Code GitHub App"
+echo "[5/16] Claude Code GitHub App"
 # There is no public API to list installations on a repo without proper auth.
 # Best we can do is check if the workflows can authenticate — which only happens at runtime.
 manual "Verify the Claude Code GitHub App is installed on this repository
@@ -409,7 +420,7 @@ manual "Verify the Claude Code GitHub App is installed on this repository
 echo ""
 
 # --- Check 6: Sub-issues API availability ---
-echo "[6/15] Sub-issues API availability"
+echo "[6/16] Sub-issues API availability"
 # Probe against an arbitrary issue in the repo. If the repo has zero issues,
 # the check is inconclusive — report a soft manual item.
 FIRST_ISSUE=$(gh issue list $REPO_ARG --state all --limit 1 --json number \
@@ -439,7 +450,7 @@ echo ""
 # Issue types are an org-level feature. Workflows degrade gracefully if
 # types aren't configured — the type parameter is silently ignored by the
 # API. But without them, typed feature/task relationships don't render.
-echo "[7/15] Issue types (Feature, Task)"
+echo "[7/16] Issue types (Feature, Task)"
 if [[ -z "$TYPES_JSON" ]]; then
   manual "Could not list issue types for org '$ORG' (not an org, or no admin access).
       If '$ORG' is a user account, types are only available under organizations.
@@ -480,7 +491,7 @@ echo ""
 
 # --- Check 8: Public-repo security ---
 if [[ "$VISIBILITY" == "PUBLIC" ]]; then
-  echo "[8/15] Public-repo security posture"
+  echo "[8/16] Public-repo security posture"
   HAS_SEC=$(jq -r '.security != null' .autoducks/autoducks.json 2>/dev/null || echo "false")
   if [[ "$HAS_SEC" == "true" ]]; then
     pass "security block present in .autoducks/autoducks.json"
@@ -493,7 +504,7 @@ if [[ "$VISIBILITY" == "PUBLIC" ]]; then
 fi
 
 # --- Check 9: Runtime sync ---
-echo "[9/15] Runtime workflow sync"
+echo "[9/16] Runtime workflow sync"
 SYNC_OK=true
 while IFS=' ' read -r kind target runtime; do
   case "$kind" in
@@ -511,13 +522,14 @@ echo ""
 # Opt-in (reviewer.required_check=true). Requires the reviewer's Check-run on
 # the integration/base branch so a request-changes verdict blocks the merge.
 # Uses the operator's own gh admin credentials (no stored PAT) and is idempotent.
-echo "[10/15] Reviewer required-check ruleset"
+echo "[10/16] Reviewer required-check ruleset"
 REQUIRED_CHECK=$(jq -r '.reviewer.required_check // false' .autoducks/autoducks.json 2>/dev/null || echo "false")
 if [[ "$REQUIRED_CHECK" != "true" ]]; then
   pass "Reviewer required-check disabled (reviewer.required_check=false) — nothing to enforce"
 else
   CHECK_NAME=$(jq -r '.reviewer.check_name // "Autoducks: Reviewer"' .autoducks/autoducks.json 2>/dev/null)
-  GATE_BRANCH=$(jq -r '.defaults.integration_branch // .defaults.base_branch // "main"' .autoducks/autoducks.json 2>/dev/null)
+  GATE_BRANCH=$(jq -r '.defaults.integration_branch // .defaults.base_branch // empty' .autoducks/autoducks.json 2>/dev/null)
+  GATE_BRANCH="${GATE_BRANCH:-$DEFAULT_BRANCH}"
   RULESET_NAME="autoducks-reviewer-required"
   PAYLOAD=$(jq -n \
     --arg name "$RULESET_NAME" \
@@ -561,14 +573,15 @@ echo ""
 # metarepo default branch so a parent PR can't merge until every protected child
 # has delivered. Uses the operator's own gh admin credentials (no stored PAT) and
 # is idempotent — mirrors Check 10's ruleset upsert exactly.
-echo "[11/15] Delivery required-check ruleset"
+echo "[11/16] Delivery required-check ruleset"
 METAREPO_ENABLED=$(jq -r 'if .metarepo.enabled == true then "true" else "false" end' .autoducks/autoducks.json 2>/dev/null || echo "false")
 METAREPO_STRATEGY=$(jq -r '.metarepo.protected_submodule_strategy // "auto_merge"' .autoducks/autoducks.json 2>/dev/null || echo "auto_merge")
 if [[ "$METAREPO_ENABLED" != "true" || "$METAREPO_STRATEGY" != "required_check" ]]; then
   pass "Delivery required-check not applicable (metarepo.enabled=$METAREPO_ENABLED, protected_submodule_strategy=$METAREPO_STRATEGY) — nothing to enforce"
 else
   CHECK_NAME=$(jq -r '.metarepo.delivery_check.check_name // "Autoducks: Children delivered"' .autoducks/autoducks.json 2>/dev/null)
-  GATE_BRANCH=$(jq -r '.defaults.integration_branch // .defaults.base_branch // "main"' .autoducks/autoducks.json 2>/dev/null)
+  GATE_BRANCH=$(jq -r '.defaults.integration_branch // .defaults.base_branch // empty' .autoducks/autoducks.json 2>/dev/null)
+  GATE_BRANCH="${GATE_BRANCH:-$DEFAULT_BRANCH}"
   RULESET_NAME="autoducks-delivery-required"
   PAYLOAD=$(jq -n \
     --arg name "$RULESET_NAME" \
@@ -615,7 +628,7 @@ echo ""
 # merge-conflict/collision validation and dies with an actionable message on
 # any of those — we just surface that failure. requiresSecrets checklist
 # surfacing stays here since it's a setup-only concern.
-echo "[12/15] Plugin compilation sync"
+echo "[12/16] Plugin compilation sync"
 COMPILER=".autoducks/core/config/apply-plugins.sh"
 if [[ ! -f "$COMPILER" ]]; then
   manual "Plugin compiler not found at $COMPILER — skipping plugin compilation sync"
@@ -661,7 +674,7 @@ echo ""
 # when the update agent is enabled and not manual-only, some other identity
 # must be able to push the machinery PR/branch: either the autoducks GitHub
 # App (vars.AUTODUCKS_APP) or a repository AUTODUCKS_PAT secret.
-echo "[13/15] Update policy"
+echo "[13/16] Update policy"
 UPDATE_JSON=$(jq -c '.update // {}' .autoducks/autoducks.json 2>/dev/null || echo "{}")
 echo "  Effective update block: $UPDATE_JSON"
 
@@ -710,7 +723,7 @@ echo ""
 # when a key stopped matching `.gitmodules` — a child could be retired and its
 # key linger indefinitely, reading like live config. `.gitmodules` is the same
 # source of truth parse-plan.py validates `**Modules:**` against.
-echo "[14/15] Metarepo submodule config"
+echo "[14/16] Metarepo submodule config"
 METAREPO_ON=$(jq -r 'if .metarepo.enabled == true then "true" else "false" end' \
                 .autoducks/autoducks.json 2>/dev/null || echo "false")
 if [[ "$METAREPO_ON" != "true" ]]; then
@@ -751,7 +764,7 @@ echo ""
 # below the two disagree in the most confusing possible way: setup says
 # "discovered", and the agent then answers "no custom agent named <name> was
 # found" for a file the operator is looking at on disk.
-echo "[15/15] Custom agent discovery"
+echo "[15/16] Custom agent discovery"
 DISCOVER_AGENTS="$SCRIPT_DIR/../.autoducks/core/config/discover-agents.sh"
 if [[ ! -f "$DISCOVER_AGENTS" ]]; then
   manual "Custom agent discovery script not found at $DISCOVER_AGENTS — skipping"
@@ -801,6 +814,45 @@ else
       fail "$ERROR_COUNT custom agent definition(s) failed validation:"
       jq -r '.errors[] | "      - \(.source): \(.reason)"' <<<"$REGISTRY_JSON"
     fi
+  fi
+fi
+echo ""
+
+# --- Check 16: Base branch resolution ---
+# The check that would have caught deepducks/swanapse (#1181): a fork of an
+# upstream using `master`, whose config declared `main` — a branch it has never
+# had — while GitHub's default was a third name again. Nothing reported it,
+# because every consumer of the value silently accepted whatever it got.
+echo "[16/16] Base branch resolution"
+if [[ -z "$DEFAULT_BRANCH" ]]; then
+  manual "Could not read the repository's default branch (gh refused or offline) — skipping the branch checks"
+else
+  if [[ -n "$CONFIGURED_BRANCH" ]]; then
+    if gh api "repos/$REPO/branches/$CONFIGURED_BRANCH" --jq '.name' >/dev/null 2>&1; then
+      if [[ "$CONFIGURED_BRANCH" == "$DEFAULT_BRANCH" ]]; then
+        pass "defaults.base_branch '$CONFIGURED_BRANCH' matches the repository default branch"
+      else
+        # Legitimate — a repo can deliberately run its pipeline off a branch
+        # that is not the GitHub default. Worth saying out loud, because the
+        # two are read by different parts of the machinery.
+        manual "defaults.base_branch is '$CONFIGURED_BRANCH' but the repository default branch is '$DEFAULT_BRANCH'.
+      Both are used: agent lanes follow the configured value, while the custom-agent
+      lane reads definitions from the repository default. Align them unless the split
+      is deliberate."
+      fi
+    else
+      fail "defaults.base_branch names '$CONFIGURED_BRANCH', which is not a branch of $REPO.
+      Every lane that creates or targets a branch will act on a ref that does not exist.
+      Set it to '$DEFAULT_BRANCH', or drop the key to follow the repository default."
+    fi
+  else
+    pass "No defaults.base_branch override; following the repository default branch '$DEFAULT_BRANCH'"
+  fi
+  # Nothing should still be resolving to a hardcoded literal.
+  if [[ -n "$ACTIVE_BRANCH" ]]; then
+    pass "Effective base branch: '$ACTIVE_BRANCH'"
+  else
+    fail "Could not resolve a base branch from either the config or the repository"
   fi
 fi
 echo ""

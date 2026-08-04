@@ -1,10 +1,23 @@
 name: 'Autoducks: Commit-message Lint'
 
+# The push trigger cannot name the default branch: `on.push.branches` takes
+# glob patterns only, never an expression, so `github.event.repository.default_branch`
+# is unavailable here. It used to say `branches: [main]`, which meant this
+# workflow never ran on a repo whose branch is `master` (#1181) — silently, since
+# a trigger that does not fire looks identical to one with nothing to report.
+#
+# So: subscribe to pushes broadly, exclude the pipeline's own task-branch noise
+# by prefix, and make the real decision in the job's `if:` below, where the
+# default branch IS reachable. Same shape autoducks-delivery-check.yml uses, and
+# for the same reason — exclusion filters survive a rename, allow-lists do not.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
-    branches: [main]
+    branches-ignore:
+      - 'feature/**'
+      - 'fix/**'
+      - 'autoducks/**'
 
 permissions:
   id-token: write
@@ -15,12 +28,21 @@ jobs:
   commit-lint:
     name: commit-message lint
     runs-on: ubuntu-latest
-    # Skip PRs a parent metarepo opened on this child (marker in body / label):
-    # the metarepo already reviewed the aggregate change, and this child's own
-    # pipeline is meant to stay dormant for it. push:main still lints normally.
+    # Two independent gates.
+    #
+    # On push: lint only the default branch. This is the branch check the
+    # trigger could not express — `github.ref` against the repository's own
+    # default_branch, so it follows a rename instead of pinning a literal.
+    #
+    # On pull_request: skip PRs a parent metarepo opened on this child (marker
+    # in body / label). The metarepo already reviewed the aggregate change, and
+    # this child's own pipeline is meant to stay dormant for it. A push to the
+    # default branch still lints normally.
     if: >-
-      github.event_name == 'push' ||
-      (!contains(github.event.pull_request.body, 'autoducks:metarepo-managed') &&
+      (github.event_name == 'push' &&
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) ||
+      (github.event_name == 'pull_request' &&
+       !contains(github.event.pull_request.body, 'autoducks:metarepo-managed') &&
        !contains(github.event.pull_request.labels.*.name, 'Autoducks:external'))
     steps:
       - name: Mint app token

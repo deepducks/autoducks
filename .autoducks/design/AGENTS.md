@@ -215,6 +215,24 @@ All branches follow a predictable convention rooted in issue IDs. The prefix enc
 
 The Maestro's PR-merged re-trigger listens on both `feature/*` and `fix/*`. The fix-utility `-fix-<epoch>` suffix is unrelated to the `fix/` prefix. The Agent lane's `agent/<name>/…` branches are outside the pipeline (see [Agent Lane](#agent-lane)) and are never watched by the Maestro.
 
+### Where the base branch comes from
+
+Two sources, in this order, and **never a literal** (#1181):
+
+1. **`defaults.base_branch`** in `autoducks.json` — the explicit operator override. Set it when the pipeline should run off a branch that is not the repository's default.
+2. **The repository's own default branch** — `github.event.repository.default_branch` in a workflow expression, `gh api repos/$REPO --jq .default_branch` in a script.
+
+`main` was previously hardcoded as the fallback in `autoducks-commit-lint.yml` and `autoducks-developer.yml`, so a repo on `master` got a push trigger that never fired and a checkout of a ref that did not exist — both silently, because a trigger that does not fire is indistinguishable from one with nothing to report.
+
+**`AUTODUCKS_BASE_BRANCH` carries source 1 only, and may be empty.** `load-config.sh` exports the configured value verbatim and does not resolve step 2; the caller does, because the caller knows whether it can reach the host. [`sync-child-gitlinks.sh`](../core/orchestration/sync-child-gitlinks.sh) is the reference shape: config, then the host API, then a warning and a clean exit rather than acting on a branch named `""`.
+
+Resolving step 2 inside `load-config.sh` is a tempting simplification and a mistake. The only source available there without a token is `origin/HEAD`, a local ref that can be stale or absent, and populating the variable from it silently preempts the authoritative answer the caller was about to fetch.
+
+Two consequences worth knowing:
+
+- **The push trigger cannot express this.** `on.push.branches` takes glob patterns only, never an expression. `autoducks-commit-lint.yml` therefore subscribes broadly, excludes pipeline branch prefixes, and makes the default-branch decision in the job's `if:`, where the value is reachable. Same shape as `autoducks-delivery-check.yml`, and for the same reason: exclusion filters survive a rename, allow-lists do not.
+- **The Agent lane reads source 2, not source 1.** `AUTODUCKS_BASE_REF` is built from the repository default branch, deliberately: the lane's security premise is "merged, reviewed repo content" (see [Agent Lane](#agent-lane)), and the repository default is the better answer to that than a config key any contributor could edit. On a repo where the two disagree, custom agent definitions come from the repository default while every other lane follows the configured value. `setup.sh` check 16 reports the divergence rather than resolving it, since a deliberate split is legitimate.
+
 ---
 
 ## Metarepo mode (submodule aggregation)
