@@ -71,33 +71,8 @@ AUTODUCKS_EFFORT="$(echo "$_merged" | jq -r '.effort // empty')"
 export AUTODUCKS_MAX_TURNS
 AUTODUCKS_MAX_TURNS="$(echo "$_merged" | jq -r '.max_turns // empty')"
 
-# Base branch resolution, in precedence order (#1181):
-#
-#   1. defaults.base_branch — the explicit operator override.
-#   2. The repository's actual default branch.
-#
-# There is deliberately no literal fallback. `main` used to be hardcoded in
-# two workflow templates, which meant a repo on `master` (a fork of an upstream
-# that uses it, say) silently got a push trigger that never fired and a
-# checkout of a ref that did not exist. A wrong branch name that looks right is
-# worse than an empty value a caller can test for, so if neither source answers
-# this stays empty.
-#
-# Step 2 reads the Actions event payload first — free, no network, no token —
-# and falls back to origin/HEAD for local runs. Both are the repository's own
-# answer, not a guess.
 export AUTODUCKS_BASE_BRANCH
 AUTODUCKS_BASE_BRANCH="$(echo "$_merged" | jq -r '.base_branch // empty')"
-if [[ -z "$AUTODUCKS_BASE_BRANCH" ]]; then
-  if [[ -n "${GITHUB_EVENT_PATH:-}" && -f "${GITHUB_EVENT_PATH:-}" ]]; then
-    AUTODUCKS_BASE_BRANCH="$(jq -r '.repository.default_branch // empty' "$GITHUB_EVENT_PATH" 2>/dev/null || true)"
-  fi
-fi
-if [[ -z "$AUTODUCKS_BASE_BRANCH" ]]; then
-  _origin_head="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
-  AUTODUCKS_BASE_BRANCH="${_origin_head#origin/}"
-  unset _origin_head
-fi
 
 export AUTODUCKS_INTEGRATION_BRANCH
 AUTODUCKS_INTEGRATION_BRANCH="$(echo "$_merged" | jq -r '.integration_branch // empty')"
