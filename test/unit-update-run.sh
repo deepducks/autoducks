@@ -46,6 +46,11 @@ echo "gh $*" >> "$GH_LOG"
 case "$*" in
   "api repos/acme/upstream --jq .default_branch")
     echo "${MOCK_DEFAULT_BRANCH:-main}" ;;
+  # The *consumer's* default branch — the update's delivery target, distinct
+  # from the source repo's above. MOCK_CONSUMER_DEFAULT_BRANCH= (empty) drives
+  # the unreachable-host fallback.
+  "api repos/acme/consumer --jq .default_branch")
+    echo "${MOCK_CONSUMER_DEFAULT_BRANCH-main}" ;;
   "api repos/acme/upstream/tags --paginate --jq .[].name")
     cat "${MOCK_TAGS_FILE:-/dev/null}" 2>/dev/null || true ;;
   api\ repos/acme/upstream/commits/*)
@@ -70,6 +75,7 @@ src() {
     MOCK_DEFAULT_BRANCH="${MOCK_DEFAULT_BRANCH:-}" MOCK_TAGS_FILE="${MOCK_TAGS_FILE:-}" \
     MOCK_COMMIT_SHA="${MOCK_COMMIT_SHA:-}" MOCK_OPEN_PRS_FILE="${MOCK_OPEN_PRS_FILE:-}" \
     MOCK_PR_DIFF_FILE="${MOCK_PR_DIFF_FILE:-}" \
+    MOCK_CONSUMER_DEFAULT_BRANCH="${MOCK_CONSUMER_DEFAULT_BRANCH-main}" \
     bash -c 'source "$1"; shift; "$@"' _ "$RUN_SH" "$@"
 }
 
@@ -171,6 +177,46 @@ OUT="$(env PATH="$D/bin:$PATH" AUTODUCKS_ROOT="$SCRATCH_ROOT" REPO="acme/consume
   AUTODUCKS_APP_TOKEN="ghs-app-yyy" \
   bash -c 'source "$1"; update::preflight "pr" "true" "schedule"' _ "$RUN_SH")"
 [[ "$OUT" == "ok"$'\t'* ]] && pass "AUTODUCKS_APP_TOKEN (broker-minted) present, no conflicts → ok" || fail "expected ok, got '$OUT'"
+
+# =============================================================================
+echo ""
+echo "── Delivery target: the default branch, not base_branch ──"
+# The machinery executes from whatever branch the host serves as HEAD — that is
+# what `actions/checkout@v4` with no `ref:` gives every lane. Installing it
+# anywhere else is a no-op that reports success. deepducks/swanapse cut from
+# `master` and was served from `ggondim`, so two consecutive releases landed on
+# `master` while every run kept executing the version on `ggondim`.
+#
+# The scratch config pins base_branch to "main" throughout, so pointing the
+# consumer's default branch elsewhere makes the two disagree the same way.
+D="$SCRATCH_ROOT/dtarget"; mk_gh "$D"; : > "$D/gh.log"
+
+# UPDATE_TARGET_BRANCH is resolved at source time, not inside a function, so
+# these read it straight out of a sourced shell rather than going through src().
+OUT="$(env PATH="$D/bin:$PATH" AUTODUCKS_ROOT="$SCRATCH_ROOT" REPO="acme/consumer" \
+  GITHUB_ACTIONS=true GH_TOKEN=t GH_LOG="$D/gh.log" MOCK_CONSUMER_DEFAULT_BRANCH="ggondim" \
+  bash -c 'source "$1"; printf "%s" "$UPDATE_TARGET_BRANCH"' _ "$RUN_SH")"
+if [[ "$OUT" == "ggondim" ]]; then
+  pass "delivery target follows the repository default branch, not base_branch"
+else
+  fail "expected ggondim (default branch), got '$OUT' — base_branch is 'main' in this fixture"
+fi
+
+# Same shape, branches in agreement: the overwhelmingly common case must be
+# unchanged by this.
+OUT="$(env PATH="$D/bin:$PATH" AUTODUCKS_ROOT="$SCRATCH_ROOT" REPO="acme/consumer" \
+  GITHUB_ACTIONS=true GH_TOKEN=t GH_LOG="$D/gh.log" MOCK_CONSUMER_DEFAULT_BRANCH="main" \
+  bash -c 'source "$1"; printf "%s" "$UPDATE_TARGET_BRANCH"' _ "$RUN_SH")"
+[[ "$OUT" == "main" ]] && pass "default branch == base_branch → target unchanged" || fail "expected main, got '$OUT'"
+
+# Unreachable host: keep the old behaviour rather than abort a cycle over a
+# transient API failure, but say so.
+OUT="$(env PATH="$D/bin:$PATH" AUTODUCKS_ROOT="$SCRATCH_ROOT" REPO="acme/consumer" \
+  GITHUB_ACTIONS=true GH_TOKEN=t GH_LOG="$D/gh.log" MOCK_CONSUMER_DEFAULT_BRANCH="" \
+  bash -c 'source "$1"; printf "%s" "$UPDATE_TARGET_BRANCH"' _ "$RUN_SH" 2>"$D/warn.log")"
+[[ "$OUT" == "main" ]] && pass "unresolvable default branch → falls back to base_branch" || fail "expected main fallback, got '$OUT'"
+grep -q "::warning::" "$D/warn.log" && pass "the fallback warns instead of failing silently" || fail "no ::warning:: on fallback: $(cat "$D/warn.log")"
+unset MOCK_CONSUMER_DEFAULT_BRANCH
 
 # =============================================================================
 echo ""

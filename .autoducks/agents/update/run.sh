@@ -38,6 +38,31 @@ PIN="$AUTODUCKS_UPDATE_PIN"
 MODE="${MODE:-$AUTODUCKS_UPDATE_MODE}"
 [[ "$MODE" =~ ^(pr|commit|off)$ ]] || MODE="$AUTODUCKS_UPDATE_MODE"
 
+# ── Delivery target ──────────────────────────────────────────────────────
+# Where the updated machinery is installed. This is the repository's default
+# branch, NOT AUTODUCKS_BASE_BRANCH, and the distinction is load-bearing.
+#
+# A scheduled or dispatched run executes the workflow files and .autoducks/
+# scripts from the default branch — that is what `actions/checkout@v4` with no
+# `ref:` gives every lane. So the default branch is the only place an install
+# takes effect. AUTODUCKS_BASE_BRANCH means something else entirely: the branch
+# the pipeline cuts feature/fix branches from.
+#
+# For most repos the two are the same branch and nothing changes. Where they
+# differ the old behaviour was silently useless: deepducks/swanapse cuts from
+# `master` but is served from `ggondim`, so v0.5.8 and v0.5.9 both landed on
+# `master` while every run kept executing v0.5.2 off `ggondim`. Two consecutive
+# releases reported success and changed nothing.
+#
+# The fallback to AUTODUCKS_BASE_BRANCH covers only an unreachable host; it
+# preserves the old behaviour rather than aborting a cycle over a transient API
+# failure, and says so out loud.
+UPDATE_TARGET_BRANCH="$(git::default_branch)"
+if [[ -z "$UPDATE_TARGET_BRANCH" ]]; then
+  UPDATE_TARGET_BRANCH="$AUTODUCKS_BASE_BRANCH"
+  echo "::warning::update: could not resolve the default branch of $REPO — falling back to base_branch '$AUTODUCKS_BASE_BRANCH'. If the two differ, this update will land where it does not execute." >&2
+fi
+
 UPDATE_FAILURE_MARKER="<!-- autoducks:update-failure -->"
 # Identifies the "a newer version is available" note already posted on an open
 # update PR, per target SHA, so a weekly cycle does not repeat itself.
@@ -153,7 +178,7 @@ update::preflight() {
   fi
 
   local open_prs existing
-  open_prs="$(git::list_open_prs "$AUTODUCKS_BASE_BRANCH" 2>/dev/null || echo '[]')"
+  open_prs="$(git::list_open_prs "$UPDATE_TARGET_BRANCH" 2>/dev/null || echo '[]')"
   existing="$(printf '%s' "$open_prs" | jq -r '[.[] | select(.headRefName | startswith("autoducks/update-"))] | .[0].number // empty')"
   if [[ -n "$existing" ]]; then
     printf 'existing-pr\t%s' "$existing"
@@ -683,7 +708,7 @@ ${UPDATE_AVAILABLE_MARKER}${target_sha}" || true
     exit 0
   fi
 
-  update::apply_branch "$AUTODUCKS_BASE_BRANCH" "$branch" "$target_sha" "$CHANNEL"
+  update::apply_branch "$UPDATE_TARGET_BRANCH" "$branch" "$target_sha" "$CHANNEL"
 
   local migration_report; migration_report="$(mktemp)"
   if ! update::run_migrations "$installed_version" "$target_version" ".autoducks/migrations" "$migration_report"; then
@@ -779,23 +804,23 @@ No PR was opened and no commit was made; the update branch was discarded."
       local _why="a major bump"
       [[ "$bump_kind" != "major" && "$has_breaking" == "1" ]] && _why="a breaking changelog entry"
       [[ "$bump_kind" != "major" && "$has_breaking" != "1" ]] && _why="local machinery drift (or drift that could not be evaluated)"
-      echo "::notice::update: mode is 'commit' but this update carries $_why — opening a PR instead of pushing to $AUTODUCKS_BASE_BRANCH." >&2
+      echo "::notice::update: mode is 'commit' but this update carries $_why — opening a PR instead of pushing to $UPDATE_TARGET_BRANCH." >&2
     else
-      update::deliver_commit "$branch" "$AUTODUCKS_BASE_BRANCH" "$target_version"
-      git push origin "HEAD:refs/heads/$AUTODUCKS_BASE_BRANCH"
+      update::deliver_commit "$branch" "$UPDATE_TARGET_BRANCH" "$target_version"
+      git push origin "HEAD:refs/heads/$UPDATE_TARGET_BRANCH"
       # deliver_commit pushes the branch because the PR path needs it; this path
       # does not. Without this the branch outlives the cycle — apply_branch clears
       # a stale ref on the next run, so it self-healed, but a commit-mode repo
       # carried one visible orphan branch between cycles.
       git::delete_branch "$branch" 2>/dev/null || true
-      update::report_success "Pushed \`$title\` directly to \`$AUTODUCKS_BASE_BRANCH\` (mode: commit)."
+      update::report_success "Pushed \`$title\` directly to \`$UPDATE_TARGET_BRANCH\` (mode: commit)."
       exit 0
     fi
   fi
 
-  update::deliver_commit "$branch" "$AUTODUCKS_BASE_BRANCH" "$target_version"
+  update::deliver_commit "$branch" "$UPDATE_TARGET_BRANCH" "$target_version"
   local pr_number
-  pr_number="$(git::create_pr "$branch" "$AUTODUCKS_BASE_BRANCH" "$title" "$body" "false")"
+  pr_number="$(git::create_pr "$branch" "$UPDATE_TARGET_BRANCH" "$title" "$body" "false")"
 
   its::add_label "$pr_number" "Autoducks:update" || true
   if [[ "$bump_kind" == "major" || "$has_breaking" == "1" ]]; then
