@@ -9,9 +9,12 @@ on:
         required: true
         type: string
       base_branch:
-        required: true
+        # No literal default (#1181): 'main' here was wrong on any repo that
+        # does not have that branch. Empty means "use the repository's default
+        # branch", resolved at the checkout step below.
+        required: false
         type: string
-        default: 'main'
+        default: ''
       actor:
         required: false
         type: string
@@ -92,7 +95,10 @@ jobs:
           echo "AUTODUCKS_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.base_branch || 'main' }}
+          # An explicit dispatch input wins; otherwise the repository's own
+          # default branch. Never a literal (#1181) — 'main' here checked out a
+          # ref that does not exist on a repo whose branch is 'master'.
+          ref: ${{ inputs.base_branch != '' && inputs.base_branch || github.event.repository.default_branch }}
           fetch-depth: 0
           submodules: recursive
           token: ${{ steps.apptoken.outputs.value || secrets.AUTODUCKS_PAT || secrets.GITHUB_TOKEN }}
