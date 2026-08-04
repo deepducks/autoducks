@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.10] - 2026-08-04
+
+### Fixed
+- fix(update): install onto the default branch, the one that actually executes (#1185)
+
 ## [0.5.9] - 2026-08-04
 
 ### Fixed
