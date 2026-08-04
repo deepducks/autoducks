@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.9] - 2026-08-04
+
+### Fixed
+- fix(config): resolve the base branch from config or the repo, never a literal (#1182)
+
 ## [0.5.8] - 2026-08-03
 
 ### Fixed
