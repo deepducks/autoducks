@@ -26,6 +26,12 @@ done
 #
 #   git::create_branch(base, name)
 #   git::branch_exists(name)                         → exit code 0/1
+#   git::default_branch()                             → branch name, or empty
+#     The branch the host serves as HEAD, which is the copy of
+#     .github/workflows/ and .autoducks/ a scheduled or dispatched run
+#     executes. Not AUTODUCKS_BASE_BRANCH, which says where the pipeline cuts
+#     from; a repo may legitimately set the two to different branches. Empty
+#     when the host cannot answer — callers decide whether that is fatal.
 #   git::create_pr(head, base, title, body, draft?)   → pr_number
 #   git::merge_pr(pr_number, when?)                   → 0 ok / 2 method-not-allowed / 1 other
 #     when ∈ {now, auto}, default now. `auto` asks the host to hold the merge
